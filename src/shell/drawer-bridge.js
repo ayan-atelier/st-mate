@@ -6,7 +6,7 @@
  *   - 右侧：成对抽屉秒切胶囊（[对话预设 ⇄ API连接] · [角色档案 ⇄ 世界书]）
  */
 
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.3.2';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.3.3';
 
 const DRAWER_GROUPS = Object.freeze([
   {

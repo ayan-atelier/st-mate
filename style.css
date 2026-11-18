@@ -25,6 +25,13 @@
    1. 原生顶栏保活折叠 & 零重排全视口接管（严禁对 #top-settings-holder 设 display:none!）
    ========================================================================== */
 
+html:has(> body.stm-shell-active:not(.movingUI)),
+html body.stm-shell-active:not(.movingUI) {
+  overflow: hidden !important;
+  max-width: 100vw !important;
+  overscroll-behavior: none;
+}
+
 body.stm-shell-active {
   --topBarBlockSize: 0px !important;
 }
@@ -196,11 +203,32 @@ body.stm-shell-active.stm-home-cloak #form_sheld {
   display: none !important;
 }
 
-/* 全屏纯享阅读：仅在 GPU 合成层将 #form_sheld 平滑移出视口，绝不改动 height / max-height */
+/* 全屏纯享阅读：采用零越界合成层隐身（绝不向下超出 100dvh 视口底边，彻底杜绝触发根级垂直滚动条挤压正文宽度） */
 body.stm-shell-active.stm-pure-reading #form_sheld {
   opacity: 0 !important;
-  transform: translate3d(0, calc(100% + 18px), 0) !important;
+  transform: scale(0.985) translateZ(0) !important;
   pointer-events: none !important;
+}
+
+/* 移动端与触屏设备彻底隐藏占位滚动条，锁死正文排版宽度恒定不拉伸 */
+@media screen and (max-width: 1000px), (pointer: coarse) {
+  html:has(> body.stm-shell-active),
+  body.stm-shell-active,
+  body.stm-shell-active #sheld,
+  body.stm-shell-active #chat {
+    scrollbar-width: none !important;
+    scrollbar-gutter: auto !important;
+  }
+
+  html:has(> body.stm-shell-active)::-webkit-scrollbar,
+  body.stm-shell-active::-webkit-scrollbar,
+  body.stm-shell-active #sheld::-webkit-scrollbar,
+  body.stm-shell-active #chat::-webkit-scrollbar,
+  body.stm-shell-active #chat:hover::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
 }
 
 body.stm-shell-active.stm-home-cloak #chat {

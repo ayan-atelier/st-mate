@@ -6,8 +6,8 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.2';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.2';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.3';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.3';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -146,6 +146,29 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text p {
 html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
   text-align: justify !important;
   text-justify: inter-ideograph;
+}`);
+  }
+
+  if (backdropLive || hasTypographyAdjustment) {
+    rules.push(`
+@media screen and (max-width: 1000px), (pointer: coarse) {
+  html, html body, html body #sheld#sheld {
+    overflow: hidden !important;
+    scrollbar-width: none !important;
+  }
+  html body #chat#chat {
+    scrollbar-width: none !important;
+    scrollbar-gutter: auto !important;
+  }
+  html::-webkit-scrollbar,
+  html body::-webkit-scrollbar,
+  html body #sheld#sheld::-webkit-scrollbar,
+  html body #chat#chat::-webkit-scrollbar,
+  html body #chat#chat:hover::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
 }`);
   }
 
