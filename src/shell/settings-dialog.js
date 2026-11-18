@@ -4,9 +4,9 @@
  * 性能准则：滑块实时拖动采用 rAF 局部预览，不销毁重建当前滑块 DOM，松手后再防抖落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.3.1';
-import { openNativeDrawer, toastMessage } from './host-actions.js?v=0.3.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.3.2';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.3.2';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.3.2';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '模块开关' },
@@ -105,7 +105,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'Phase 1 · v0.3.1');
+    const badge = el('span', 'stm-dialog-badge', 'Phase 1 · v0.3.2');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -330,7 +330,7 @@ export function createSettingsDialog({
         vibe: {
           backdropMode: 'theme',
           backdropBrightness: 42,
-          backdropClarity: 55,
+          backdropClarity: 100,
           fontSizePx: 0,
           fontScale: 100,
           paddingX: 0,
@@ -609,31 +609,69 @@ export function createSettingsDialog({
     }
 
     const extHost = doc.getElementById('extensions_settings2') || doc.getElementById('extensions_settings');
-    if (extHost && !doc.getElementById('stm-ext-inline-drawer')) {
-      const wrap = el('div');
-      wrap.id = 'stm-ext-inline-drawer';
-      const drawer = el('div', 'inline-drawer');
-      const header = el('div', 'inline-drawer-toggle inline-drawer-header');
-      const icon = el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down');
-      header.append(el('b', '', '砚台 · ST伴侣'), icon);
+    if (extHost) {
+      let wrap = doc.getElementById('stm-ext-inline-drawer');
+      if (!wrap) {
+        wrap = el('div');
+        wrap.id = 'stm-ext-inline-drawer';
+        const drawer = el('div', 'inline-drawer');
+        const header = el('div', 'inline-drawer-toggle inline-drawer-header');
+        const icon = el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down');
+        icon.setAttribute('aria-hidden', 'true');
+        header.append(el('b', '', '砚台 · ST伴侣'), icon);
 
-      const content = el('div', 'inline-drawer-content');
-      const desc = el('small', 'stm-ext-note', '可逆夺舍外壳 · 双态顶栏 · 全屏纯享阅读 · 模块独立开关');
-      const openBtn = el('button', 'menu_button', '打开 ST伴侣设置中心');
-      openBtn.type = 'button';
-      openBtn.addEventListener('click', () => open());
+        const content = el('div', 'inline-drawer-content stm-ext-drawer-body');
+        const status = el('small', 'stm-ext-status', '');
+        const desc = el(
+          'p',
+          'stm-ext-help',
+          '集成双态沉浸顶栏、页面排版与角色底图、静默流畅渲染引擎及模块独立开关。关闭接管后将无损退回纯原生酒馆界面。',
+        );
 
-      const quickRestore = el('button', 'menu_button', '切换：伴侣界面 / 原生酒馆');
-      quickRestore.type = 'button';
-      quickRestore.addEventListener('click', () => {
-        const next = !store.get().shellEnabled;
-        void onToggleShell?.(next);
-      });
+        const checkLabel = el('label', 'checkbox_label stm-ext-check');
+        const checkInput = el('input');
+        checkInput.type = 'checkbox';
+        checkInput.addEventListener('change', () => {
+          void Promise.resolve(onToggleShell?.(checkInput.checked)).then(() => {
+            installFallbackEntries();
+          });
+        });
+        checkLabel.append(checkInput, el('span', '', '启用 ST伴侣界面接管'));
 
-      content.append(desc, openBtn, quickRestore);
-      drawer.append(header, content);
-      wrap.append(drawer);
-      extHost.prepend(wrap);
+        const actions = el('div', 'stm-ext-actions');
+        const openBtn = el('button', 'menu_button', '打开设置中心');
+        openBtn.type = 'button';
+        openBtn.addEventListener('click', () => open());
+
+        const readerBtn = el('button', 'menu_button', '页面排版与背景');
+        readerBtn.type = 'button';
+        readerBtn.addEventListener('click', () => {
+          if (!hasActiveChatSelection(getContext?.())) {
+            open('reading');
+            return;
+          }
+          closeAllNativeDrawers();
+          onOpenReaderDock?.();
+        });
+
+        actions.append(openBtn, readerBtn);
+        content.append(status, desc, checkLabel, actions);
+        drawer.append(header, content);
+        wrap.append(drawer);
+        extHost.prepend(wrap);
+      }
+
+      const s = store.get();
+      const statusNode = wrap.querySelector('.stm-ext-status');
+      if (statusNode) {
+        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.3.2 · ${
+          s.modules.turbo ? '流畅渲染加速运行中' : '流畅渲染加速已关闭'
+        }`;
+      }
+      const checkNode = wrap.querySelector('.stm-ext-check input[type="checkbox"]');
+      if (checkNode && checkNode.checked !== Boolean(s.shellEnabled)) {
+        checkNode.checked = Boolean(s.shellEnabled);
+      }
     }
   }
 

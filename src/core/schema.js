@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   vibe: Object.freeze({
     backdropMode: 'theme', // theme (原版) | character (角色图) | custom (自定义)
     backdropBrightness: 42,
-    backdropClarity: 55,
+    backdropClarity: 100, // 默认 100% 满清晰度原画质感，需柔焦虚化时再往左拉
     backdropBlur: 18,
     backdropDim: 55,
     customBackdropUrl: '',

@@ -134,15 +134,19 @@ export function openImageCropDialog({ file, aspectRatio = 0.62 }) {
 
       function drawPreview() {
         const rect = viewport.getBoundingClientRect();
-        const dpr = Math.min(2, Number(globalThis.devicePixelRatio || 1));
-        const cw = Math.max(180, Math.round((rect.width || 260) * dpr));
-        const ch = Math.max(220, Math.round((rect.height || cw / safeAspect) * dpr));
+        const dpr = Math.min(3, Math.max(1.5, Number(globalThis.devicePixelRatio || 2)));
+        const cw = Math.max(240, Math.round((rect.width || 260) * dpr));
+        const ch = Math.max(300, Math.round((rect.height || cw / safeAspect) * dpr));
         if (previewCanvas.width !== cw || previewCanvas.height !== ch) {
           previewCanvas.width = cw;
           previewCanvas.height = ch;
         }
         const ctx = previewCanvas.getContext('2d');
         if (!ctx) return;
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) {
+          ctx.imageSmoothingQuality = 'high';
+        }
         const { sx, sy, sw, sh } = computeSourceRect();
         ctx.clearRect(0, 0, cw, ch);
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
@@ -215,9 +219,9 @@ export function openImageCropDialog({ file, aspectRatio = 0.62 }) {
 
       applyBtn.addEventListener('click', () => {
         const { sx, sy, sw, sh } = computeSourceRect();
-        const maxOutH = 1440;
-        const outH = Math.min(maxOutH, Math.max(360, Math.round(sh)));
-        const outW = Math.max(240, Math.round(outH * safeAspect));
+        const maxOutH = 2560;
+        const outH = Math.min(maxOutH, Math.max(720, Math.round(sh)));
+        const outW = Math.max(480, Math.round(outH * safeAspect));
 
         const outCanvas = doc.createElement('canvas');
         outCanvas.width = outW;
@@ -226,6 +230,10 @@ export function openImageCropDialog({ file, aspectRatio = 0.62 }) {
         if (!ctx) {
           finish(file);
           return;
+        }
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) {
+          ctx.imageSmoothingQuality = 'high';
         }
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
         outCanvas.toBlob(
@@ -241,7 +249,7 @@ export function openImageCropDialog({ file, aspectRatio = 0.62 }) {
             finish(croppedFile);
           },
           'image/webp',
-          0.9,
+          0.95,
         );
       });
     };

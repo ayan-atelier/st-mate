@@ -6,8 +6,8 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.1';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.1';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.2';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.2';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -318,6 +318,7 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     const isLightTheme = detectLightInkTheme(doc);
 
     el.dataset.tone = isLightTheme ? 'light' : 'dark';
+    el.dataset.sharp = blurPx <= 0.05 ? '1' : '0';
     el.style.setProperty('--stm-backdrop-dim', dimAlpha);
     el.style.setProperty('--stm-backdrop-blur', `${blurPx}px`);
 

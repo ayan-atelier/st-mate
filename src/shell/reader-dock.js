@@ -6,17 +6,17 @@
  * 3. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.1';
-import { svgMarkup } from '../core/icons.js?v=0.3.1';
-import { sanitizeAssetUrl } from '../core/schema.js?v=0.3.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.3.2';
+import { svgMarkup } from '../core/icons.js?v=0.3.2';
+import { sanitizeAssetUrl } from '../core/schema.js?v=0.3.2';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.3.1';
-import { openImageCropDialog } from './image-cropper.js?v=0.3.1';
+} from './host-actions.js?v=0.3.2';
+import { openImageCropDialog } from './image-cropper.js?v=0.3.2';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -207,12 +207,15 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
     try {
       const relUrl = await uploadBackgroundAsset(chosenFile, getContext);
       const shortName = String(rawFile.name || '自定义背景').slice(0, 60);
+      const curClarity = store.get().vibe.backdropClarity;
       commitVibe({
         backdropMode: 'custom',
         customBackdropUrl: relUrl,
         customBackdropName: shortName,
+        // 若仍停留在旧版初始 55% 柔焦值，上传自定义新图时自动拉满 100% 原画清晰度
+        ...(curClarity === 55 ? { backdropClarity: 100 } : {}),
       });
-      toastMessage('自定义底图已生效', 'success');
+      toastMessage('自定义高清底图已生效', 'success');
     } catch (err) {
       toastMessage(err?.message || '底图上传失败', 'error');
     } finally {
@@ -264,7 +267,7 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
       commitVibe({
         backdropMode: 'theme',
         backdropBrightness: 42,
-        backdropClarity: 55,
+        backdropClarity: 100,
         fontSizePx: 0,
         fontScale: 100,
         paddingX: 0,

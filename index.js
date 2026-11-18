@@ -3,20 +3,20 @@
  * 严格遵循单一实例、无损回退、TauriTavern 首帧异步挂载、移动端样式自动破缓存与标准 SillyTavern getContext() 规范。
  */
 
-import { getHostContext, scheduleIdleBoot } from './src/core/env.js?v=0.3.1';
-import { createSettingsStore } from './src/core/schema.js?v=0.3.1';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.3.1';
-import { closeAllNativeDrawers, toastMessage } from './src/shell/host-actions.js?v=0.3.1';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.3.1';
-import { createTopbar } from './src/shell/topbar.js?v=0.3.1';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.3.1';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.3.1';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.3.1';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.3.1';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.3.1';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.3.1';
+import { getHostContext, scheduleIdleBoot } from './src/core/env.js?v=0.3.2';
+import { createSettingsStore } from './src/core/schema.js?v=0.3.2';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.3.2';
+import { closeAllNativeDrawers, toastMessage } from './src/shell/host-actions.js?v=0.3.2';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.3.2';
+import { createTopbar } from './src/shell/topbar.js?v=0.3.2';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.3.2';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.3.2';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.3.2';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.3.2';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.3.2';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.3.2';
 
-const STM_VERSION = '0.3.1';
+const STM_VERSION = '0.3.2';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，

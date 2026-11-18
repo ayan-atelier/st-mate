@@ -361,7 +361,7 @@ test('page overrides & gestures: 高权重美化穿透样式生成、顶格/缩�
 
 test('turbo engine: 长对话楼层自动分流休眠与 LRU 底图缓存淘汰无泄漏', () => {
   assert.equal(clarityToBlurPx(100), 0);
-  assert.ok(clarityToBlurPx(50) > 15 && clarityToBlurPx(50) < 20);
+  assert.ok(clarityToBlurPx(50) > 10 && clarityToBlurPx(50) < 20);
 
   const evicted = [];
   const lru = createLruMap(2, (k, v) => evicted.push([k, v]));

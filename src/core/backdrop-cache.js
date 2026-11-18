@@ -1,27 +1,26 @@
 /**
- * ST伴侣 (st-mate) · 角色底图离屏预压缩 + IndexedDB 极速缓存 + 柔焦静态烘焙器
- * 解决痛点：
- * 1. 酒馆角色卡原图（/characters/xxx.png）普遍 3MB~15MB，手机 WebView 每次进页面下载+解码高达十余秒；
- * 2. 全屏大图直接挂实时 CSS filter:blur() 会导致手机滑屏时每帧重算高斯卷积，发烫掉帧。
- * 方案：
- * - 首次读取后在空闲帧压缩为 <= 640px 的轻量 WebP（约 25~45KB，体积缩小 99%），存入 IndexedDB + 内存 LRU；
- * - 停止拖动清晰度滑杆后，若宿主 Canvas 支持原生硬件 filter，进一步预烘焙为静态柔焦纹理，使阅读滚动期间 CSS filter 归零。
+ * ST伴侣 (st-mate) · 底图 2K 视网膜级离屏缓存器 (IndexedDB v2 + 内存 LRU)
+ * 兼顾「零等待秒开」与「2K OLED 手机屏 100% 纤毫毕现锐度」：
+ * - 将酒馆 5MB~15MB 的无损 PNG 角色卡原图（含庞大内嵌世界书 JSON 块）提取为最高 2160px 物理像素、0.93 高画质 WebP；
+ * - 体积缩小约 95%（仅 ~200KB），IndexedDB 毫秒级秒读，同时在 3x 视网膜手机屏与桌面 2K 屏上保持原画级发丝与眼神光锐度；
+ * - 对玩家已上传至 /backgrounds/ 的自定义裁切底图直接原画直通，绝不二次压缩。
  */
 
-const IDB_NAME = 'st_mate_backdrop_cache_v1';
+const IDB_NAME = 'st_mate_backdrop_cache_v2';
 const IDB_STORE = 'covers';
-const IDB_MAX_ENTRIES = 60;
-const BASE_MAX_EDGE = 640;
-const BLUR_BAKE_MAX_EDGE = 380;
+const IDB_MAX_ENTRIES = 45;
+const BASE_MAX_EDGE = 2160;
 
 export function clarityToBlurPx(clarity) {
-  const c = Number.isFinite(Number(clarity)) ? Math.min(100, Math.max(0, Number(clarity))) : 55;
+  const c = Number.isFinite(Number(clarity)) ? Math.min(100, Math.max(0, Number(clarity))) : 100;
   if (c >= 100) return 0;
-  return Math.round((100 - c) * 0.36 * 10) / 10;
+  // 非线性柔和曲线：高清晰度区间 (85%~99%) 仅做极轻微柔化，往左拉再平滑进入奶油散景
+  const ratio = (100 - c) / 100;
+  return Math.round(Math.pow(ratio, 1.3) * 34 * 10) / 10;
 }
 
-export function createLruMap(maxEntries = 16, onEvict = null) {
-  const limit = Math.max(2, Number(maxEntries) || 16);
+export function createLruMap(maxEntries = 14, onEvict = null) {
+  const limit = Math.max(2, Number(maxEntries) || 14);
   const map = new Map();
 
   function get(key) {
@@ -72,13 +71,16 @@ export function createLruMap(maxEntries = 16, onEvict = null) {
   };
 }
 
-function isAnimatedUrl(url) {
-  return /\.(?:gif|apng|webp\?.*anim)(?:$|[?#])/i.test(String(url || ''));
+function isAnimatedOrPrecompressedBg(url) {
+  const s = String(url || '');
+  if (/\.(?:gif|apng|webp\?.*anim)(?:$|[?#])/i.test(s)) return true;
+  // 用户通过图库裁切上传到 /backgrounds/ 的底图已经是高清优化文件，原画直出不再二次重编码
+  if (/\/backgrounds\/[^/?#]+/i.test(s)) return true;
+  return false;
 }
 
 export function createBackdropCache({ root = globalThis } = {}) {
   let dbPromise = null;
-  let canvasFilterSupported = null;
   const inflightBase = new Map();
 
   const revokeUrl = url => {
@@ -91,12 +93,8 @@ export function createBackdropCache({ root = globalThis } = {}) {
     }
   };
 
-  const baseLru = createLruMap(18, (_key, entry) => {
+  const baseLru = createLruMap(14, (_key, entry) => {
     revokeUrl(entry?.objectUrl);
-  });
-
-  const bakedBlurLru = createLruMap(14, (_key, objectUrl) => {
-    revokeUrl(objectUrl);
   });
 
   function canUseCanvas() {
@@ -105,29 +103,6 @@ export function createBackdropCache({ root = globalThis } = {}) {
       typeof root?.Image === 'function' &&
       typeof root?.URL?.createObjectURL === 'function',
     );
-  }
-
-  function supportsCanvasFilter() {
-    if (canvasFilterSupported !== null) return canvasFilterSupported;
-    if (!canUseCanvas()) {
-      canvasFilterSupported = false;
-      return false;
-    }
-    try {
-      const c = root.document.createElement('canvas');
-      c.width = 2;
-      c.height = 2;
-      const ctx = c.getContext('2d');
-      if (!ctx || !('filter' in ctx)) {
-        canvasFilterSupported = false;
-        return false;
-      }
-      ctx.filter = 'blur(2px)';
-      canvasFilterSupported = ctx.filter === 'blur(2px)';
-    } catch {
-      canvasFilterSupported = false;
-    }
-    return canvasFilterSupported;
   }
 
   function openDb() {
@@ -139,6 +114,13 @@ export function createBackdropCache({ root = globalThis } = {}) {
 
     dbPromise = new Promise(resolve => {
       try {
+        // 顺手异步清理旧版 v1 低清 640px 缓存库，释放空间
+        try {
+          idb.deleteDatabase?.('st_mate_backdrop_cache_v1');
+        } catch {
+          // ignore
+        }
+
         const req = idb.open(IDB_NAME, 1);
         req.onupgradeneeded = () => {
           const db = req.result;
@@ -210,7 +192,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
     }
   }
 
-  function loadImageElement(src, { sameOriginOnly = false } = {}) {
+  function loadImageElement(src) {
     return new Promise((resolve, reject) => {
       const img = new root.Image();
       let settled = false;
@@ -221,16 +203,14 @@ export function createBackdropCache({ root = globalThis } = {}) {
         reject(new Error('Image load timeout'));
       }, 15000);
 
-      if (!sameOriginOnly) {
-        try {
-          const pageOrigin = root.location?.origin;
-          const parsed = new URL(src, pageOrigin || 'http://localhost/');
-          if (pageOrigin && parsed.origin !== pageOrigin && !src.startsWith('blob:') && !src.startsWith('data:')) {
-            img.crossOrigin = 'anonymous';
-          }
-        } catch {
-          // ignore
+      try {
+        const pageOrigin = root.location?.origin;
+        const parsed = new URL(src, pageOrigin || 'http://localhost/');
+        if (pageOrigin && parsed.origin !== pageOrigin && !src.startsWith('blob:') && !src.startsWith('data:')) {
+          img.crossOrigin = 'anonymous';
         }
+      } catch {
+        // ignore
       }
 
       img.decoding = 'async';
@@ -250,7 +230,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
     });
   }
 
-  function canvasToBlob(canvas, type = 'image/webp', quality = 0.84) {
+  function canvasToBlob(canvas, type = 'image/webp', quality = 0.93) {
     return new Promise(resolve => {
       if (typeof canvas.toBlob !== 'function') {
         resolve(null);
@@ -262,7 +242,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
             if (blob) {
               resolve(blob);
             } else if (type !== 'image/jpeg') {
-              canvas.toBlob(fallbackBlob => resolve(fallbackBlob || null), 'image/jpeg', 0.85);
+              canvas.toBlob(fallbackBlob => resolve(fallbackBlob || null), 'image/jpeg', 0.93);
             } else {
               resolve(null);
             }
@@ -291,12 +271,12 @@ export function createBackdropCache({ root = globalThis } = {}) {
         await pre.decode();
       }
     } catch {
-      // ignore decode warning
+      // ignore
     }
   }
 
   async function resolveCompressedBase(rawUrl) {
-    if (!rawUrl || !canUseCanvas() || isAnimatedUrl(rawUrl)) {
+    if (!rawUrl || !canUseCanvas() || isAnimatedOrPrecompressedBg(rawUrl)) {
       return null;
     }
 
@@ -336,8 +316,13 @@ export function createBackdropCache({ root = globalThis } = {}) {
         const ctx = canvas.getContext('2d', { alpha: false });
         if (!ctx) return null;
 
+        ctx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in ctx) {
+          ctx.imageSmoothingQuality = 'high';
+        }
         ctx.drawImage(img, 0, 0, tw, th);
-        const blob = await canvasToBlob(canvas, 'image/webp', 0.85);
+
+        const blob = await canvasToBlob(canvas, 'image/webp', 0.93);
         if (!blob) return null;
 
         void writeToIdb({
@@ -362,50 +347,6 @@ export function createBackdropCache({ root = globalThis } = {}) {
     return job;
   }
 
-  async function bakeBlurredUrl(rawUrl, clarity) {
-    const blurPx = clarityToBlurPx(clarity);
-    if (blurPx < 0.8 || !supportsCanvasFilter()) return null;
-
-    const cacheKey = `${rawUrl}|b:${blurPx.toFixed(1)}`;
-    const hit = bakedBlurLru.get(cacheKey);
-    if (hit) return hit;
-
-    const baseEntry = await resolveCompressedBase(rawUrl);
-    if (!baseEntry?.objectUrl) return null;
-
-    try {
-      const img = await loadImageElement(baseEntry.objectUrl, { sameOriginOnly: true });
-      const nw = Number(img.naturalWidth || baseEntry.width || 0);
-      const nh = Number(img.naturalHeight || baseEntry.height || 0);
-      if (!nw || !nh) return null;
-
-      const scale = Math.min(1, BLUR_BAKE_MAX_EDGE / Math.max(nw, nh));
-      const tw = Math.max(1, Math.round(nw * scale));
-      const th = Math.max(1, Math.round(nh * scale));
-      // 按画布与典型视口比例换算等效高斯半径，确保静态烘焙前后视觉柔化度一致
-      const scaledRadius = Math.max(0.6, Math.round(blurPx * (Math.max(tw, th) / 780) * 10) / 10);
-      const pad = Math.ceil(scaledRadius * 2.2);
-
-      const canvas = root.document.createElement('canvas');
-      canvas.width = tw;
-      canvas.height = th;
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (!ctx) return null;
-
-      ctx.filter = `blur(${scaledRadius}px)`;
-      // 外扩绘制消除边缘黑框渗色
-      ctx.drawImage(img, -pad, -pad, tw + pad * 2, th + pad * 2);
-
-      const blob = await canvasToBlob(canvas, 'image/webp', 0.82);
-      if (!blob) return null;
-
-      const bakedUrl = root.URL.createObjectURL(blob);
-      return bakedBlurLru.set(cacheKey, bakedUrl);
-    } catch {
-      return null;
-    }
-  }
-
   function invalidate(rawUrl) {
     if (!rawUrl) return;
     baseLru.delete(rawUrl);
@@ -414,14 +355,12 @@ export function createBackdropCache({ root = globalThis } = {}) {
 
   function destroy() {
     inflightBase.clear();
-    bakedBlurLru.clear();
     baseLru.clear();
   }
 
   return {
     peekCompressedBase,
     resolveCompressedBase,
-    bakeBlurredUrl,
     invalidate,
     destroy,
   };

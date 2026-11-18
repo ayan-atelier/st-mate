@@ -698,6 +698,13 @@ html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #form_sheld {
   transform: scale(1.03) translateZ(0);
 }
 
+/* 清晰度 100% (0px 模糊) 时回归 1:1 物理像素对齐渲染，杜绝 1.03x GPU 双线性拉伸导致的次像素发虚 */
+.stm-vibe-backdrop[data-sharp="1"] .stm-vibe-art {
+  inset: 0;
+  filter: none !important;
+  transform: none !important;
+}
+
 /* 中文正文段落两端对齐，消除窄屏右侧换行余白导致的版心视觉偏左 */
 body.stm-reader-justify #chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
   text-align: justify;
@@ -1235,6 +1242,36 @@ body.stm-turbo-mobile .popup {
   display: block;
   margin-bottom: 8px;
   color: var(--stm-muted);
+}
+
+#stm-ext-inline-drawer .stm-ext-status {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--stm-muted);
+  font-size: 12px;
+}
+
+#stm-ext-inline-drawer .stm-ext-help {
+  margin: 4px 0 10px !important;
+  color: var(--stm-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+#stm-ext-inline-drawer .stm-ext-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#stm-ext-inline-drawer .stm-ext-actions .menu_button {
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 auto;
+  margin: 0 !important;
+  padding: 6px 12px !important;
+  white-space: nowrap !important;
 }
 
 /* ==========================================================================
