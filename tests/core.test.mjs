@@ -328,13 +328,21 @@ test('page overrides & gestures: 高权重美化穿透样式生成、顶格/缩�
     },
   });
 
-  const activeCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: true });
+  const activeCss = buildPageOverrideCss(store.get().vibe, {
+    readerActive: true,
+    backdropLive: true,
+    isNotionTheme: true,
+  });
   assert.ok(activeCss.includes('#sheld#sheld'), '开启底图时必须同步透明化 #sheld 防止观月札记等主题纸底遮挡');
   assert.ok(activeCss.includes('--nt-body: 18px !important'), '必须穿透观月札记 --nt-body 字号变量');
   assert.ok(activeCss.includes('padding-left: 6px !important'), '边距必须精准生效');
+  assert.ok(activeCss.includes('text-align: justify !important'), '必须启用中文两端对齐消除右侧偏空');
   assert.ok(activeCss.includes('text-indent: 2em !important'), '首行缩进必须生效');
   assert.ok(activeCss.includes('--nt-serif:'), '字体切换必须覆盖观月札记等主题字体变量');
   assert.ok(activeCss.includes('.mesAvatarWrapper'), '隐去头像必须生效');
+
+  const tavernSvg = svgMarkup('tavern');
+  assert.ok(tavernSvg.includes('stroke-width="1.5"'), '原生酒馆啤酒杯图标必须为 1.5px 纯色细线 SVG');
 
   // 右滑重Roll开关双向直连 powerUserSettings.gestures
   let saved = 0;

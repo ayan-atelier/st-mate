@@ -276,6 +276,25 @@ export function createBackdropCache({ root = globalThis } = {}) {
     });
   }
 
+  function peekCompressedBase(rawUrl) {
+    if (!rawUrl) return null;
+    return baseLru.get(rawUrl) || null;
+  }
+
+  async function warmDecodeUrl(url) {
+    if (!url || typeof root?.Image !== 'function') return;
+    try {
+      const pre = new root.Image();
+      pre.decoding = 'async';
+      pre.src = url;
+      if (typeof pre.decode === 'function') {
+        await pre.decode();
+      }
+    } catch {
+      // ignore decode warning
+    }
+  }
+
   async function resolveCompressedBase(rawUrl) {
     if (!rawUrl || !canUseCanvas() || isAnimatedUrl(rawUrl)) {
       return null;
@@ -292,6 +311,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
       const idbHit = await readFromIdb(rawUrl);
       if (idbHit?.blob) {
         const objectUrl = root.URL.createObjectURL(idbHit.blob);
+        await warmDecodeUrl(objectUrl);
         return baseLru.set(rawUrl, {
           objectUrl,
           blob: idbHit.blob,
@@ -329,6 +349,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
         });
 
         const objectUrl = root.URL.createObjectURL(blob);
+        await warmDecodeUrl(objectUrl);
         return baseLru.set(rawUrl, { objectUrl, blob, width: tw, height: th });
       } catch {
         return null;
@@ -398,6 +419,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
   }
 
   return {
+    peekCompressedBase,
     resolveCompressedBase,
     bakeBlurredUrl,
     invalidate,

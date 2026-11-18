@@ -6,17 +6,17 @@
  * 3. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.0';
-import { svgMarkup } from '../core/icons.js?v=0.3.0';
-import { sanitizeAssetUrl } from '../core/schema.js?v=0.3.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.3.1';
+import { svgMarkup } from '../core/icons.js?v=0.3.1';
+import { sanitizeAssetUrl } from '../core/schema.js?v=0.3.1';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.3.0';
-import { openImageCropDialog } from './image-cropper.js?v=0.3.0';
+} from './host-actions.js?v=0.3.1';
+import { openImageCropDialog } from './image-cropper.js?v=0.3.1';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -268,6 +268,7 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
         fontSizePx: 0,
         fontScale: 100,
         paddingX: 0,
+        desktopPaddingX: 0,
         lineHeight: 0,
         paragraphIndent: 'default',
         hideAvatars: false,
@@ -305,26 +306,32 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
       }),
     );
 
-    // 1-2 边距：小 - 6 + 大
+    // 1-2 边距：小 - 6 + 大（手机窄屏与电脑宽屏自动独立读写，互不串扰）
+    const isMobileWidth = Number(globalThis.innerWidth || 1024) <= 768;
+    const padKey = isMobileWidth ? 'paddingX' : 'desktopPaddingX';
+    const padMax = isMobileWidth ? 48 : 96;
+    const padStep = isMobileWidth ? 2 : 4;
+    const curPadVal = vibe[padKey] || 0;
+
     typeGrid.append(
       makeStepPillControl({
         title: '边距',
         leftLabel: '小−',
         rightLabel: '+大',
         min: 0,
-        max: 60,
-        step: 2,
-        value: vibe.paddingX,
+        max: padMax,
+        step: padStep,
+        value: curPadVal,
         formatBadge: n => (n <= 0 ? '默认' : `${n}`),
         onStepLeft: () => {
-          const cur = store.get().vibe.paddingX;
-          commitVibe({ paddingX: Math.max(0, cur - 4) });
+          const cur = store.get().vibe[padKey] || 0;
+          commitVibe({ [padKey]: Math.max(0, cur - padStep * 2) });
         },
         onStepRight: () => {
-          const cur = store.get().vibe.paddingX;
-          commitVibe({ paddingX: Math.min(60, cur === 0 ? 8 : cur + 4) });
+          const cur = store.get().vibe[padKey] || 0;
+          commitVibe({ [padKey]: Math.min(padMax, cur === 0 ? padStep * 4 : cur + padStep * 2) });
         },
-        onInput: n => scheduleLiveVibe({ paddingX: n }),
+        onInput: n => scheduleLiveVibe({ [padKey]: n }),
       }),
     );
 

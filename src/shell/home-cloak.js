@@ -6,8 +6,8 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.0';
-import { svgMarkup } from '../core/icons.js?v=0.3.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.3.1';
+import { svgMarkup } from '../core/icons.js?v=0.3.1';
 
 export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShell }) {
   let bodyObserver = null;
@@ -87,14 +87,46 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
       mateBtn.dataset.stmMode = modeTag;
       if (shellEnabled) {
         mateBtn.innerHTML = `<span class="stm-shelf-btn-icon" aria-hidden="true">${svgMarkup('settings')}</span><span>设置</span>`;
-        mateBtn.title = '打开 ST伴侣设置中心（模块开关 / 阅读背景字号 / API面板）';
-        nativeHomeBtn.textContent = '原生酒馆';
-        nativeHomeBtn.title = '一键关闭伴侣外壳与书架等接管模块，直接回到纯原生酒馆首页';
+        mateBtn.title = '打开 ST伴侣设置中心（模块开关 / 页面排版 / API面板）';
+        nativeHomeBtn.innerHTML = `<span class="stm-shelf-btn-icon" aria-hidden="true">${svgMarkup('tavern')}</span>`;
+        nativeHomeBtn.classList.add('stm-shelf-icon-only');
+        nativeHomeBtn.title = '切回原生酒馆首页';
+        nativeHomeBtn.setAttribute('aria-label', '切回原生酒馆首页');
       } else {
         mateBtn.innerHTML = `<span class="stm-shelf-btn-icon" aria-hidden="true">${svgMarkup('spark')}</span><span>ST伴侣</span>`;
         mateBtn.title = '重新开启 ST伴侣极简沉浸界面';
         nativeHomeBtn.textContent = originalLabels.get(nativeHomeBtn) || '原版首页';
+        nativeHomeBtn.classList.remove('stm-shelf-icon-only');
         nativeHomeBtn.title = '';
+        nativeHomeBtn.removeAttribute('aria-label');
+      }
+    }
+
+    // 精简第二行右侧「刷新 ↻」为纯线性刷新图标（与左侧导入图标对称呼应，减少首页文字噪点）
+    const shelfRoot = shelfToolbar.parentElement;
+    const refreshBtn = shelfRoot
+      ? [...shelfRoot.querySelectorAll(':scope > .jd-shelf-info > .jd-text-button')].find(
+          btn => originalLabels.has(btn) || (btn.textContent || '').includes('刷新'),
+        )
+      : null;
+
+    if (refreshBtn) {
+      if (!originalLabels.has(refreshBtn)) {
+        originalLabels.set(refreshBtn, refreshBtn.textContent || '刷新 ↻');
+      }
+      if (refreshBtn.dataset.stmMode !== modeTag) {
+        refreshBtn.dataset.stmMode = modeTag;
+        if (shellEnabled) {
+          refreshBtn.innerHTML = `<span class="stm-shelf-btn-icon" aria-hidden="true">${svgMarkup('refresh')}</span>`;
+          refreshBtn.classList.add('stm-shelf-icon-only');
+          refreshBtn.title = '刷新角色与存档列表';
+          refreshBtn.setAttribute('aria-label', '刷新角色与存档列表');
+        } else {
+          refreshBtn.textContent = originalLabels.get(refreshBtn) || '刷新 ↻';
+          refreshBtn.classList.remove('stm-shelf-icon-only');
+          refreshBtn.title = '';
+          refreshBtn.removeAttribute('aria-label');
+        }
       }
     }
   }
@@ -197,10 +229,22 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
       const nativeHomeBtn = actionWrap.querySelector('.jd-native-home');
       if (nativeHomeBtn) {
         nativeHomeBtn.textContent = originalLabels.get(nativeHomeBtn) || '原版首页';
+        nativeHomeBtn.classList.remove('stm-shelf-icon-only');
         nativeHomeBtn.title = '';
+        nativeHomeBtn.removeAttribute('aria-label');
         actionWrap.before(nativeHomeBtn);
       }
       actionWrap.remove();
+    }
+
+    for (const btn of doc.querySelectorAll('#chat > .jd-bookshelf > .jd-shelf-info > .jd-text-button')) {
+      if (originalLabels.has(btn)) {
+        btn.textContent = originalLabels.get(btn) || '刷新 ↻';
+        btn.classList.remove('stm-shelf-icon-only');
+        btn.title = '';
+        btn.removeAttribute('aria-label');
+        delete btn.dataset.stmMode;
+      }
     }
   }
 

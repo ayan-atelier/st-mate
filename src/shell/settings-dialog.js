@@ -4,9 +4,9 @@
  * 性能准则：滑块实时拖动采用 rAF 局部预览，不销毁重建当前滑块 DOM，松手后再防抖落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.0';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.3.0';
-import { openNativeDrawer, toastMessage } from './host-actions.js?v=0.3.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.3.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.3.1';
+import { openNativeDrawer, toastMessage } from './host-actions.js?v=0.3.1';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '模块开关' },
@@ -105,7 +105,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'Phase 1 · v0.3.0');
+    const badge = el('span', 'stm-dialog-badge', 'Phase 1 · v0.3.1');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');

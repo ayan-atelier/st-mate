@@ -1,14 +1,13 @@
 /**
  * ST伴侣 (st-mate) · 页面排版与背景渲染器 + 底栏低频项收纳
- * 核心突破：
- * 1. 底图直接挂载于 #sheld 阅读主栏内部最底层（z-index:0），并动态透明化 #sheld/#chat/#form_sheld，
- *    确保在《观月札记》《静读》等任何第三方美化下都精准替换「文字正下方的酒馆底图」，电脑宽屏亦不拉扯变形；
- * 2. 动态高优先级覆盖表 (#stm-page-overrides) 始终驻留于 document.head 末尾（排在 #custom-style 之后），
- *    未改动项 0 规则注入，改动项（字号/边距/首行顶格与缩进/行距/字体/隐去头像/无框书页）100% 破除主题锁定即刻见效！
+ * 核心机制：
+ * 1. 底图直接挂载于 #sheld 阅读主栏内部最底层（z-index:0），几何尺寸恒定锁死（零二次缩放、零解码闪烁）；
+ * 2. 手机端与电脑端左右边距独立记忆，自动校准《观月札记》电脑端 42px 左偏移与中文段落两端对齐（版心正中不偏）；
+ * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.0';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.0';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.1';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.1';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -25,7 +24,10 @@ export const FONT_STACKS = Object.freeze({
   custom: '"StmReaderCustomFont", "Noto Serif SC", serif',
 });
 
-export function buildPageOverrideCss(vibe, { readerActive = false, backdropLive = false } = {}) {
+export function buildPageOverrideCss(
+  vibe,
+  { readerActive = false, backdropLive = false, isNotionTheme = false } = {},
+) {
   if (!readerActive) return '';
   const rules = [];
 
@@ -46,6 +48,24 @@ html body.stm-shell-active.stm-backdrop-live #form_sheld#form_sheld {
 }`);
   }
 
+  // 校准《观月札记》电脑端 .mes_block 左侧硬编码 42px 偏移导致的整栏版心偏右问题（仅让标题行避让左上角圆头像）
+  if (isNotionTheme && !vibe.hideAvatars) {
+    rules.push(`
+@media screen and (min-width: 601px) {
+  html body #chat#chat > .mes:not(.smallSysMes) > .mes_block {
+    margin-left: 0 !important;
+    width: 100% !important;
+  }
+  html body:not(.hideChatAvatars):not(.documentstyle) #chat#chat > .mes:not(.smallSysMes) .ch_name > .flex-container {
+    margin-left: 38px !important;
+    max-width: calc(100% - 38px) !important;
+  }
+  html body #chat#chat > .mes:not(.smallSysMes) > .mesAvatarWrapper {
+    margin-left: 0 !important;
+  }
+}`);
+  }
+
   if (vibe.fontSizePx > 0) {
     rules.push(`
 html body #chat#chat > .mes:not(.smallSysMes) {
@@ -63,14 +83,29 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text {
 }`);
   }
 
+  // 手机窄屏与电脑宽屏各自独立套用边距，互不串扰
   if (vibe.paddingX > 0) {
     rules.push(`
-html body #chat#chat {
-  --nt-inset: 0px !important;
-  --nt-mobile-inset: 0px !important;
-  padding-left: ${vibe.paddingX}px !important;
-  padding-right: ${vibe.paddingX}px !important;
-  box-sizing: border-box !important;
+@media screen and (max-width: 768px) {
+  html body #chat#chat {
+    --nt-inset: 0px !important;
+    --nt-mobile-inset: 0px !important;
+    padding-left: ${vibe.paddingX}px !important;
+    padding-right: ${vibe.paddingX}px !important;
+    box-sizing: border-box !important;
+  }
+}`);
+  }
+
+  if ((vibe.desktopPaddingX || 0) > 0) {
+    rules.push(`
+@media screen and (min-width: 769px) {
+  html body #chat#chat {
+    --nt-inset: 0px !important;
+    padding-left: ${vibe.desktopPaddingX}px !important;
+    padding-right: ${vibe.desktopPaddingX}px !important;
+    box-sizing: border-box !important;
+  }
 }`);
   }
 
@@ -96,6 +131,21 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not(:is(blockquote p, 
     rules.push(`
 html body #chat#chat > .mes:not(.smallSysMes) .mes_text p {
   text-indent: 0 !important;
+}`);
+  }
+
+  // 开启任意文字排版项时同步启用微信读书级中文两端对齐，消除右侧换行余白导致的视觉偏左
+  const hasTypographyAdjustment =
+    vibe.fontSizePx > 0 ||
+    vibe.paddingX > 0 ||
+    (vibe.desktopPaddingX || 0) > 0 ||
+    vibe.lineHeight > 0 ||
+    vibe.paragraphIndent !== 'default';
+  if (hasTypographyAdjustment) {
+    rules.push(`
+html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
+  text-align: justify !important;
+  text-justify: inter-ideograph;
 }`);
   }
 
@@ -127,6 +177,10 @@ html body #chat#chat > .mes:not(.smallSysMes) > .mes_block {
   padding-left: 0 !important;
   padding-top: 0 !important;
   width: 100% !important;
+  max-width: 100% !important;
+}
+html body #chat#chat > .mes:not(.smallSysMes) .ch_name > .flex-container {
+  margin-left: 0 !important;
   max-width: 100% !important;
 }
 html body #chat#chat > .mes:not(.smallSysMes)::before,
@@ -162,9 +216,8 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
   let pageOverrideStyleEl = null;
 
   let activeRawUrl = '';
-  let activeBaseDisplayUrl = '';
+  let activeDisplayUrl = '';
   let imageReqId = 0;
-  let bakeTimer = 0;
 
   let fontStyleEl = null;
   let loadedCustomFontUrl = '';
@@ -187,8 +240,17 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
       const m = color.match(/rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i);
       if (!m) return false;
       const lum = (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255;
-      // 文字明度低于 0.42 说明当前是白底深字浅色主题，自动改用柔白雾遮罩保证黑字清晰
       return lum < 0.42;
+    } catch {
+      return false;
+    }
+  }
+
+  function detectNotionTheme(doc) {
+    try {
+      return Boolean(
+        globalThis.getComputedStyle?.(doc.documentElement)?.getPropertyValue?.('--nt-serif')?.trim(),
+      );
     } catch {
       return false;
     }
@@ -232,7 +294,6 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
       pageOverrideStyleEl = doc.getElementById('stm-page-overrides') || doc.createElement('style');
       pageOverrideStyleEl.id = 'stm-page-overrides';
     }
-    // 始终保持在 head 最末尾（晚于酒馆 #custom-style），确保任何美化主题下调字号/字体/边距都立即生效
     if (doc.head.lastElementChild !== pageOverrideStyleEl) {
       doc.head.append(pageOverrideStyleEl);
     }
@@ -241,46 +302,14 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     }
   }
 
-  function clearBakeTimer() {
-    if (bakeTimer) {
-      clearTimeout(bakeTimer);
-      bakeTimer = 0;
-    }
-  }
-
   function hideBackdrop(doc) {
-    clearBakeTimer();
     imageReqId += 1;
     activeRawUrl = '';
-    activeBaseDisplayUrl = '';
+    activeDisplayUrl = '';
     if (backdropEl) {
       backdropEl.hidden = true;
-      delete backdropEl.dataset.preblurred;
     }
     doc?.body?.classList.remove('stm-backdrop-live');
-  }
-
-  function scheduleStaticBlurBake(rawUrl, clarity, turboEnabled) {
-    clearBakeTimer();
-    const blurPx = clarityToBlurPx(clarity);
-    if (!turboEnabled || !rawUrl || blurPx < 0.8) return;
-
-    const expectedReq = imageReqId;
-    bakeTimer = setTimeout(async () => {
-      bakeTimer = 0;
-      const s = store.get();
-      if (!s.shellEnabled || !s.modules.reader || !s.modules.turbo) return;
-      if (expectedReq !== imageReqId || activeRawUrl !== rawUrl) return;
-      if (s.vibe.backdropClarity !== clarity) return;
-
-      const bakedUrl = await backdropCache.bakeBlurredUrl(rawUrl, clarity);
-      if (!bakedUrl || expectedReq !== imageReqId || activeRawUrl !== rawUrl) return;
-      if (store.get().vibe.backdropClarity !== clarity || !backdropEl || backdropEl.hidden) return;
-
-      backdropEl.style.setProperty('--stm-backdrop-image', cssSafeUrl(bakedUrl));
-      backdropEl.style.setProperty('--stm-backdrop-blur', '0px');
-      backdropEl.dataset.preblurred = '1';
-    }, 200);
   }
 
   function applyImageBackdrop(doc, el, { rawUrl, brightness, clarity, turboEnabled }) {
@@ -290,35 +319,32 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
 
     el.dataset.tone = isLightTheme ? 'light' : 'dark';
     el.style.setProperty('--stm-backdrop-dim', dimAlpha);
+    el.style.setProperty('--stm-backdrop-blur', `${blurPx}px`);
 
-    if (rawUrl === activeRawUrl && activeBaseDisplayUrl) {
-      delete el.dataset.preblurred;
-      el.style.setProperty('--stm-backdrop-image', cssSafeUrl(activeBaseDisplayUrl));
-      el.style.setProperty('--stm-backdrop-blur', `${blurPx}px`);
+    // 同一角色内调节亮度/清晰度时绝不重设 background-image，零闪烁
+    if (rawUrl === activeRawUrl && activeDisplayUrl) {
       el.hidden = false;
-      scheduleStaticBlurBake(rawUrl, clarity, turboEnabled);
       return;
     }
 
     activeRawUrl = rawUrl;
-    activeBaseDisplayUrl = rawUrl;
     const reqId = ++imageReqId;
 
-    delete el.dataset.preblurred;
-    el.style.setProperty('--stm-backdrop-image', cssSafeUrl(rawUrl));
-    el.style.setProperty('--stm-backdrop-blur', `${blurPx}px`);
+    // 若内存 LRU 已命中压缩版，第 0 帧直接同步挂入，彻底消灭二次切图闪烁
+    const memEntry = turboEnabled ? backdropCache.peekCompressedBase(rawUrl) : null;
+    const initialUrl = memEntry?.objectUrl || rawUrl;
+    activeDisplayUrl = initialUrl;
+    el.style.setProperty('--stm-backdrop-image', cssSafeUrl(initialUrl));
     el.hidden = false;
 
-    if (!turboEnabled) return;
+    if (!turboEnabled || memEntry?.objectUrl) return;
 
     void backdropCache.resolveCompressedBase(rawUrl).then(entry => {
       if (reqId !== imageReqId || activeRawUrl !== rawUrl || !backdropEl || backdropEl.hidden) return;
-      if (entry?.objectUrl) {
-        activeBaseDisplayUrl = entry.objectUrl;
-        delete backdropEl.dataset.preblurred;
+      if (entry?.objectUrl && entry.objectUrl !== activeDisplayUrl) {
+        activeDisplayUrl = entry.objectUrl;
         backdropEl.style.setProperty('--stm-backdrop-image', cssSafeUrl(entry.objectUrl));
       }
-      scheduleStaticBlurBake(rawUrl, store.get().vibe.backdropClarity, Boolean(store.get().modules.turbo));
     });
   }
 
@@ -387,6 +413,8 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     const meta = getCurrentEntityMeta(ctx);
     const inChat = Boolean(meta.active && !isHomeCloaked?.());
 
+    doc.body.classList.toggle('stm-reader-justify', Boolean(readerActive && inChat));
+
     let backdropLive = false;
 
     if (!readerActive || !inChat || vibe.backdropMode === 'theme') {
@@ -417,7 +445,8 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     }
 
     void syncCustomFontFace(doc, readerActive, vibe);
-    const overrideCss = buildPageOverrideCss(vibe, { readerActive, backdropLive });
+    const isNotionTheme = readerActive && inChat ? detectNotionTheme(doc) : false;
+    const overrideCss = buildPageOverrideCss(vibe, { readerActive, backdropLive, isNotionTheme });
     syncOverrideStyleSheet(doc, overrideCss);
   }
 
@@ -507,7 +536,7 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     if (meta.portraitUrl) backdropCache.invalidate(meta.portraitUrl);
     if (meta.thumbUrl) backdropCache.invalidate(meta.thumbUrl);
     activeRawUrl = '';
-    activeBaseDisplayUrl = '';
+    activeDisplayUrl = '';
   }
 
   function refresh() {
@@ -516,7 +545,6 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
   }
 
   function destroy() {
-    clearBakeTimer();
     customFontAbort?.abort?.();
     customFontAbort = null;
     fontStyleEl?.remove();
@@ -532,9 +560,9 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     artEl = null;
     shadeEl = null;
     activeRawUrl = '';
-    activeBaseDisplayUrl = '';
+    activeDisplayUrl = '';
 
-    globalThis.document?.body?.classList.remove('stm-backdrop-live');
+    globalThis.document?.body?.classList.remove('stm-backdrop-live', 'stm-reader-justify');
   }
 
   return {

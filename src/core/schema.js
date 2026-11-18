@@ -42,7 +42,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     customBackdropName: '',
     fontScale: 100,
     fontSizePx: 0, // 0 表示跟随原美化字号；13~26 表示精确字号
-    paddingX: 0, // 0 表示跟随原美化边距；4~64px 表示自定义左右边距
+    paddingX: 0, // 手机端左右边距（0=跟随原美化；4~48px）
+    desktopPaddingX: 0, // 电脑端左右边距（0=跟随原美化；8~96px，与手机端独立记忆互不干扰）
     lineHeight: 0, // 0 表示跟随原美化行距；140~240 表示 1.40~2.40 倍行高
     paragraphIndent: 'default', // default (跟随原版) | flush (顶格) | indent (缩进两格)
     hideAvatars: false,
@@ -172,6 +173,7 @@ export function normalizeSettings(raw = {}) {
       fontScale,
       fontSizePx,
       paddingX: clampInt(rawVibe.paddingX, 0, 64, DEFAULT_SETTINGS.vibe.paddingX),
+      desktopPaddingX: clampInt(rawVibe.desktopPaddingX, 0, 120, DEFAULT_SETTINGS.vibe.desktopPaddingX),
       lineHeight:
         rawVibe.lineHeight === 0 || rawVibe.lineHeight === undefined || rawVibe.lineHeight === null
           ? 0

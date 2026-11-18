@@ -267,8 +267,22 @@ body.stm-shell-active.stm-home-cloak #chat {
   transition: opacity 0.15s ease;
 }
 
-.jd-bookshelf .stm-shelf-mate-btn:hover .stm-shelf-btn-icon svg {
+.jd-bookshelf .stm-shelf-mate-btn:hover .stm-shelf-btn-icon svg,
+.jd-bookshelf .stm-shelf-icon-only:hover .stm-shelf-btn-icon svg {
   opacity: 0.96;
+}
+
+.jd-bookshelf .stm-shelf-icon-only {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 7px !important;
+  min-width: 28px;
+}
+
+.jd-bookshelf .stm-shelf-icon-only .stm-shelf-btn-icon svg {
+  width: 15px;
+  height: 15px;
 }
 
 .stm-welcome-return-btn {
@@ -675,20 +689,19 @@ html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #form_sheld {
 
 .stm-vibe-art {
   position: absolute;
-  inset: -26px;
+  inset: -20px;
   background-image: var(--stm-backdrop-image, none);
   background-size: cover;
   background-position: 50% 22%;
   background-repeat: no-repeat;
   filter: blur(var(--stm-backdrop-blur, 0px));
-  transform: scale(1.04) translateZ(0);
+  transform: scale(1.03) translateZ(0);
 }
 
-/* 松手静态柔焦烘焙完成后，彻底卸载 CSS filter，阅读滑屏零 GPU 卷积开销 */
-.stm-vibe-backdrop[data-preblurred="1"] .stm-vibe-art {
-  inset: 0;
-  filter: none !important;
-  transform: translateZ(0);
+/* 中文正文段落两端对齐，消除窄屏右侧换行余白导致的版心视觉偏左 */
+body.stm-reader-justify #chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
+  text-align: justify;
+  text-justify: inter-ideograph;
 }
 
 .stm-vibe-shade {
