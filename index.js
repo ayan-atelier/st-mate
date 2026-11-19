@@ -3,20 +3,40 @@
  * 严格遵循单一实例、无损回退、TauriTavern 首帧异步挂载、移动端样式自动破缓存与标准 SillyTavern getContext() 规范。
  */
 
-import { getHostContext, scheduleIdleBoot } from './src/core/env.js?v=0.3.3';
-import { createSettingsStore } from './src/core/schema.js?v=0.3.3';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.3.3';
-import { closeAllNativeDrawers, toastMessage } from './src/shell/host-actions.js?v=0.3.3';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.3.3';
-import { createTopbar } from './src/shell/topbar.js?v=0.3.3';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.3.3';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.3.3';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.3.3';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.3.3';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.3.3';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.3.3';
+import {
+  clearTauriSafeAreaGuard,
+  createTauriOverlayBackGuard,
+  detectPlatform,
+  getHostContext,
+  scheduleIdleBoot,
+  syncTauriSafeAreaGuard,
+} from './src/core/env.js?v=0.7.3';
+import {
+  closeExportFallbackDialog,
+  isExportFallbackDialogOpen,
+} from './src/core/file-saver.js?v=0.7.3';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.3';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.3';
+import { closeAllNativeDrawers, toastMessage } from './src/shell/host-actions.js?v=0.7.3';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.3';
+import { createTopbar } from './src/shell/topbar.js?v=0.7.3';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.3';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.3';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.3';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.3';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.3';
+import { createApiDock } from './src/modules/api-dock.js?v=0.7.3';
+import {
+  createActiveChatPresetSyncScheduler,
+  primeHostOpenAiModule,
+  syncPresetForActiveChat,
+} from './src/modules/preset-backend.js?v=0.7.3';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.3';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.3';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.3';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.3';
 
-const STM_VERSION = '0.3.3';
+const STM_VERSION = '0.7.3';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -54,16 +74,63 @@ function createStMateRuntime() {
   let atmosphere = null;
   let perfEngine = null;
   let readerDock = null;
+  let apiDock = null;
+  let presetDock = null;
+  let charWorldDock = null;
+  let ttOverlayBackGuard = null;
+  let lastDockDismissedAt = 0;
+
+  const presetSyncScheduler = createActiveChatPresetSyncScheduler({
+    isEnabled: () => enabled,
+    beforeSync: () => presetDock?.flushPendingSave?.(),
+    runSync: async ({ isCurrent, shouldAbort }) => {
+      const res = await syncPresetForActiveChat({
+        getContext,
+        store,
+        shouldAbort,
+        onSwitched: () => {
+          if (isCurrent()) {
+            topbar?.refresh();
+            presetDock?.refresh();
+            charWorldDock?.refresh();
+          }
+        },
+      });
+      if (res?.switched && isCurrent()) {
+        topbar?.refresh();
+        presetDock?.refresh();
+        charWorldDock?.refresh();
+      }
+      return res;
+    },
+  });
+
+  /**
+   * 在酒馆原生 CHAT_CHANGED autoSelectPreset 执行后的短微延迟内，串行且按最新序号幂等同步当前角色/群聊绑定的预设。
+   */
+  function scheduleActiveChatPresetSync(delayMs = 30) {
+    void presetSyncScheduler.schedule(delayMs);
+  }
 
   async function toggleShell(nextEnabled) {
     const normalized = Boolean(nextEnabled);
-    store.update({ shellEnabled: normalized });
     if (normalized) {
+      store.update({ shellEnabled: true });
       await moduleBridge.applyAllFromStore();
     } else {
+      apiDock?.flushPendingSave?.();
+      await Promise.allSettled([
+        presetDock?.flushPendingSave?.(),
+        charWorldDock?.flushPendingSave?.(),
+      ]);
       readerDock?.close();
+      apiDock?.close();
+      presetDock?.close();
+      charWorldDock?.close();
+      globalThis.document?.getElementById?.('stm-portrait-lightbox')?.remove?.();
       tapImmersive?.exit();
       closeAllNativeDrawers();
+      store.update({ shellEnabled: false });
       await moduleBridge.suspendAllForNative();
     }
     refreshAll();
@@ -86,6 +153,9 @@ function createStMateRuntime() {
     drawerBridge?.sync();
     atmosphere?.refresh();
     readerDock?.refresh();
+    apiDock?.refresh();
+    presetDock?.refresh();
+    charWorldDock?.refresh();
     settingsDialog?.installFallbackEntries();
     settingsDialog?.renderIfOpen();
   }
@@ -96,7 +166,7 @@ function createStMateRuntime() {
       id: 'st-mate',
       label: 'ST伴侣总台',
       version: STM_VERSION,
-      schemaVersion: 3,
+      schemaVersion: STM_SCHEMA_VERSION,
       namespace: 'st_mate',
       inspect() {
         const s = store.get();
@@ -110,8 +180,40 @@ function createStMateRuntime() {
       },
       open(tabId) {
         if (tabId === 'reader-dock') {
+          apiDock?.close();
+          presetDock?.close();
+          charWorldDock?.close();
           readerDock?.open();
+        } else if (tabId === 'api-dock') {
+          readerDock?.close();
+          presetDock?.close();
+          charWorldDock?.close();
+          apiDock?.open();
+        } else if (tabId === 'preset-dock') {
+          readerDock?.close();
+          apiDock?.close();
+          charWorldDock?.close();
+          presetDock?.open();
+        } else if (tabId === 'preset-assistant' || tabId === 'assistant') {
+          readerDock?.close();
+          apiDock?.close();
+          charWorldDock?.close();
+          presetDock?.openAssistant();
+        } else if (tabId === 'char-world-dock' || tabId === 'char') {
+          readerDock?.close();
+          apiDock?.close();
+          presetDock?.close();
+          charWorldDock?.open('char');
+        } else if (tabId === 'world-dock' || tabId === 'world') {
+          readerDock?.close();
+          apiDock?.close();
+          presetDock?.close();
+          charWorldDock?.open('world');
         } else {
+          readerDock?.close();
+          apiDock?.close();
+          presetDock?.close();
+          charWorldDock?.close();
           settingsDialog?.open(tabId);
         }
       },
@@ -143,14 +245,47 @@ function createStMateRuntime() {
       parser.addCommandObject(
         SlashCommand.fromProps({
           name: 'stmate',
-          helpString: '打开 ST伴侣设置中心（传入 reader 打开页面排版与背景面板，传入 toggle 切换原生酒馆/伴侣界面）',
+          helpString:
+            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {
               void toggleShell(!store.get().shellEnabled);
+            } else if (cmd === 'char' || cmd === 'character') {
+              readerDock?.close();
+              apiDock?.close();
+              presetDock?.close();
+              charWorldDock?.open('char');
+            } else if (cmd === 'world' || cmd === 'wi' || cmd === 'lorebook') {
+              readerDock?.close();
+              apiDock?.close();
+              presetDock?.close();
+              charWorldDock?.open('world');
+            } else if (cmd === 'assistant' || cmd === 'ai' || cmd === 'preset-assistant') {
+              readerDock?.close();
+              apiDock?.close();
+              charWorldDock?.close();
+              presetDock?.openAssistant();
+            } else if (cmd === 'preset' || cmd === 'presets') {
+              readerDock?.close();
+              apiDock?.close();
+              charWorldDock?.close();
+              presetDock?.toggle();
+            } else if (cmd === 'api') {
+              readerDock?.close();
+              presetDock?.close();
+              charWorldDock?.close();
+              apiDock?.toggle();
             } else if (cmd === 'reader' || cmd === 'aa') {
+              apiDock?.close();
+              presetDock?.close();
+              charWorldDock?.close();
               readerDock?.toggle();
             } else {
+              readerDock?.close();
+              apiDock?.close();
+              presetDock?.close();
+              charWorldDock?.close();
               settingsDialog?.open();
             }
             return '';
@@ -181,13 +316,23 @@ function createStMateRuntime() {
     };
 
     subscribe(types.APP_READY, () => {
+      void primeHostOpenAiModule();
+      void primeHostWorldInfoModule();
       void moduleBridge.applyAllFromStore();
       refreshAll({ shouldHydrate: true });
+      scheduleActiveChatPresetSync(40);
     });
 
     subscribe(types.CHAT_CHANGED, () => {
+      apiDock?.flushPendingSave?.();
+      void presetDock?.flushPendingSave?.();
+      presetDock?.close();
+      apiDock?.close();
+      readerDock?.close();
+      void charWorldDock?.handleChatChanged?.();
       tapImmersive?.exit();
       refreshAll();
+      scheduleActiveChatPresetSync(30);
     });
 
     subscribe(types.SETTINGS_UPDATED, () => {
@@ -205,6 +350,8 @@ function createStMateRuntime() {
       types.CHARACTER_DELETED,
       types.CHARACTERS_IMPORTED,
       types.GROUP_UPDATED,
+      types.WORLDINFO_SETTINGS_UPDATED,
+      types.WORLDINFO_UPDATED,
     ]) {
       subscribe(evt, () => refreshAll());
     }
@@ -237,6 +384,12 @@ function createStMateRuntime() {
       getContext,
       store,
       isHomeCloaked: () => homeCloak.isHomeCloaked(),
+      shouldSuppressTap: () =>
+        Boolean(charWorldDock?.isOpen()) ||
+        Boolean(presetDock?.isOpen()) ||
+        Boolean(apiDock?.isOpen()) ||
+        Boolean(readerDock?.isOpen()) ||
+        Date.now() - lastDockDismissedAt < 320,
     });
 
     atmosphere = createAtmosphere({
@@ -249,7 +402,86 @@ function createStMateRuntime() {
       getContext,
       store,
       onPreviewAtmosphere: () => atmosphere?.refresh(),
-      onOpenStateChange: () => topbar?.refresh(),
+      onOpenStateChange: opened => {
+        if (opened) {
+          apiDock?.close();
+          presetDock?.close();
+          charWorldDock?.close();
+        } else {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+        topbar?.refresh();
+      },
+    });
+
+    apiDock = createApiDock({
+      getContext,
+      store,
+      onBeforeOpen: () => {
+        readerDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+      },
+      onOpenStateChange: opened => {
+        if (!opened) {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+        topbar?.refresh();
+      },
+    });
+
+    presetDock = createPresetDock({
+      getContext,
+      store,
+      onBeforeOpen: () => {
+        readerDock?.close();
+        apiDock?.close();
+        charWorldDock?.close();
+      },
+      onOpenStateChange: opened => {
+        if (!opened) {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+        topbar?.refresh();
+      },
+      onPresetChanged: () => {
+        topbar?.refresh();
+        charWorldDock?.refresh();
+      },
+      onOpenApiDock: () => {
+        readerDock?.close();
+        charWorldDock?.close();
+        apiDock?.open();
+      },
+    });
+
+    charWorldDock = createCharWorldDock({
+      getContext,
+      store,
+      onBeforeOpen: () => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+      },
+      onOpenStateChange: opened => {
+        if (!opened) {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+        topbar?.refresh();
+      },
+      onPresetChanged: () => {
+        topbar?.refresh();
+        presetDock?.refresh();
+      },
+      onCharacterChanged: () => {
+        atmosphere?.invalidateCurrentEntityBackdrop();
+        topbar?.refresh();
+        presetDock?.refresh();
+      },
     });
 
     settingsDialog = createSettingsDialog({
@@ -258,14 +490,42 @@ function createStMateRuntime() {
       moduleBridge,
       onToggleShell: toggleShell,
       onPreviewAtmosphere: () => atmosphere?.refresh(),
-      onOpenReaderDock: () => readerDock?.open(),
+      onOpenStateChange: () => {
+        ttOverlayBackGuard?.sync();
+      },
+      onOpenReaderDock: () => {
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        readerDock?.open();
+      },
+      onOpenApiDock: () => {
+        readerDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        apiDock?.open();
+      },
+      onOpenPresetDock: () => {
+        readerDock?.close();
+        apiDock?.close();
+        charWorldDock?.close();
+        presetDock?.open();
+      },
+      onOpenPresetAssistant: () => {
+        readerDock?.close();
+        apiDock?.close();
+        charWorldDock?.close();
+        presetDock?.openAssistant();
+      },
+      onOpenCharWorldDock: tab => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.open(tab);
+      },
     });
 
-    drawerBridge = createDrawerBridge({
-      getContext,
-      store,
-      onOpenSettings: () => settingsDialog.open(),
-    });
+    drawerBridge = createDrawerBridge();
 
     topbar = createTopbar({
       getContext,
@@ -273,17 +533,88 @@ function createStMateRuntime() {
       moduleBridge,
       onOpenSettings: () => {
         readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
         settingsDialog.open();
       },
-      onToggleReaderDock: () => readerDock?.toggle(),
+      onToggleCharWorldDock: () => charWorldDock?.toggle(),
+      isCharWorldDockOpen: () => Boolean(charWorldDock?.isOpen()),
+      onTogglePresetDock: () => presetDock?.toggle(),
+      isPresetDockOpen: () => Boolean(presetDock?.isOpen()),
+      onToggleApiDock: () => apiDock?.toggle(),
+      isApiDockOpen: () => Boolean(apiDock?.isOpen()),
+      onToggleReaderDock: () => {
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        readerDock?.toggle();
+      },
       isReaderDockOpen: () => Boolean(readerDock?.isOpen()),
-      onNativeDrawerOpened: () => readerDock?.close(),
+      onNativeDrawerOpened: () => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+      },
       onExitPureReading: () => tapImmersive.exit(),
     });
 
     unsubscribeStore = store.subscribe(() => {
       refreshAll();
     });
+
+    // 仅在 isTauri 下挂载安卓 TT 侧滑返回手势守卫（普通浏览器 100% 零监听、零调用 history.pushState）
+    if (detectPlatform(globalThis).isTauri) {
+      ttOverlayBackGuard = createTauriOverlayBackGuard({
+        root: globalThis,
+        hasAnyOverlayOpen: () =>
+          isExportFallbackDialogOpen(globalThis.document) ||
+          Boolean(charWorldDock?.isLightboxOpen?.()) ||
+          Boolean(settingsDialog?.isOpen?.()) ||
+          Boolean(readerDock?.isOpen?.()) ||
+          Boolean(apiDock?.isOpen?.()) ||
+          Boolean(presetDock?.isOpen?.()) ||
+          Boolean(charWorldDock?.isOpen?.()),
+        closeTopmostOverlay: () => {
+          if (isExportFallbackDialogOpen(globalThis.document)) {
+            closeExportFallbackDialog(globalThis.document, globalThis);
+            return true;
+          }
+          if (charWorldDock?.isLightboxOpen?.()) {
+            charWorldDock.closeLightbox();
+            return true;
+          }
+          if (settingsDialog?.isOpen?.()) {
+            settingsDialog.close();
+            return true;
+          }
+          if (readerDock?.isOpen?.()) {
+            readerDock.close();
+            return true;
+          }
+          if (apiDock?.isOpen?.()) {
+            apiDock.close();
+            return true;
+          }
+          if (presetDock?.isOpen?.()) {
+            presetDock.close();
+            return true;
+          }
+          if (charWorldDock?.isOpen?.()) {
+            charWorldDock.close();
+            return true;
+          }
+          return false;
+        },
+      });
+
+      const onViewportSafeAreaCheck = () => {
+        syncTauriSafeAreaGuard(globalThis);
+      };
+      globalThis.addEventListener?.('resize', onViewportSafeAreaCheck, { passive: true });
+      eventCleanups.push(() => globalThis.removeEventListener?.('resize', onViewportSafeAreaCheck));
+    }
   }
 
   function enable() {
@@ -291,6 +622,7 @@ function createStMateRuntime() {
     enabled = true;
 
     ensureFreshStylesheet();
+    syncTauriSafeAreaGuard(globalThis);
     initSubsystems();
     registerSelfInControlRegistry();
 
@@ -298,6 +630,7 @@ function createStMateRuntime() {
       const boot = () => {
         if (!enabled) return true;
         ensureFreshStylesheet();
+        syncTauriSafeAreaGuard(globalThis);
         const ctx = getContext();
         if (!ctx?.extensionSettings) return false;
 
@@ -305,6 +638,7 @@ function createStMateRuntime() {
         const bound = bindHostEvents();
         void moduleBridge.applyAllFromStore();
         refreshAll();
+        scheduleActiveChatPresetSync(40);
         return bound;
       };
 
@@ -331,9 +665,15 @@ function createStMateRuntime() {
       globalThis.clearInterval(bootPollTimer);
       bootPollTimer = 0;
     }
+    presetSyncScheduler.cancel();
 
     unsubscribeStore?.();
     unsubscribeStore = null;
+
+    ttOverlayBackGuard?.destroy();
+    ttOverlayBackGuard = null;
+    closeExportFallbackDialog(globalThis.document, globalThis);
+    clearTauriSafeAreaGuard(globalThis);
 
     while (eventCleanups.length) {
       const off = eventCleanups.pop();
@@ -346,6 +686,9 @@ function createStMateRuntime() {
 
     unregisterSelfFromControlRegistry();
 
+    charWorldDock?.destroy();
+    presetDock?.destroy();
+    apiDock?.destroy();
     readerDock?.destroy();
     atmosphere?.destroy();
     perfEngine?.destroy();
@@ -355,6 +698,9 @@ function createStMateRuntime() {
     homeCloak?.destroy();
     settingsDialog?.destroy();
 
+    charWorldDock = null;
+    presetDock = null;
+    apiDock = null;
     readerDock = null;
     atmosphere = null;
     perfEngine = null;
@@ -371,6 +717,10 @@ function createStMateRuntime() {
     refresh: refreshAll,
     openSettings: tab => settingsDialog?.open(tab),
     openReaderDock: () => readerDock?.open(),
+    openApiDock: () => apiDock?.open(),
+    openPresetDock: () => presetDock?.open(),
+    openPresetAssistant: () => presetDock?.openAssistant(),
+    openCharWorldDock: tab => charWorldDock?.open(tab),
   };
 }
 
@@ -391,6 +741,9 @@ export function onEnable() {
 }
 
 export function onDisable() {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('DOMContentLoaded', onEnable);
+  }
   runtime.disable();
 }
 

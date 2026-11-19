@@ -6,8 +6,8 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.3';
-import { svgMarkup } from '../core/icons.js?v=0.3.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
+import { svgMarkup } from '../core/icons.js?v=0.7.3';
 
 export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShell }) {
   let bodyObserver = null;
@@ -254,10 +254,14 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
   }
 
   function destroy() {
-    if (rafId && typeof globalThis.cancelAnimationFrame === 'function') {
-      globalThis.cancelAnimationFrame(rafId);
+    if (rafId) {
+      if (typeof globalThis.cancelAnimationFrame === 'function') {
+        globalThis.cancelAnimationFrame(rafId);
+      } else {
+        clearTimeout(rafId);
+      }
+      rafId = 0;
     }
-    rafId = 0;
     bodyObserver?.disconnect();
     chatObserver?.disconnect();
     bodyObserver = null;

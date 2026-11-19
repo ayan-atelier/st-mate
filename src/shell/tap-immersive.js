@@ -6,10 +6,10 @@
  *   确保切换时文字 0 像素跳动、百楼长聊天与前端美化卡片 60fps 零重排！
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.3';
-import { shouldTogglePureReading } from '../core/tap-guard.js?v=0.3.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
+import { shouldTogglePureReading } from '../core/tap-guard.js?v=0.7.3';
 
-export function createTapImmersive({ getContext, store, isHomeCloaked }) {
+export function createTapImmersive({ getContext, store, isHomeCloaked, shouldSuppressTap }) {
   let active = false;
   let pointerState = null;
   let composerObserver = null;
@@ -98,6 +98,11 @@ export function createTapImmersive({ getContext, store, isHomeCloaked }) {
   }
 
   function onChatClick(event) {
+    if (shouldSuppressTap?.()) {
+      pointerState = null;
+      return;
+    }
+
     const doc = globalThis.document;
     const chatRoot = doc?.getElementById('chat');
     if (!chatRoot) return;

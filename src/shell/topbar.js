@@ -1,13 +1,13 @@
 /**
- * ST伴侣 (st-mate) · 对话页双态极简顶栏控制器
- * - RP态：左侧 ‹ + [头像 + 角色名] + 浅色小字当前预设名 ▾；右侧 4 个 1.5px 纯色细线图标
- * - 阅读态：隐去头像、角色名与预设小字，仅保留 ‹ 与右侧 4 个细线图标，大面积呼吸留白
- * - 严守原生保活铁律：绝不对 #top-settings-holder 设 display:none，保障全部 9 个原生抽屉正常弹出；
+ * ST伴侣 (st-mate) · 对话页极简顶栏控制器
+ * - 活跃对话中左侧常驻：‹ 返回键 + [头像 + 角色名（点击打开角色档案与世界书）] + [预设名 ▾]
+ * - 右侧常驻 4 个清爽 1.5px 纯色细线图标：插头 (API连接) · 用户 (人设馆) · Aa (页面排版) · 设置 (伴侣设置)
+ * - 严守原生保活铁律：绝不对 #top-settings-holder 设 display:none，保障全部原生抽屉正常弹出；
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.3';
-import { svgMarkup } from '../core/icons.js?v=0.3.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
+import { svgMarkup } from '../core/icons.js?v=0.7.3';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -15,7 +15,7 @@ import {
   getOpenNativeDrawerIds,
   openNativeDrawer,
   returnToHomeScreen,
-} from './host-actions.js?v=0.3.3';
+} from './host-actions.js?v=0.7.3';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -30,6 +30,12 @@ export function createTopbar({
   store,
   moduleBridge,
   onOpenSettings,
+  onToggleCharWorldDock,
+  isCharWorldDockOpen,
+  onTogglePresetDock,
+  isPresetDockOpen,
+  onToggleApiDock,
+  isApiDockOpen,
   onToggleReaderDock,
   isReaderDockOpen,
   onNativeDrawerOpened,
@@ -46,7 +52,6 @@ export function createTopbar({
   let btnPersona = null;
   let btnReader = null;
   let btnSettings = null;
-  let btnCharWorld = null;
   let drawerObserver = null;
   let presetSelectObserver = null;
   let sheldResizeObserver = null;
@@ -131,6 +136,13 @@ export function createTopbar({
   }
 
   function handlePresetClick() {
+    const current = store.get();
+    if (typeof onTogglePresetDock === 'function' && current.shellEnabled && current.modules.presets) {
+      closeAllNativeDrawers();
+      onTogglePresetDock();
+      return;
+    }
+    onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
     if (openIds.includes('ai-config-button')) {
       closeAllNativeDrawers();
@@ -140,9 +152,13 @@ export function createTopbar({
   }
 
   function handleApiClick() {
+    if (typeof onToggleApiDock === 'function' && store.get().shellEnabled) {
+      closeAllNativeDrawers();
+      onToggleApiDock();
+      return;
+    }
     const openIds = getOpenNativeDrawerIds();
-    const isReadingMode = store.get().topbarMode === 'reading';
-    if (openIds.includes('sys-settings-button') || (isReadingMode && openIds.includes('ai-config-button'))) {
+    if (openIds.includes('sys-settings-button')) {
       closeAllNativeDrawers();
       return;
     }
@@ -150,6 +166,7 @@ export function createTopbar({
   }
 
   function handlePersonaClick() {
+    onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
     if (openIds.includes('persona-management-button')) {
       closeAllNativeDrawers();
@@ -169,6 +186,17 @@ export function createTopbar({
   }
 
   function handleCharWorldClick() {
+    const current = store.get();
+    if (
+      typeof onToggleCharWorldDock === 'function' &&
+      current.shellEnabled &&
+      current.modules.charWorld
+    ) {
+      closeAllNativeDrawers();
+      onToggleCharWorldDock();
+      return;
+    }
+    onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
     if (openIds.includes('rightNavHolder') || openIds.includes('WI-SP-button')) {
       closeAllNativeDrawers();
@@ -183,7 +211,8 @@ export function createTopbar({
     if (presetTextSpan.textContent !== presetMeta.shortName) {
       presetTextSpan.textContent = presetMeta.shortName;
     }
-    const tip = `当前对话预设：${presetMeta.fullName}（点击切换预设）`;
+    const actionHint = store.get().modules.presets ? '点击展开预设馆' : '点击切换预设';
+    const tip = `当前对话预设：${presetMeta.fullName}（${actionHint}）`;
     if (presetBtn.title !== tip) {
       presetBtn.title = tip;
       presetBtn.setAttribute('aria-label', tip);
@@ -225,6 +254,7 @@ export function createTopbar({
     left.className = 'stm-topbar-left';
 
     backBtn = makeIconBtn('back', '返回书架首页', () => {
+      onNativeDrawerOpened?.();
       void returnToHomeScreen(getContext);
     });
     backBtn.classList.add('stm-topbar-back');
@@ -272,7 +302,8 @@ export function createTopbar({
     const right = doc.createElement('div');
     right.className = 'stm-topbar-right';
 
-    btnApi = makeIconBtn('bolt', 'API连接与模型配置', handleApiClick);
+    btnApi = makeIconBtn('plug', 'API连接与模型配置', handleApiClick);
+    btnApi.classList.add('stm-topbar-api-btn');
     btnPersona = makeIconBtn('user', '人设馆与用户设定', handlePersonaClick);
     btnReader = makeIconBtn('typography', '页面排版与背景', () => {
       closeAllNativeDrawers();
@@ -283,9 +314,8 @@ export function createTopbar({
       closeAllNativeDrawers();
       onOpenSettings?.();
     });
-    btnCharWorld = makeIconBtn('book', '角色档案与世界书', handleCharWorldClick);
 
-    right.append(btnApi, btnPersona, btnReader, btnSettings, btnCharWorld);
+    right.append(btnApi, btnPersona, btnReader, btnSettings);
     inner.append(left, right);
     rootEl.append(inner);
 
@@ -352,18 +382,22 @@ export function createTopbar({
       onNativeDrawerOpened?.();
     }
 
-    const isReadingMode = store.get().topbarMode === 'reading';
-    presetBtn?.classList.toggle('is-active', openIds.includes('ai-config-button'));
+    identityBtn?.classList.toggle(
+      'is-active',
+      Boolean(isCharWorldDockOpen?.()) ||
+        openIds.includes('rightNavHolder') ||
+        openIds.includes('WI-SP-button'),
+    );
+    presetBtn?.classList.toggle(
+      'is-active',
+      Boolean(isPresetDockOpen?.()) || openIds.includes('ai-config-button'),
+    );
     btnApi?.classList.toggle(
       'is-active',
-      openIds.includes('sys-settings-button') || (isReadingMode && openIds.includes('ai-config-button')),
+      Boolean(isApiDockOpen?.()) || openIds.includes('sys-settings-button'),
     );
     btnPersona?.classList.toggle('is-active', openIds.includes('persona-management-button'));
     btnReader?.classList.toggle('is-active', Boolean(isReaderDockOpen?.()));
-    btnCharWorld?.classList.toggle(
-      'is-active',
-      openIds.includes('rightNavHolder') || openIds.includes('WI-SP-button'),
-    );
   }
 
   function refresh() {
@@ -380,7 +414,7 @@ export function createTopbar({
 
     mountDom();
     rootEl.hidden = false;
-    rootEl.dataset.mode = current.topbarMode;
+    rootEl.dataset.mode = 'rp';
 
     const ctx = getContext?.();
     const hasChat = hasActiveChatSelection(ctx);
@@ -390,7 +424,7 @@ export function createTopbar({
     }
 
     const meta = getCurrentEntityMeta(ctx);
-    const showIdentity = hasChat && current.topbarMode === 'rp' && meta.active;
+    const showIdentity = hasChat && meta.active;
     identityBtn.hidden = !showIdentity;
     presetBtn.hidden = !showIdentity;
     if (showIdentity) {
@@ -412,10 +446,14 @@ export function createTopbar({
   }
 
   function destroy() {
-    if (boundsRaf && typeof globalThis.cancelAnimationFrame === 'function') {
-      globalThis.cancelAnimationFrame(boundsRaf);
+    if (boundsRaf) {
+      if (typeof globalThis.cancelAnimationFrame === 'function') {
+        globalThis.cancelAnimationFrame(boundsRaf);
+      } else {
+        clearTimeout(boundsRaf);
+      }
+      boundsRaf = 0;
     }
-    boundsRaf = 0;
     desktopBoundsActive = false;
     drawerObserver?.disconnect();
     presetSelectObserver?.disconnect();

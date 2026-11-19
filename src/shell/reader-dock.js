@@ -6,17 +6,17 @@
  * 3. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.3.3';
-import { svgMarkup } from '../core/icons.js?v=0.3.3';
-import { sanitizeAssetUrl } from '../core/schema.js?v=0.3.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
+import { svgMarkup } from '../core/icons.js?v=0.7.3';
+import { sanitizeAssetUrl } from '../core/schema.js?v=0.7.3';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.3.3';
-import { openImageCropDialog } from './image-cropper.js?v=0.3.3';
+} from './host-actions.js?v=0.7.3';
+import { openImageCropDialog } from './image-cropper.js?v=0.7.3';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -722,7 +722,17 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
     }
     if (isOpen) {
       syncBoundsToSheldNow();
-      renderBody();
+      const doc = globalThis.document;
+      const activeEl = doc?.activeElement;
+      const isTypingInside =
+        activeEl &&
+        dockEl?.contains(activeEl) &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.tagName === 'SELECT');
+      if (!isTypingInside && !busyUploading) {
+        renderBody();
+      }
     }
   }
 

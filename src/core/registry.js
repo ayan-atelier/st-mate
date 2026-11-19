@@ -40,7 +40,7 @@ export const MODULE_DESCRIPTORS = Object.freeze([
     settingsNamespace: 'st_mate_presets',
     label: '预设馆系统',
     icon: 'sliders',
-    summary: '管理预设仓库与角色绑定（Phase 2 完整开放；关闭或过渡期自动联动原生预设/API 抽屉）。',
+    summary: '点顶栏预设胶囊展开预设馆：支持全局默认预设、角色专属绑定自动秒切、预设仓库收纳，以及参数与提示词条目开关编辑（关闭后回退酒馆原生预设面板）。',
   },
   {
     key: 'persona',
@@ -56,7 +56,7 @@ export const MODULE_DESCRIPTORS = Object.freeze([
     settingsNamespace: 'st_mate_char_world',
     label: '角色与清爽世界书页',
     icon: 'book',
-    summary: '最右侧按钮打开角色详情与清爽世界书（Phase 3 完整开放；过渡期或关闭时联动原生角色/世界书抽屉）。',
+    summary: '点顶栏左侧角色头像与名称展开一体页：支持导出 PNG/JSON 角色卡、开局第1楼一键换开场白、专属预设与世界书绑定，以及防假生效的清爽蓝绿灯世界书管理（关闭后回退原生角色/世界书面板）。',
   },
   {
     key: 'echoes',
@@ -178,7 +178,7 @@ export function createModuleBridge({ root = globalThis, getContext, store }) {
   /**
    * 一键全量挂起回纯原生酒馆：
    * 不擦除 store.get().modules 里保存的玩家个人偏好，只将所有受控子插件临时卸载回原生状态；
-   * 等玩家点「✨ 回到 ST伴侣」时，applyAllFromStore() 会按原样瞬间恢复！
+   * 等玩家点「回到 ST伴侣」时，applyAllFromStore() 会按原样瞬间恢复！
    */
   async function suspendAllForNative() {
     for (const key of ['bookshelf', 'persona', 'echoes', 'memory']) {

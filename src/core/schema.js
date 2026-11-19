@@ -1,18 +1,98 @@
 /**
  * ST伴侣 (st-mate) · 配置模型与幂等迁移存储层
  * 严格隔离在 extensionSettings.st_mate 命名空间下，绝不污染酒馆全局或其他扩展配置。
+ * 安全准则：API 密钥 100% 存入酒馆原生加密保险箱 secrets.json，此处仅记录 secretId 与掩码标签，绝不落盘明文密钥。
  */
 
 export const STM_NAMESPACE = 'st_mate';
-export const STM_SCHEMA_VERSION = 3;
+export const STM_SCHEMA_VERSION = 5;
 
-export const TOPBAR_MODES = Object.freeze(['rp', 'reading']);
-export const TAP_SCOPES = Object.freeze(['all', 'reading']);
+export const TOPBAR_MODES = Object.freeze(['rp']);
+export const TAP_SCOPES = Object.freeze(['all']);
 export const HOME_ENTRY_MODES = Object.freeze(['bookshelf-bar', 'floating']);
 export const DRAWER_BRIDGE_MODES = Object.freeze(['inline-switch', 'popover']);
 export const BACKDROP_MODES = Object.freeze(['theme', 'character', 'custom']);
 export const PARAGRAPH_INDENTS = Object.freeze(['default', 'flush', 'indent']);
 export const FONT_CHOICES = Object.freeze(['default', 'serif', 'sans', 'kai', 'custom']);
+export const VERTEX_AUTH_MODES = Object.freeze(['express', 'full']);
+export const AUX_API_MODES = Object.freeze(['follow_main', 'station']);
+
+export const CHAT_COMPLETION_SOURCE_IDS = Object.freeze([
+  'custom',
+  'vertexai',
+  'makersuite',
+  'claude',
+  'openrouter',
+  'openai',
+  'deepseek',
+  'siliconflow',
+  'xai',
+  'moonshot',
+  'minimax',
+  'zai',
+  'groq',
+  'nanogpt',
+  'chutes',
+  'mistralai',
+  'cohere',
+  'perplexity',
+  'fireworks',
+  'cometapi',
+  'azure_openai',
+  'workers_ai',
+  'pollinations',
+  'ai21',
+  'electronhub',
+  'aimlapi',
+]);
+
+export const POST_PROCESSING_IDS = Object.freeze([
+  '',
+  'merge',
+  'merge_tools',
+  'semi',
+  'semi_tools',
+  'strict',
+  'strict_tools',
+  'single',
+  'claude',
+]);
+
+export const SECRET_KEY_BY_SOURCE = Object.freeze({
+  custom: 'api_key_custom',
+  vertexai: 'api_key_vertexai',
+  makersuite: 'api_key_makersuite',
+  claude: 'api_key_claude',
+  openrouter: 'api_key_openrouter',
+  openai: 'api_key_openai',
+  deepseek: 'api_key_deepseek',
+  siliconflow: 'api_key_siliconflow',
+  xai: 'api_key_xai',
+  moonshot: 'api_key_moonshot',
+  minimax: 'api_key_minimax',
+  zai: 'api_key_zai',
+  groq: 'api_key_groq',
+  nanogpt: 'api_key_nanogpt',
+  chutes: 'api_key_chutes',
+  mistralai: 'api_key_mistralai',
+  cohere: 'api_key_cohere',
+  perplexity: 'api_key_perplexity',
+  fireworks: 'api_key_fireworks',
+  cometapi: 'api_key_cometapi',
+  azure_openai: 'api_key_azure_openai',
+  workers_ai: 'api_key_workers_ai',
+  pollinations: 'api_key_pollinations',
+  ai21: 'api_key_ai21',
+  electronhub: 'api_key_electronhub',
+  aimlapi: 'api_key_aimlapi',
+});
+
+export function resolveDefaultSecretKey(source, vertexAuthMode = 'express') {
+  if (source === 'vertexai') {
+    return vertexAuthMode === 'full' ? 'vertexai_service_account_json' : 'api_key_vertexai';
+  }
+  return SECRET_KEY_BY_SOURCE[source] || 'api_key_custom';
+}
 
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: STM_SCHEMA_VERSION,
@@ -55,10 +135,22 @@ export const DEFAULT_SETTINGS = Object.freeze({
     foldOptionsMenu: true,
     pinnedExtensions: Object.freeze([]),
   }),
+  apiStudio: Object.freeze({
+    activeStationId: '',
+    defaultStationId: '',
+    stations: Object.freeze([]),
+  }),
   auxApi: Object.freeze({
+    mode: 'follow_main', // follow_main (跟随主对话 API) | station (指定已保存站子卡片)
     enabled: false,
-    endpoint: '',
+    stationId: '',
     model: '',
+    endpoint: '',
+  }),
+  presetStudio: Object.freeze({
+    defaultPreset: '',
+    charBindings: Object.freeze({}),
+    archivedPresets: Object.freeze([]),
   }),
 });
 
@@ -74,6 +166,37 @@ function pickEnum(value, allowed, fallback) {
 
 function pickBool(value, fallback) {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function cleanStringList(rawList, maxItems = 60, maxLen = 200) {
+  if (!Array.isArray(rawList)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of rawList) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim().slice(0, maxLen);
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+export function sanitizeEndpointUrl(rawUrl) {
+  if (typeof rawUrl !== 'string') return '';
+  const trimmed = rawUrl.trim().slice(0, 500);
+  if (!trimmed) return '';
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.username || parsed.password) return '';
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return trimmed;
+    }
+  } catch {
+    return '';
+  }
+  return '';
 }
 
 export function sanitizeAssetUrl(rawUrl) {
@@ -96,12 +219,114 @@ export function sanitizeAssetUrl(rawUrl) {
   return '';
 }
 
+/**
+ * 归一化单张 API 站子卡片数据（严禁保留任何 apiKey / rawKey 明文字段）。
+ */
+export function normalizeApiStation(raw = {}, fallbackIndex = 0) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const source = pickEnum(src.source, CHAT_COMPLETION_SOURCE_IDS, 'custom');
+  const vertexAuthMode = pickEnum(src.vertexAuthMode, VERTEX_AUTH_MODES, 'express');
+  const derivedSecretType = resolveDefaultSecretKey(source, vertexAuthMode);
+  const rawSecretKeyType = typeof src.secretKeyType === 'string' ? src.secretKeyType.trim().slice(0, 80) : '';
+  const secretKeyType =
+    source === 'vertexai'
+      ? derivedSecretType
+      : rawSecretKeyType && Object.values(SECRET_KEY_BY_SOURCE).includes(rawSecretKeyType)
+        ? rawSecretKeyType
+        : derivedSecretType;
+
+  const rawId = typeof src.id === 'string' ? src.id.trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80) : '';
+  const id = rawId || `stm_station_${fallbackIndex + 1}`;
+  const rawName = typeof src.name === 'string' ? src.name.trim() : '';
+  const migratedName = rawName
+    .replace(/^默认\s*·\s*自定义反代$/i, '通用接口')
+    .replace(
+      /^默认\s*·\s*(Vertex AI|通用接口|AI Studio|Claude|OpenRouter|OpenAI|DeepSeek|硅基流动|xAI Grok|Kimi|MiniMax|智谱 Z\.AI|Groq|NanoGPT|Chutes|Mistral|Cohere|Perplexity|Fireworks|CometAPI|Azure|Workers AI|Pollinations|AI21|ElectronHub|AI\/ML API)$/i,
+      '$1',
+    );
+  const name = migratedName ? migratedName.slice(0, 60) : `站子 ${fallbackIndex + 1}`;
+
+  return {
+    id,
+    name,
+    source,
+    url: sanitizeEndpointUrl(src.url),
+    secretKeyType,
+    secretId: typeof src.secretId === 'string' ? src.secretId.trim().slice(0, 120) : '',
+    secretLabel: typeof src.secretLabel === 'string' ? src.secretLabel.trim().slice(0, 120) : '',
+    model: typeof src.model === 'string' ? src.model.trim().slice(0, 200) : '',
+    favoriteModels: cleanStringList(src.favoriteModels, 60, 200),
+    cachedModels: cleanStringList(src.cachedModels, 800, 200),
+    postProcessing: pickEnum(src.postProcessing, POST_PROCESSING_IDS, ''),
+    vertexAuthMode,
+    vertexRegion:
+      typeof src.vertexRegion === 'string' && src.vertexRegion.trim()
+        ? src.vertexRegion.trim().slice(0, 60)
+        : 'global',
+    vertexProjectId: typeof src.vertexProjectId === 'string' ? src.vertexProjectId.trim().slice(0, 120) : '',
+  };
+}
+
+function sanitizeStoredPresetName(raw) {
+  if (typeof raw !== 'string') return '';
+  const trimmed = raw
+    .trim()
+    .replace(/\.(?:json|settings|preset)$/i, '')
+    .trim()
+    .slice(0, 200);
+  if (!trimmed || /^gui(?:\s+koboldai\s+settings)?$/i.test(trimmed)) return '';
+  return trimmed;
+}
+
+/**
+ * 归一化预设馆配置（全局默认预设 + 角色/群聊唯一键绑定映射 + 预设仓库归档列表）。
+ */
+export function normalizePresetStudio(raw = {}) {
+  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const defaultPreset = sanitizeStoredPresetName(src.defaultPreset);
+
+  const charBindings = {};
+  if (src.charBindings && typeof src.charBindings === 'object' && !Array.isArray(src.charBindings)) {
+    const entries = Object.entries(src.charBindings);
+    let count = 0;
+    for (const [rawKey, rawVal] of entries) {
+      if (count >= 2000) break;
+      const key = typeof rawKey === 'string' ? rawKey.trim().slice(0, 260) : '';
+      if (!/^(?:char|group):.+/.test(key)) continue;
+      const val = sanitizeStoredPresetName(rawVal);
+      if (!val) continue;
+      charBindings[key] = val;
+      count += 1;
+    }
+  }
+
+  const archivedPresets = [];
+  const seenArchived = new Set();
+  if (Array.isArray(src.archivedPresets)) {
+    for (const item of src.archivedPresets) {
+      const cleaned = sanitizeStoredPresetName(item);
+      if (!cleaned || seenArchived.has(cleaned)) continue;
+      seenArchived.add(cleaned);
+      archivedPresets.push(cleaned);
+      if (archivedPresets.length >= 500) break;
+    }
+  }
+
+  return {
+    defaultPreset,
+    charBindings,
+    archivedPresets,
+  };
+}
+
 export function normalizeSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const rawModules = src.modules && typeof src.modules === 'object' ? src.modules : {};
   const rawVibe = src.vibe && typeof src.vibe === 'object' ? src.vibe : {};
   const rawTidy = src.tidy && typeof src.tidy === 'object' ? src.tidy : {};
+  const rawStudio = src.apiStudio && typeof src.apiStudio === 'object' ? src.apiStudio : {};
   const rawAux = src.auxApi && typeof src.auxApi === 'object' ? src.auxApi : {};
+  const rawPresetStudio = src.presetStudio && typeof src.presetStudio === 'object' ? src.presetStudio : {};
 
   const pinnedExtensions = Array.isArray(rawTidy.pinnedExtensions)
     ? [
@@ -144,12 +369,51 @@ export function normalizeSettings(raw = {}) {
       ? 'flush'
       : pickEnum(rawVibe.paragraphIndent, PARAGRAPH_INDENTS, DEFAULT_SETTINGS.vibe.paragraphIndent);
 
+  // 归一化 API 站子卡片列表（确保 ID 唯一、最多保留 50 张）
+  const stations = [];
+  const usedIds = new Set();
+  if (Array.isArray(rawStudio.stations)) {
+    for (let i = 0; i < rawStudio.stations.length && stations.length < 50; i += 1) {
+      const st = normalizeApiStation(rawStudio.stations[i], i);
+      let uniqueId = st.id;
+      let suffix = 2;
+      while (usedIds.has(uniqueId)) {
+        uniqueId = `${st.id}_${suffix}`;
+        suffix += 1;
+      }
+      usedIds.add(uniqueId);
+      stations.push(uniqueId === st.id ? st : { ...st, id: uniqueId });
+    }
+  }
+
+  const requestedActiveId = typeof rawStudio.activeStationId === 'string' ? rawStudio.activeStationId.trim() : '';
+  const activeStationId =
+    stations.length === 0
+      ? ''
+      : stations.some(st => st.id === requestedActiveId)
+        ? requestedActiveId
+        : stations[0].id;
+
+  const requestedDefaultId =
+    typeof rawStudio.defaultStationId === 'string' ? rawStudio.defaultStationId.trim() : '';
+  const defaultStationId = stations.some(st => st.id === requestedDefaultId) ? requestedDefaultId : '';
+
+  // 伴侣助手副 API 归一化（兼容旧版 enabled 布尔开关与新版 mode 枚举）
+  let auxMode = 'follow_main';
+  if (AUX_API_MODES.includes(rawAux.mode)) {
+    auxMode = rawAux.mode;
+  } else if (rawAux.enabled === true) {
+    auxMode = 'station';
+  }
+  const rawAuxStationId = typeof rawAux.stationId === 'string' ? rawAux.stationId.trim().slice(0, 80) : '';
+
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
-    topbarMode: pickEnum(src.topbarMode, TOPBAR_MODES, DEFAULT_SETTINGS.topbarMode),
+    // v0.4.0 彻底取消顶栏双态切换：恒定归一化为 rp 态与全局轻触纯享阅读
+    topbarMode: 'rp',
     tapPureReading: pickBool(src.tapPureReading, DEFAULT_SETTINGS.tapPureReading),
-    tapPureReadingScope: pickEnum(src.tapPureReadingScope, TAP_SCOPES, DEFAULT_SETTINGS.tapPureReadingScope),
+    tapPureReadingScope: 'all',
     homeEntryMode: pickEnum(src.homeEntryMode, HOME_ENTRY_MODES, DEFAULT_SETTINGS.homeEntryMode),
     drawerBridgeMode: pickEnum(src.drawerBridgeMode, DRAWER_BRIDGE_MODES, DEFAULT_SETTINGS.drawerBridgeMode),
     modules: {
@@ -188,11 +452,19 @@ export function normalizeSettings(raw = {}) {
       foldOptionsMenu: pickBool(rawTidy.foldOptionsMenu, DEFAULT_SETTINGS.tidy.foldOptionsMenu),
       pinnedExtensions,
     },
-    auxApi: {
-      enabled: pickBool(rawAux.enabled, DEFAULT_SETTINGS.auxApi.enabled),
-      endpoint: typeof rawAux.endpoint === 'string' ? rawAux.endpoint.trim().slice(0, 500) : '',
-      model: typeof rawAux.model === 'string' ? rawAux.model.trim().slice(0, 200) : '',
+    apiStudio: {
+      activeStationId,
+      defaultStationId,
+      stations,
     },
+    auxApi: {
+      mode: auxMode,
+      enabled: auxMode === 'station',
+      stationId: rawAuxStationId,
+      model: typeof rawAux.model === 'string' ? rawAux.model.trim().slice(0, 200) : '',
+      endpoint: typeof rawAux.endpoint === 'string' ? rawAux.endpoint.trim().slice(0, 500) : '',
+    },
+    presetStudio: normalizePresetStudio(rawPresetStudio),
   };
 }
 
@@ -221,7 +493,9 @@ export function createSettingsStore({ getContext }) {
       modules: { ...cache.modules, ...(patch?.modules || {}) },
       vibe: { ...cache.vibe, ...(patch?.vibe || {}) },
       tidy: { ...cache.tidy, ...(patch?.tidy || {}) },
+      apiStudio: patch?.apiStudio ? { ...cache.apiStudio, ...patch.apiStudio } : cache.apiStudio,
       auxApi: { ...cache.auxApi, ...(patch?.auxApi || {}) },
+      presetStudio: patch?.presetStudio ? { ...cache.presetStudio, ...patch.presetStudio } : cache.presetStudio,
     };
     cache = normalizeSettings(nextRaw);
 

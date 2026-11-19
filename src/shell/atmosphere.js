@@ -6,8 +6,8 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.3.3';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.3.3';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.7.3';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.7.3';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -24,6 +24,8 @@ export const FONT_STACKS = Object.freeze({
   custom: '"StmReaderCustomFont", "Noto Serif SC", serif',
 });
 
+const CHAT_OVERRIDE_SCOPE = 'html body:not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home)';
+
 export function buildPageOverrideCss(
   vibe,
   { readerActive = false, backdropLive = false, isNotionTheme = false } = {},
@@ -33,13 +35,13 @@ export function buildPageOverrideCss(
 
   if (backdropLive) {
     rules.push(`
-html body.stm-shell-active.stm-backdrop-live #sheld#sheld {
+html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #sheld#sheld {
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
 }
-html body.stm-shell-active.stm-backdrop-live #chat#chat,
-html body.stm-shell-active.stm-backdrop-live #form_sheld#form_sheld {
+html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home),
+html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #form_sheld#form_sheld {
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
@@ -52,15 +54,15 @@ html body.stm-shell-active.stm-backdrop-live #form_sheld#form_sheld {
   if (isNotionTheme && !vibe.hideAvatars) {
     rules.push(`
 @media screen and (min-width: 601px) {
-  html body #chat#chat > .mes:not(.smallSysMes) > .mes_block {
+  ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) > .mes_block {
     margin-left: 0 !important;
     width: 100% !important;
   }
-  html body:not(.hideChatAvatars):not(.documentstyle) #chat#chat > .mes:not(.smallSysMes) .ch_name > .flex-container {
+  html body:not(.stm-home-cloak):not(.hideChatAvatars):not(.documentstyle) #chat#chat:not(.jd-bookshelf-home) > .mes:not(.smallSysMes) .ch_name > .flex-container {
     margin-left: 38px !important;
     max-width: calc(100% - 38px) !important;
   }
-  html body #chat#chat > .mes:not(.smallSysMes) > .mesAvatarWrapper {
+  ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) > .mesAvatarWrapper {
     margin-left: 0 !important;
   }
 }`);
@@ -68,26 +70,26 @@ html body.stm-shell-active.stm-backdrop-live #form_sheld#form_sheld {
 
   if (vibe.fontSizePx > 0) {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) {
   --nt-body: ${vibe.fontSizePx}px !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text,
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text :is(p, li, q, blockquote) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :is(p, li, q, blockquote) {
   font-size: ${vibe.fontSizePx}px !important;
 }`);
   } else if (vibe.fontScale !== 100) {
     const scale = (vibe.fontScale / 100).toFixed(2);
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text {
   font-size: calc(var(--mainFontSize, 1rem) * ${scale}) !important;
 }`);
   }
 
-  // 手机窄屏与电脑宽屏各自独立套用边距，互不串扰
+  // 手机窄屏与电脑宽屏各自独立套用边距，严格排除首页净空态与角色书架容器
   if (vibe.paddingX > 0) {
     rules.push(`
 @media screen and (max-width: 768px) {
-  html body #chat#chat {
+  ${CHAT_OVERRIDE_SCOPE} {
     --nt-inset: 0px !important;
     --nt-mobile-inset: 0px !important;
     padding-left: ${vibe.paddingX}px !important;
@@ -100,7 +102,7 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text {
   if ((vibe.desktopPaddingX || 0) > 0) {
     rules.push(`
 @media screen and (min-width: 769px) {
-  html body #chat#chat {
+  ${CHAT_OVERRIDE_SCOPE} {
     --nt-inset: 0px !important;
     padding-left: ${vibe.desktopPaddingX}px !important;
     padding-right: ${vibe.desktopPaddingX}px !important;
@@ -112,24 +114,24 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text {
   if (vibe.lineHeight > 0) {
     const lh = (vibe.lineHeight / 100).toFixed(2);
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) {
   --nt-body-line-height: ${lh} !important;
   --jd-leading: ${lh} !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text,
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text p {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p {
   line-height: ${lh} !important;
 }`);
   }
 
   if (vibe.paragraphIndent === 'indent') {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not(:is(blockquote p, details p, li p, td p, th p)) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p:not(:is(blockquote p, details p, li p, td p, th p)) {
   text-indent: 2em !important;
 }`);
   } else if (vibe.paragraphIndent === 'flush') {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text p {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p {
   text-indent: 0 !important;
 }`);
   }
@@ -143,7 +145,7 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text p {
     vibe.paragraphIndent !== 'default';
   if (hasTypographyAdjustment) {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p:not([align]):not([style*="text-align"]):not(:is(blockquote p, details p, td p, th p)) {
   text-align: justify !important;
   text-justify: inter-ideograph;
 }`);
@@ -152,19 +154,19 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([styl
   if (backdropLive || hasTypographyAdjustment) {
     rules.push(`
 @media screen and (max-width: 1000px), (pointer: coarse) {
-  html, html body, html body #sheld#sheld {
+  html, html body:not(.stm-home-cloak), html body:not(.stm-home-cloak) #sheld#sheld {
     overflow: hidden !important;
     scrollbar-width: none !important;
   }
-  html body #chat#chat {
+  ${CHAT_OVERRIDE_SCOPE} {
     scrollbar-width: none !important;
     scrollbar-gutter: auto !important;
   }
   html::-webkit-scrollbar,
-  html body::-webkit-scrollbar,
-  html body #sheld#sheld::-webkit-scrollbar,
-  html body #chat#chat::-webkit-scrollbar,
-  html body #chat#chat:hover::-webkit-scrollbar {
+  html body:not(.stm-home-cloak)::-webkit-scrollbar,
+  html body:not(.stm-home-cloak) #sheld#sheld::-webkit-scrollbar,
+  ${CHAT_OVERRIDE_SCOPE}::-webkit-scrollbar,
+  ${CHAT_OVERRIDE_SCOPE}:hover::-webkit-scrollbar {
     display: none !important;
     width: 0 !important;
     height: 0 !important;
@@ -179,35 +181,35 @@ html body #chat#chat > .mes:not(.smallSysMes) .mes_text p:not([align]):not([styl
   if (useFont) {
     const stack = FONT_STACKS[vibe.fontChoice];
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) {
   --mainFontFamily: ${stack} !important;
   --nt-serif: ${stack} !important;
   --jd-font: ${stack} !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text,
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text :not(:is(pre, code, kbd, samp, .fa, .fas, .far, .fab, .fa-solid, .fa-regular, .fa-brands, i[class*="fa-"])) {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :not(:is(pre, code, kbd, samp, .fa, .fas, .far, .fab, .fa-solid, .fa-regular, .fa-brands, i[class*="fa-"])) {
   font-family: ${stack} !important;
 }`);
   }
 
   if (vibe.hideAvatars) {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes) > .mesAvatarWrapper {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) > .mesAvatarWrapper {
   display: none !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes) > .mes_block {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) > .mes_block {
   margin-left: 0 !important;
   padding-left: 0 !important;
   padding-top: 0 !important;
   width: 100% !important;
   max-width: 100% !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes) .ch_name > .flex-container {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .ch_name > .flex-container {
   margin-left: 0 !important;
   max-width: 100% !important;
 }
-html body #chat#chat > .mes:not(.smallSysMes)::before,
-html body #chat#chat > .mes:not(.smallSysMes)::after {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes)::before,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes)::after {
   display: none !important;
   content: none !important;
 }`);
@@ -215,9 +217,9 @@ html body #chat#chat > .mes:not(.smallSysMes)::after {
 
   if (vibe.bookPageFlow) {
     rules.push(`
-html body #chat#chat > .mes:not(.smallSysMes),
-html body #chat#chat > .mes:not(.smallSysMes) > .mes_block,
-html body #chat#chat > .mes:not(.smallSysMes) .mes_text {
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes),
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) > .mes_block,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text {
   background: transparent !important;
   background-color: transparent !important;
   background-image: none !important;
@@ -468,9 +470,14 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
       }
     }
 
-    void syncCustomFontFace(doc, readerActive, vibe);
-    const isNotionTheme = readerActive && inChat ? detectNotionTheme(doc) : false;
-    const overrideCss = buildPageOverrideCss(vibe, { readerActive, backdropLive, isNotionTheme });
+    const inChatReaderActive = Boolean(readerActive && inChat);
+    void syncCustomFontFace(doc, inChatReaderActive, vibe);
+    const isNotionTheme = inChatReaderActive ? detectNotionTheme(doc) : false;
+    const overrideCss = buildPageOverrideCss(vibe, {
+      readerActive: inChatReaderActive,
+      backdropLive,
+      isNotionTheme,
+    });
     syncOverrideStyleSheet(doc, overrideCss);
   }
 
