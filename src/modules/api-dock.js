@@ -6,9 +6,9 @@
  * 3. 「副 API 通道」独立卡片清晰呈现，选定站子后支持直接下拉搜索该站子模型列表（收藏置顶）或后台静默拉取模型，告别纯手填。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.3';
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.7.3';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.7.3';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.4';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.7.4';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.7.4';
 import {
   API_SOURCES,
   MORE_SOURCE_IDS,
@@ -33,7 +33,7 @@ import {
   testStationChatReply,
   toggleFavoriteModel,
   writeStationSecret,
-} from './api-backend.js?v=0.7.3';
+} from './api-backend.js?v=0.7.4';
 
 export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOpen }) {
   let dockEl = null;
@@ -56,7 +56,9 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
   const pendingSecretsByStation = new Map();
   let confirmDeleteId = '';
 
-  // 渐进披露状态：已就绪站子默认收起低频连接表单；新建/复制/未配置站子自动展开
+  // 渐进披露状态：站子下拉栏按需展开；已就绪站子默认收起低频连接表单；新建/复制/未配置站子自动展开
+  let stationPickerOpen = false;
+  let stationFilterText = '';
   let configExpanded = false;
   let forceExpandStationId = '';
   let advancedExpanded = false;
@@ -77,7 +79,10 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
   // 局部更新与未提交草稿句柄（防止打字时重绘整棵 DOM 丢失焦点或吞掉搜狗拼音）
   let liveRefs = {
     stationId: '',
+    activeTriggerNameEl: null,
     activePillNameEl: null,
+    stationDropdownWrap: null,
+    stationListWrap: null,
     nameInput: null,
     urlInput: null,
     regionInput: null,
@@ -308,6 +313,8 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     busyTesting = false;
     confirmDeleteId = '';
     forceExpandStationId = '';
+    stationPickerOpen = false;
+    stationFilterText = '';
     configExpanded = false;
     advancedExpanded = false;
     modelDropdownOpen = false;
@@ -380,6 +387,8 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     busyTesting = false;
     confirmDeleteId = '';
     forceExpandStationId = newStation.id;
+    stationPickerOpen = false;
+    stationFilterText = '';
     configExpanded = true;
     advancedExpanded = false;
     modelDropdownOpen = false;
@@ -413,6 +422,8 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     busyTesting = false;
     confirmDeleteId = '';
     forceExpandStationId = cloned.id;
+    stationPickerOpen = false;
+    stationFilterText = '';
     configExpanded = true;
     advancedExpanded = false;
     modelDropdownOpen = false;
@@ -1002,13 +1013,85 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     wrap.append(listEl);
   }
 
+  function renderStationListOnly() {
+    const listWrap = liveRefs.stationListWrap;
+    const doc = globalThis.document;
+    if (!listWrap || !doc) return;
+    listWrap.replaceChildren();
+
+    const studio = getStudioState();
+    const activeStation = getActiveStation();
+    const q = String(stationFilterText || '').trim().toLowerCase();
+    const visibleStations = q
+      ? studio.stations.filter(s => {
+          const hay = `${s.name} ${s.url || ''} ${getSourceMeta(s.source).shortLabel} ${s.model || ''}`.toLowerCase();
+          return hay.includes(q);
+        })
+      : studio.stations;
+
+    if (visibleStations.length === 0) {
+      listWrap.append(el('div', 'stm-model-more-note', `未找到匹配「${stationFilterText}」的站子`));
+      return;
+    }
+
+    for (const item of visibleStations) {
+      const active = activeStation && item.id === activeStation.id;
+      const isUserDefault = Boolean(studio.defaultStationId && studio.defaultStationId === item.id);
+      const isSwitchingThis = switchingStationId === item.id;
+      const itemMeta = getSourceMeta(item.source);
+
+      const cardBtn = el(
+        'button',
+        `stm-station-pill stm-station-option${active ? ' is-active' : ''}${isSwitchingThis ? ' is-switching' : ''}`,
+      );
+      cardBtn.type = 'button';
+      cardBtn.title = `${item.name}（${itemMeta.shortLabel}${item.model ? ` · ${item.model}` : ''}）`;
+
+      const leftMain = el('span', 'stm-station-opt-main');
+      if (active) {
+        leftMain.append(createIconNode(doc, 'check', 'stm-row-icon'));
+      }
+      const pillNameSpan = el('span', 'stm-station-pill-name', item.name);
+      if (active) {
+        liveRefs.activePillNameEl = pillNameSpan;
+      }
+      leftMain.append(pillNameSpan);
+
+      if (isUserDefault) {
+        leftMain.append(el('span', 'stm-station-pill-sub is-default-mark', '默认'));
+      }
+
+      const rightMeta = el(
+        'span',
+        'stm-station-opt-meta',
+        item.model ? item.model : itemMeta.shortLabel,
+      );
+
+      cardBtn.append(leftMain, rightMeta);
+      cardBtn.addEventListener('click', () => {
+        stationPickerOpen = false;
+        stationFilterText = '';
+        if (activeStation && item.id === activeStation.id && !switchingStationId) {
+          if (liveRefs.stationDropdownWrap) liveRefs.stationDropdownWrap.hidden = true;
+          renderBody();
+          return;
+        }
+        void handleSwitchStation(item.id);
+      });
+      listWrap.append(cardBtn);
+    }
+  }
+
   function renderBody() {
     const doc = globalThis.document;
     if (!doc || !bodyEl) return;
     bodyEl.replaceChildren();
     liveRefs = {
       stationId: '',
+      activeTriggerNameEl: null,
       activePillNameEl: null,
+      stationDropdownWrap: null,
+      stationListWrap: null,
       nameInput: null,
       urlInput: null,
       regionInput: null,
@@ -1036,25 +1119,16 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     const showConfigForm = configExpanded || isStationUnconfigured(station, secStatus);
 
     // =========================================================================
-    // 1. 站子快切区：状态灯行 + 自动换行胶囊列（零重复角标、零灰白滚动条）+ 单行紧凑配置摘要
+    // 1. 站子快切区：紧凑标题行 + 下拉选择栏（绿灯状态内嵌右端，站子再多也只占一行）+ 明面管理栏
     // =========================================================================
     const secStations = el('section', 'stm-dock-section');
     const topHead = el('div', 'stm-api-tophead');
 
-    const statusBadge = el('div', 'stm-api-status-line');
-    const effectiveTone =
-      connectionBanner.tone !== 'idle'
-        ? connectionBanner.tone
-        : secStatus.valid
-          ? 'ok'
-          : 'warn';
-    const dot = el('span', `stm-status-dot is-${effectiveTone}`);
-    const statusText =
-      connectionBanner.text ||
-      (secStatus.valid
-        ? `已就绪 · ${station.name}${station.model ? ` · ${station.model}` : ''}`
-        : `${station.name} · 待完善连接配置`);
-    statusBadge.append(dot, el('span', 'stm-api-status-text', statusText));
+    const headLeft = el('div', 'stm-prompt-head-left');
+    headLeft.append(
+      el('span', 'stm-sec-title', '连接站子'),
+      el('span', 'stm-preset-badge is-subtle', `共 ${studio.stations.length} 个`),
+    );
 
     const headRight = el('div', 'stm-api-head-links');
     const importBtn = el('button', 'stm-ghost-link');
@@ -1089,60 +1163,119 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     });
 
     headRight.append(importBtn, nativeLinkBtn);
-    topHead.append(statusBadge, headRight);
+    topHead.append(headLeft, headRight);
     secStations.append(topHead);
 
-    // 站子胶囊栏（自然换行，纯净站子名，仅用户主动设定的默认主站显示轻量标记）
-    const stationBar = el('div', 'stm-station-strip');
-    for (const item of studio.stations) {
-      const active = item.id === station.id;
-      const isUserDefault = Boolean(studio.defaultStationId && studio.defaultStationId === item.id);
-      const isSwitchingThis = switchingStationId === item.id;
-      const itemMeta = getSourceMeta(item.source);
+    // 当前站子下拉触发栏（左侧站子名，右侧融合绿灯就绪态与下拉箭头）+ 右侧 [+ 新建]
+    const effectiveTone =
+      connectionBanner.tone !== 'idle'
+        ? connectionBanner.tone
+        : secStatus.valid
+          ? 'ok'
+          : 'warn';
+    const shortReadyLabel = switchingStationId
+      ? '切换中…'
+      : effectiveTone === 'err'
+        ? '连接异常'
+        : secStatus.valid
+          ? '已就绪'
+          : '待配密钥';
 
-      const cardBtn = el(
-        'button',
-        `stm-station-pill${active ? ' is-active' : ''}${isSwitchingThis ? ' is-switching' : ''}`,
-      );
-      cardBtn.type = 'button';
-      cardBtn.title = `${item.name}（${itemMeta.shortLabel}${item.model ? ` · ${item.model}` : ''}）`;
+    const pickerRow = el('div', 'stm-station-picker-row');
+    const pickerBtn = el(
+      'button',
+      `stm-station-picker-btn${stationPickerOpen ? ' is-open' : ''}`,
+    );
+    pickerBtn.type = 'button';
+    pickerBtn.setAttribute('aria-expanded', String(stationPickerOpen));
+    pickerBtn.title = '点击展开切换其他 API 站子';
 
-      const pillNameSpan = el('span', 'stm-station-pill-name', item.name);
-      if (active) {
-        liveRefs.activePillNameEl = pillNameSpan;
-      }
-      cardBtn.append(pillNameSpan);
-
-      if (isUserDefault) {
-        cardBtn.append(el('span', 'stm-station-pill-sub is-default-mark', '默认'));
-      }
-
-      cardBtn.addEventListener('click', () => {
-        if (item.id === station.id && !switchingStationId) return;
-        void handleSwitchStation(item.id);
-      });
-      stationBar.append(cardBtn);
+    const pickerLeft = el('span', 'stm-station-picker-left');
+    const triggerNameSpan = el('strong', 'stm-station-picker-name', station.name);
+    liveRefs.activeTriggerNameEl = triggerNameSpan;
+    pickerLeft.append(triggerNameSpan);
+    if (studio.defaultStationId && studio.defaultStationId === station.id) {
+      pickerLeft.append(el('span', 'stm-station-trigger-default', '默认'));
     }
+
+    const pickerRight = el('span', 'stm-station-picker-right');
+    pickerRight.append(
+      el('span', `stm-status-dot is-${effectiveTone}`),
+      el('span', 'stm-station-ready-text', shortReadyLabel),
+      createIconNode(doc, 'chevron', 'stm-station-picker-chevron'),
+    );
+
+    pickerBtn.append(pickerLeft, pickerRight);
+    pickerBtn.addEventListener('click', () => {
+      stationPickerOpen = !stationPickerOpen;
+      if (!stationPickerOpen) {
+        stationFilterText = '';
+      }
+      renderBody();
+    });
 
     const addStationBtn = el('button', 'stm-station-add-btn');
     addStationBtn.type = 'button';
     addStationBtn.title = '新增一张站子卡片';
     addStationBtn.append(createIconNode(doc, 'plus', 'stm-inline-svg'), el('span', '', '新建'));
     addStationBtn.addEventListener('click', handleCreateStation);
-    stationBar.append(addStationBtn);
 
-    secStations.append(stationBar);
+    pickerRow.append(pickerBtn, addStationBtn);
+    secStations.append(pickerRow);
 
-    // 当前站子单行状态摘要 + [测活] + [配置连接 ▾]
+    // 按需展开的站子下拉面板（站子多时支持关键词秒搜）
+    const stationDropWrap = el('div', 'stm-model-dropdown stm-station-dropdown');
+    stationDropWrap.hidden = !stationPickerOpen;
+    liveRefs.stationDropdownWrap = stationDropWrap;
+
+    if (studio.stations.length >= 4) {
+      const stSearchWrap = el('div', 'stm-station-search-row');
+      const stSearchBox = el('div', 'stm-model-search-box');
+      stSearchBox.append(createIconNode(doc, 'search', 'stm-model-search-icon'));
+      const stSearchInput = el('input', 'stm-api-input stm-model-combo-input stm-compact-input');
+      stSearchInput.type = 'text';
+      stSearchInput.placeholder = `搜索 ${studio.stations.length} 个站子名称或地址…`;
+      stSearchInput.value = stationFilterText;
+      stSearchInput.addEventListener('input', () => {
+        stationFilterText = stSearchInput.value;
+        renderStationListOnly();
+      });
+      stSearchBox.append(stSearchInput);
+      stSearchWrap.append(stSearchBox);
+      stationDropWrap.append(stSearchWrap);
+    }
+
+    const stationListWrap = el('div', 'stm-model-list stm-station-list');
+    liveRefs.stationListWrap = stationListWrap;
+    stationDropWrap.append(stationListWrap);
+    renderStationListOnly();
+    secStations.append(stationDropWrap);
+
+    // 当前站子紧凑连接摘要 + 明面管理操作栏（测活 / 配置连接 / 设为默认 / 复制 / 删除）
     const summaryBar = el('div', 'stm-station-summary-bar');
     const summaryText = el(
-      'span',
+      'div',
       'stm-station-summary-text',
       formatStationCompactSummary(station, secStatus),
     );
     summaryText.title = `${meta.label}${station.url ? ` · ${station.url}` : ''} · ${secStatus.statusText}`;
+    summaryBar.append(summaryText);
+
+    if (
+      connectionBanner.text &&
+      !connectionBanner.text.startsWith('已切换至')
+    ) {
+      summaryBar.append(
+        el(
+          'div',
+          `stm-station-banner-note is-${connectionBanner.tone || 'info'}`,
+          connectionBanner.text,
+        ),
+      );
+    }
 
     const summaryActions = el('div', 'stm-station-summary-actions');
+    const leftQuickBtns = el('div', 'stm-station-ops-left');
 
     const probeQuickBtn = el('button', 'stm-mini-action-btn');
     probeQuickBtn.type = 'button';
@@ -1174,8 +1307,45 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
       renderBody();
     });
 
-    summaryActions.append(probeQuickBtn, toggleCfgBtn);
-    summaryBar.append(summaryText, summaryActions);
+    leftQuickBtns.append(probeQuickBtn, toggleCfgBtn);
+
+    const rightQuickOps = el('div', 'stm-station-ops-right');
+    const isAlreadyPrimary =
+      studio.defaultStationId === station.id && studio.stations[0]?.id === station.id;
+
+    if (!isAlreadyPrimary) {
+      const setDefBtn = el('button', 'stm-ghost-link stm-set-default-btn');
+      setDefBtn.type = 'button';
+      setDefBtn.title = '将此站子设为你的默认主站并置顶到第 1 位';
+      setDefBtn.append(createIconNode(doc, 'pin', 'stm-inline-svg'), el('span', '', '设为默认'));
+      setDefBtn.addEventListener('click', () => handleSetPrimaryDefault(station));
+      rightQuickOps.append(setDefBtn);
+    }
+
+    const dupBtn = el('button', 'stm-ghost-link');
+    dupBtn.type = 'button';
+    dupBtn.title = '复制当前站子的地址、密钥绑定与收藏模型';
+    dupBtn.append(createIconNode(doc, 'copy', 'stm-inline-svg'), el('span', '', '复制'));
+    dupBtn.addEventListener('click', handleDuplicateStation);
+    rightQuickOps.append(dupBtn);
+
+    if (studio.stations.length > 1) {
+      const delBtn = el(
+        'button',
+        `stm-danger-link stm-station-del-btn${confirmDeleteId === station.id ? ' is-confirm' : ''}`,
+      );
+      delBtn.type = 'button';
+      delBtn.title = '删除当前站子卡片（点击后需再次确认，防止误删）';
+      delBtn.append(
+        createIconNode(doc, 'trash', 'stm-inline-svg'),
+        el('span', '', confirmDeleteId === station.id ? '确认删除?' : '删除'),
+      );
+      delBtn.addEventListener('click', () => handleDeleteActiveStation(station));
+      rightQuickOps.append(delBtn);
+    }
+
+    summaryActions.append(leftQuickBtns, rightQuickOps);
+    summaryBar.append(summaryActions);
     secStations.append(summaryBar);
 
     // =========================================================================
@@ -1199,6 +1369,9 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
         const trimmed = nameInput.value.trim();
         if (!trimmed) return;
         updateStationById(station.id, { name: trimmed }, { silent: true });
+        if (liveRefs.activeTriggerNameEl) {
+          liveRefs.activeTriggerNameEl.textContent = trimmed;
+        }
         if (liveRefs.activePillNameEl) {
           liveRefs.activePillNameEl.textContent = trimmed;
         }
@@ -1211,6 +1384,9 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
           return;
         }
         updateStationById(station.id, { name: trimmed }, { silent: true });
+        if (liveRefs.activeTriggerNameEl) {
+          liveRefs.activeTriggerNameEl.textContent = trimmed;
+        }
         if (liveRefs.activePillNameEl) {
           liveRefs.activePillNameEl.textContent = trimmed;
         }
@@ -1497,7 +1673,7 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
       secretField.append(secretRow);
       formGrid.append(secretField);
 
-      // 第四行：底部低频工具条（高级选项折叠「提示词消息后处理」 + 设为默认主站 / 复制 / 删除）
+      // 第四行：底部低频高级选项（折叠「提示词消息后处理」；设为默认 / 复制 / 删除已提至上方明面摘要栏，零重复）
       const footBar = el('div', 'stm-config-footbar');
       const hasNonDefaultAdv = Boolean(
         station.postProcessing ||
@@ -1517,43 +1693,7 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
         renderBody();
       });
 
-      const stationActions = el('div', 'stm-config-actions');
-      const isAlreadyPrimary =
-        studio.defaultStationId === station.id && studio.stations[0]?.id === station.id;
-
-      if (isAlreadyPrimary) {
-        stationActions.append(el('span', 'stm-primary-station-tag', '当前默认主站'));
-      } else {
-        const setDefBtn = el('button', 'stm-ghost-link stm-set-default-btn');
-        setDefBtn.type = 'button';
-        setDefBtn.title = '将此站子设为你的默认主站并置顶到第 1 位';
-        setDefBtn.append(createIconNode(doc, 'pin', 'stm-inline-svg'), el('span', '', '设为默认'));
-        setDefBtn.addEventListener('click', () => handleSetPrimaryDefault(station));
-        stationActions.append(setDefBtn);
-      }
-
-      const dupBtn = el('button', 'stm-ghost-link');
-      dupBtn.type = 'button';
-      dupBtn.title = '复制当前站子的地址、密钥绑定与收藏模型';
-      dupBtn.append(createIconNode(doc, 'copy', 'stm-inline-svg'), el('span', '', '复制'));
-      dupBtn.addEventListener('click', handleDuplicateStation);
-      stationActions.append(dupBtn);
-
-      if (studio.stations.length > 1) {
-        const delBtn = el(
-          'button',
-          `stm-danger-link${confirmDeleteId === station.id ? ' is-confirm' : ''}`,
-        );
-        delBtn.type = 'button';
-        delBtn.append(
-          createIconNode(doc, 'trash', 'stm-inline-svg'),
-          el('span', '', confirmDeleteId === station.id ? '确认删除' : '删除'),
-        );
-        delBtn.addEventListener('click', () => handleDeleteActiveStation(station));
-        stationActions.append(delBtn);
-      }
-
-      footBar.append(advToggleBtn, stationActions);
+      footBar.append(advToggleBtn);
       formGrid.append(footBar);
 
       // 极低频高级选项（默认隐藏，绝大多数玩家无需看到「提示词消息后处理」）
@@ -2082,6 +2222,8 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     flushPendingFormInputs({ syncHostIfActive: true });
     isOpen = false;
     confirmDeleteId = '';
+    stationPickerOpen = false;
+    stationFilterText = '';
     modelDropdownOpen = false;
     auxModelDropdownOpen = false;
     if (dockEl) dockEl.hidden = true;

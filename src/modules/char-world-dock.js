@@ -7,20 +7,20 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.4';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.7.3';
+} from '../shell/host-actions.js?v=0.7.4';
 import {
   getBoundPresetForEntity,
   getHostPresetState,
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.7.3';
+} from './preset-backend.js?v=0.7.4';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -54,7 +54,7 @@ import {
   setGlobalWorldBookEnabled,
   toggleWorldInfoEntryEnabled,
   updateWorldInfoBookEntry,
-} from './char-world-backend.js?v=0.7.3';
+} from './char-world-backend.js?v=0.7.4';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -120,8 +120,10 @@ export function createCharWorldDock({
   let renamingCharName = false;
   let charNameDraft = '';
   let selectedGreetingIndex = 0;
+  let greetingSectionOpen = false;
   let editingGreeting = false;
   let confirmDeleteGreeting = false;
+  let exportMenuOpen = false;
   let exportingFormat = '';
   const openFieldSections = new Set(); // 核心设定默认全部折叠，保持角色画册感与防剧透
   const charDraftMap = new Map(); // avatar -> unsaved patch overlay
@@ -734,6 +736,78 @@ export function createCharWorldDock({
     container.append(memberCard);
   }
 
+  function buildInlinePresetBindRow(ctx, profile) {
+    const doc = globalThis.document;
+    const ps = store.get().presetStudio;
+    const hostPresetState = getHostPresetState({ getContext });
+    const boundPreset = getBoundPresetForEntity(ps, ctx);
+    const defaultPreset = ps.defaultPreset || '';
+
+    const row = el('div', 'stm-cw-inline-bind-row');
+    const leftLabel = el('span', 'stm-cw-inline-bind-label');
+    leftLabel.append(
+      createIconNode(doc, 'sliders', 'stm-row-icon'),
+      el('span', '', '绑定预设'),
+    );
+
+    const select = el('select', 'stm-cw-select is-clean');
+    select.setAttribute('aria-label', '绑定专属预设');
+    const followOpt = el(
+      'option',
+      '',
+      defaultPreset ? `跟随默认（${defaultPreset}）` : '跟随默认（自由切换）',
+    );
+    followOpt.value = '';
+    followOpt.selected = !boundPreset;
+    select.append(followOpt);
+
+    const names = [...hostPresetState.presetNames];
+    if (boundPreset && !names.includes(boundPreset)) {
+      const missingOpt = el('option', '', `${boundPreset}（已缺失）`);
+      missingOpt.value = boundPreset;
+      missingOpt.selected = true;
+      select.append(missingOpt);
+    }
+
+    for (const pName of names) {
+      const opt = el(
+        'option',
+        '',
+        pName === hostPresetState.activePreset ? `${pName}（当前）` : pName,
+      );
+      opt.value = pName;
+      opt.selected = boundPreset === pName;
+      select.append(opt);
+    }
+
+    select.addEventListener('change', async () => {
+      const targetPreset = select.value;
+      const nextStudio = setBoundPresetForEntity(store.get().presetStudio, ctx, targetPreset);
+      store.update({ presetStudio: nextStudio }, { silent: true });
+
+      const toActivate = targetPreset || nextStudio.defaultPreset || '';
+      if (toActivate) {
+        const res = await selectHostPresetByName(toActivate, { getContext });
+        onPresetChanged?.();
+        if (res?.ok) {
+          toastMessage(
+            targetPreset
+              ? `已为「${profile.name}」绑定并切换预设：${targetPreset}`
+              : `已解除专属预设，回退至全局默认：${toActivate}`,
+            'success',
+          );
+        }
+      } else {
+        onPresetChanged?.();
+        toastMessage(`已解除「${profile.name}」的专属预设绑定`, 'info');
+      }
+      renderBodyPreservingScroll();
+    });
+
+    row.append(leftLabel, select);
+    return row;
+  }
+
   function renderSingleCharProfileView(container, ctx, profile, activation) {
     const doc = globalThis.document;
 
@@ -741,7 +815,7 @@ export function createCharWorldDock({
       selectedGreetingIndex = Math.max(0, profile.greetings.length - 1);
     }
 
-    // 1. 画册海报式角色主卡（电脑左置 3:4 大幅立绘 + 右侧整合绑定与导出；手机顶部居中氛围大立绘）
+    // 1. 无外框画册舞台（手机端：美图 -> 角色名 -> Tag -> 统计 -> 导出/绑定预设/按需世界书；电脑端：左美图右信息）
     const artUrl = profile.portraitUrl || profile.thumbUrl;
     const hero = el('div', 'stm-cw-hero is-char-showcase');
 
@@ -836,6 +910,19 @@ export function createCharWorldDock({
       });
       titleRow.append(renameBtn);
     }
+    heroTopBlock.append(titleRow);
+
+    // 角色 Tag 标签行（紧随角色名正下方，素雅轻标签）
+    if (Array.isArray(profile.tags) && profile.tags.length > 0) {
+      const tagsRow = el('div', 'stm-cw-tags-row');
+      for (const tagText of profile.tags.slice(0, 8)) {
+        tagsRow.append(el('span', 'stm-cw-tag-pill', tagText));
+      }
+      if (profile.tags.length > 8) {
+        tagsRow.append(el('span', 'stm-cw-tag-pill is-more', `+${profile.tags.length - 8}`));
+      }
+      heroTopBlock.append(tagsRow);
+    }
 
     const totalSettingChars =
       profile.descriptionCharCount +
@@ -847,134 +934,71 @@ export function createCharWorldDock({
       'stm-cw-hero-sub',
       `设定 ${totalSettingChars} 字 · 开场白 ${profile.greetings.length} 条`,
     );
-    heroTopBlock.append(titleRow, statSub);
+    heroTopBlock.append(statSub);
 
-    // 2. 内联整合「专属预设绑定」+「角色主世界书绑定」（与左侧大立绘等高呼应，省去额外独立卡片层）
-    const bindGrid = el('div', 'stm-cw-bind-grid is-in-hero');
-    bindGrid.append(buildEntityPresetBindControl(ctx, profile));
-
-    const worldBindBox = el('div', 'stm-cw-bind-box');
-    const wHead = el('div', 'stm-cw-bind-head');
-    const wTitle = el('span', 'stm-cw-bind-label');
-    wTitle.append(createIconNode(doc, 'globe', 'stm-row-icon'), el('span', '', '角色主世界书'));
-
-    const jumpWorldBtn = el('button', 'stm-cw-inline-link', '查看世界书 ›');
-    jumpWorldBtn.type = 'button';
-    jumpWorldBtn.addEventListener('click', () => {
-      const targetBook = profile.primaryWorld || activation.defaultBookName || '';
-      void selectWorldBookAndLoad(targetBook, { switchToWorldTab: true });
-    });
-    wHead.append(wTitle, jumpWorldBtn);
-
-    const worldSelect = el('select', 'stm-cw-select');
-    const noneOpt = el('option', '', '未绑定主世界书');
-    noneOpt.value = '';
-    noneOpt.selected = !profile.primaryWorld;
-    worldSelect.append(noneOpt);
-
-    if (
-      profile.primaryWorld &&
-      activation.worldNames.length > 0 &&
-      !activation.worldNames.includes(profile.primaryWorld)
-    ) {
-      const missingOpt = el('option', '', `${profile.primaryWorld}（书目文件不存在）`);
-      missingOpt.value = profile.primaryWorld;
-      missingOpt.selected = true;
-      worldSelect.append(missingOpt);
-    }
-
-    for (const wName of activation.worldNames) {
-      const opt = el('option', '', wName);
-      opt.value = wName;
-      opt.selected = profile.primaryWorld === wName;
-      worldSelect.append(opt);
-    }
-
-    worldSelect.addEventListener('change', async () => {
-      const prevWorld = profile.primaryWorld;
-      const nextWorld = worldSelect.value;
-      await flushAllPendingSaves();
-      try {
-        await bindCharacterPrimaryWorldBook(nextWorld, { getContext, chid: profile.chid });
-        if (nextWorld) {
-          selectedWorldBook = nextWorld;
-          setSaveBadge('ok', `已绑主世界书：${nextWorld}`);
-          toastMessage(`已为「${profile.name}」绑定主世界书：${nextWorld}`, 'success');
-        } else {
-          if (!selectedWorldBook || selectedWorldBook === prevWorld) {
-            selectedWorldBook =
-              resolveWorldInfoActivationState({ getContext }).defaultBookName || '';
-          }
-          setSaveBadge('ok', '已解除主世界书绑定');
-          toastMessage(`已解除「${profile.name}」的主世界书绑定`, 'info');
-        }
-        renderHeader();
-        renderBodyPreservingScroll();
-      } catch (err) {
-        toastMessage(err?.message || '绑定角色主世界书失败', 'error');
-      }
-    });
-
-    worldBindBox.append(wHead, worldSelect);
-    bindGrid.append(worldBindBox);
-
+    // 2. 轻量操作区：二合一「导出 ▾」（点开选 PNG 或 JSON）+ 原生面板入口
     const exportRow = el('div', 'stm-cw-export-row');
+    const runCharExport = async fmt => {
+      if (exportingFormat) return;
+      exportMenuOpen = false;
+      exportingFormat = fmt;
+      renderBodyPreservingScroll();
+      try {
+        const res = await exportActiveCharacterCard(fmt, {
+          getContext,
+          flushPendingSave: () => flushAllPendingSaves(),
+        });
+        if (!res.cancelled && res.saveMode !== 'tauri-fallback') {
+          toastMessage(
+            `已导出 ${fmt.toUpperCase()} 角色卡：${res.fileName}`,
+            'success',
+          );
+        }
+      } catch (err) {
+        toastMessage(err?.message || `导出 ${fmt.toUpperCase()} 失败`, 'error');
+      } finally {
+        exportingFormat = '';
+        if (isOpen) renderBodyPreservingScroll();
+      }
+    };
 
-    const btnExportPng = el('button', 'stm-cw-primary-btn');
-    btnExportPng.type = 'button';
-    btnExportPng.disabled = Boolean(exportingFormat);
-    btnExportPng.append(
+    const exportTriggerBtn = el(
+      'button',
+      `stm-cw-secondary-btn stm-cw-export-trigger${exportMenuOpen ? ' is-open' : ''}`,
+    );
+    exportTriggerBtn.type = 'button';
+    exportTriggerBtn.disabled = Boolean(exportingFormat);
+    exportTriggerBtn.setAttribute('aria-expanded', String(exportMenuOpen));
+    exportTriggerBtn.append(
       createIconNode(doc, 'download', 'stm-row-icon'),
-      el('span', '', exportingFormat === 'png' ? '导出中…' : '导出 PNG 角色卡'),
+      el(
+        'span',
+        '',
+        exportingFormat ? '导出中…' : exportMenuOpen ? '收起导出 ▴' : '导出角色卡 ▾',
+      ),
     );
-    btnExportPng.addEventListener('click', async () => {
+    exportTriggerBtn.addEventListener('click', () => {
       if (exportingFormat) return;
-      exportingFormat = 'png';
+      exportMenuOpen = !exportMenuOpen;
       renderBodyPreservingScroll();
-      try {
-        const res = await exportActiveCharacterCard('png', {
-          getContext,
-          flushPendingSave: () => flushAllPendingSaves(),
-        });
-        if (!res.cancelled && res.saveMode !== 'tauri-fallback') {
-          toastMessage(`已导出 PNG 角色卡：${res.fileName}`, 'success');
-        }
-      } catch (err) {
-        toastMessage(err?.message || '导出 PNG 角色卡失败', 'error');
-      } finally {
-        exportingFormat = '';
-        if (isOpen) renderBodyPreservingScroll();
-      }
     });
+    exportRow.append(exportTriggerBtn);
 
-    const btnExportJson = el('button', 'stm-cw-secondary-btn');
-    btnExportJson.type = 'button';
-    btnExportJson.disabled = Boolean(exportingFormat);
-    btnExportJson.append(
-      createIconNode(doc, 'file', 'stm-row-icon'),
-      el('span', '', exportingFormat === 'json' ? '导出中…' : '导出 JSON'),
-    );
-    btnExportJson.addEventListener('click', async () => {
-      if (exportingFormat) return;
-      exportingFormat = 'json';
-      renderBodyPreservingScroll();
-      try {
-        const res = await exportActiveCharacterCard('json', {
-          getContext,
-          flushPendingSave: () => flushAllPendingSaves(),
-        });
-        if (!res.cancelled && res.saveMode !== 'tauri-fallback') {
-          toastMessage(`已导出 JSON 角色卡：${res.fileName}`, 'success');
-        }
-      } catch (err) {
-        toastMessage(err?.message || '导出 JSON 失败', 'error');
-      } finally {
-        exportingFormat = '';
-        if (isOpen) renderBodyPreservingScroll();
-      }
-    });
+    if (exportMenuOpen && !exportingFormat) {
+      const choicesWrap = el('div', 'stm-cw-export-choices');
+      const pngChoiceBtn = el('button', 'stm-cw-primary-btn stm-cw-export-choice-btn', 'PNG 角色卡');
+      pngChoiceBtn.type = 'button';
+      pngChoiceBtn.addEventListener('click', () => void runCharExport('png'));
 
-    const nativeCharLink = el('button', 'stm-ghost-link stm-cw-native-fallback', '原生角色面板 ›');
+      const jsonChoiceBtn = el('button', 'stm-cw-secondary-btn stm-cw-export-choice-btn', 'JSON 数据');
+      jsonChoiceBtn.type = 'button';
+      jsonChoiceBtn.addEventListener('click', () => void runCharExport('json'));
+
+      choicesWrap.append(pngChoiceBtn, jsonChoiceBtn);
+      exportRow.append(choicesWrap);
+    }
+
+    const nativeCharLink = el('button', 'stm-ghost-link stm-cw-native-fallback', '原生面板 ›');
     nativeCharLink.type = 'button';
     nativeCharLink.title = '打开酒馆原生右侧角色详情抽屉（支持更换角色卡头像与底层杂项）';
     nativeCharLink.addEventListener('click', async () => {
@@ -982,185 +1006,301 @@ export function createCharWorldDock({
       close();
       openNativeDrawer('rightNavHolder', { getContext });
     });
+    exportRow.append(nativeCharLink);
 
-    exportRow.append(btnExportPng, btnExportJson, nativeCharLink);
-    metaCol.append(heroTopBlock, bindGrid, exportRow);
+    // 3. 清爽无外框单行绑定栏：绑定预设 + 按需显示世界书（无角色书且无记忆聊天书时自动隐去，不占空间）
+    const inlineBinds = el('div', 'stm-cw-inline-binds');
+    inlineBinds.append(buildInlinePresetBindRow(ctx, profile));
+
+    const hasCharOrChatWorld = Boolean(
+      profile.primaryWorld ||
+        activation.chatBook ||
+        (Array.isArray(activation.extraCharBooks) && activation.extraCharBooks.length > 0),
+    );
+
+    if (hasCharOrChatWorld) {
+      const worldRow = el('div', 'stm-cw-inline-bind-row is-world-row');
+      const wLabel = el('span', 'stm-cw-inline-bind-label');
+      const isMemoryOrChatOnly = !profile.primaryWorld && Boolean(activation.chatBook);
+      wLabel.append(
+        createIconNode(doc, 'globe', 'stm-row-icon'),
+        el('span', '', isMemoryOrChatOnly ? '聊天/记忆书' : '角色世界书'),
+      );
+
+      const targetJumpBook =
+        profile.primaryWorld ||
+        activation.chatBook ||
+        activation.extraCharBooks?.[0] ||
+        activation.defaultBookName ||
+        '';
+
+      const wRight = el('div', 'stm-cw-inline-world-right');
+      if (profile.primaryWorld) {
+        const worldSelect = el('select', 'stm-cw-select is-clean');
+        worldSelect.setAttribute('aria-label', '角色主世界书');
+        const noneOpt = el('option', '', '解除绑定主世界书');
+        noneOpt.value = '';
+        worldSelect.append(noneOpt);
+
+        if (
+          activation.worldNames.length > 0 &&
+          !activation.worldNames.includes(profile.primaryWorld)
+        ) {
+          const missingOpt = el('option', '', `${profile.primaryWorld}（书目缺失）`);
+          missingOpt.value = profile.primaryWorld;
+          missingOpt.selected = true;
+          worldSelect.append(missingOpt);
+        }
+
+        for (const wName of activation.worldNames.length > 0
+          ? activation.worldNames
+          : [profile.primaryWorld]) {
+          const opt = el('option', '', wName);
+          opt.value = wName;
+          opt.selected = profile.primaryWorld === wName;
+          worldSelect.append(opt);
+        }
+
+        worldSelect.addEventListener('change', async () => {
+          const prevWorld = profile.primaryWorld;
+          const nextWorld = worldSelect.value;
+          await flushAllPendingSaves();
+          try {
+            await bindCharacterPrimaryWorldBook(nextWorld, { getContext, chid: profile.chid });
+            if (nextWorld) {
+              selectedWorldBook = nextWorld;
+              setSaveBadge('ok', `已绑主世界书：${nextWorld}`);
+              toastMessage(`已为「${profile.name}」绑定主世界书：${nextWorld}`, 'success');
+            } else {
+              if (!selectedWorldBook || selectedWorldBook === prevWorld) {
+                selectedWorldBook =
+                  resolveWorldInfoActivationState({ getContext }).defaultBookName || '';
+              }
+              setSaveBadge('ok', '已解除主世界书绑定');
+              toastMessage(`已解除「${profile.name}」的主世界书绑定`, 'info');
+            }
+            renderHeader();
+            renderBodyPreservingScroll();
+          } catch (err) {
+            toastMessage(err?.message || '绑定角色主世界书失败', 'error');
+          }
+        });
+        wRight.append(worldSelect);
+      } else {
+        const bookTagBtn = el('button', 'stm-cw-world-jump-chip', targetJumpBook);
+        bookTagBtn.type = 'button';
+        bookTagBtn.addEventListener('click', () => {
+          void selectWorldBookAndLoad(targetJumpBook, { switchToWorldTab: true });
+        });
+        wRight.append(bookTagBtn);
+      }
+
+      const jumpWorldBtn = el('button', 'stm-cw-inline-link', '查看 ›');
+      jumpWorldBtn.type = 'button';
+      jumpWorldBtn.addEventListener('click', () => {
+        void selectWorldBookAndLoad(targetJumpBook, { switchToWorldTab: true });
+      });
+      wRight.append(jumpWorldBtn);
+
+      worldRow.append(wLabel, wRight);
+      inlineBinds.append(worldRow);
+    }
+
+    metaCol.append(heroTopBlock, exportRow, inlineBinds);
     hero.append(portraitStage, metaCol);
     container.append(hero);
 
-    // 3. 开场白预览、编辑与「第 1 楼一键换开场白」
-    const greetCard = el('div', 'stm-cw-card stm-cw-greetings-card');
-    const gHead = el('div', 'stm-cw-card-head');
-    const gTitleWrap = el('div', 'stm-cw-card-title');
-    gTitleWrap.append(
-      createIconNode(doc, 'chat', 'stm-row-icon'),
-      el('strong', '', '开场白'),
-      el('span', 'stm-cw-mini-badge', `共 ${profile.greetings.length} 条`),
+    // 4. 去框化折页清单（从「开场白」开始统一用极细分割线排列，默认全部收起，零方框堆叠压迫感）
+    const sheetList = el('div', 'stm-cw-sheet-list');
+
+    // 4.1 第 1 项：开场白（默认收起）
+    const greetItem = el(
+      'div',
+      `stm-cw-sheet-item stm-cw-greetings-item${greetingSectionOpen ? ' is-open' : ''}`,
     );
+    const greetHeadBtn = el('button', 'stm-cw-greet-fold-head');
+    greetHeadBtn.type = 'button';
+    greetHeadBtn.setAttribute('aria-expanded', String(greetingSectionOpen));
 
-    const gHeadActions = el('div', 'stm-cw-inline-actions');
-    const addGreetBtn = el('button', 'stm-cw-mini-btn is-accent');
-    addGreetBtn.type = 'button';
-    addGreetBtn.append(createIconNode(doc, 'plus', 'stm-inline-svg'), el('span', '', '新增备用'));
-    addGreetBtn.addEventListener('click', async () => {
-      await flushAllPendingSaves();
-      const freshProfile = readMergedCharProfile(getContext?.());
-      const { patch, newGreetingIndex } = buildAddAlternateGreetingPatch(freshProfile, '');
-      try {
-        await saveCharacterProfilePatch(patch, { getContext, chid: freshProfile.chid });
-        selectedGreetingIndex = newGreetingIndex;
-        editingGreeting = true;
-        confirmDeleteGreeting = false;
-        setSaveBadge('ok', `已新增 #${newGreetingIndex + 1} 备用开场白`);
-        renderBodyPreservingScroll();
-      } catch (err) {
-        toastMessage(err?.message || '新增备用开场白失败', 'error');
-      }
-    });
-    gHeadActions.append(addGreetBtn);
-    gHead.append(gTitleWrap, gHeadActions);
-    greetCard.append(gHead);
-
-    // 开场白快捷胶囊栏
-    const pillBar = el('div', 'stm-cw-greeting-pills');
-    for (const g of profile.greetings) {
-      const isSelected = g.index === selectedGreetingIndex;
-      const isLiveFloor1 = profile.canReplaceFirstFloor && profile.activeFirstFloorIndex === g.index;
-      const pill = el(
-        'button',
-        `stm-cw-greeting-pill${isSelected ? ' is-active' : ''}${isLiveFloor1 ? ' is-live-floor' : ''}`,
-      );
-      pill.type = 'button';
-      if (isLiveFloor1) {
-        const liveDot = el('span', 'stm-wi-dot is-keyword');
-        liveDot.title = '当前聊天第1楼正在展示此开场白';
-        pill.append(liveDot);
-      }
-      pill.append(el('span', '', g.index === 0 ? '#1 主开场白' : `#${g.index + 1}`));
-      pill.addEventListener('click', () => {
-        if (selectedGreetingIndex === g.index) return;
-        selectedGreetingIndex = g.index;
-        confirmDeleteGreeting = false;
-        renderBodyPreservingScroll();
-      });
-      pillBar.append(pill);
-    }
-    greetCard.append(pillBar);
-
-    const curGreeting = profile.greetings[selectedGreetingIndex] || profile.greetings[0];
-
-    if (editingGreeting) {
-      const greetTextarea = el('textarea', 'stm-cw-textarea stm-cw-greeting-editor');
-      greetTextarea.rows = 7;
-      greetTextarea.placeholder = `在此编写 ${curGreeting.label} 正文（自动保存至角色卡）…`;
-      greetTextarea.value = curGreeting.content;
-      greetTextarea.addEventListener('input', () => {
-        const latest = readMergedCharProfile(getContext?.());
-        const patch = buildGreetingEditPatch(latest, curGreeting.index, greetTextarea.value);
-        queueCharacterDraftPatch(latest, patch);
-      });
-      greetCard.append(greetTextarea);
-    } else {
-      const previewBox = el(
-        'div',
-        `stm-cw-greeting-preview${curGreeting.content.trim() ? '' : ' is-empty'}`,
-        curGreeting.content.trim()
-          ? curGreeting.content
-          : '（该条开场白暂无内容，点击下方「编辑开场白」即可填写）',
-      );
-      greetCard.append(previewBox);
-    }
-
-    // 开场白底部操作栏：第 1 楼一键换开场白 + 编辑/删除备用
-    const gFoot = el('div', 'stm-cw-greeting-foot');
-    const applyFloorBtn = el(
-      'button',
-      `stm-cw-floor-apply-btn${profile.canReplaceFirstFloor ? ' is-ready' : ' is-disabled'}`,
+    const greetLeft = el('span', 'stm-cw-field-title', '开场白');
+    const greetRight = el('span', 'stm-cw-field-meta');
+    greetRight.append(
+      el('span', 'stm-cw-char-count has-text', `共 ${profile.greetings.length} 条`),
+      createIconNode(doc, 'chevron', 'stm-cw-chevron'),
     );
-    applyFloorBtn.type = 'button';
-    applyFloorBtn.disabled = !profile.canReplaceFirstFloor;
-    if (profile.canReplaceFirstFloor) {
-      applyFloorBtn.append(
-        createIconNode(doc, 'check', 'stm-row-icon'),
-        el('span', '', '在当前聊天启用此开场白'),
-      );
-      applyFloorBtn.addEventListener('click', async () => {
-        await flushAllPendingSaves();
-        const res = await applyGreetingToFirstChatFloor(curGreeting.index, { getContext });
-        if (res.ok) {
-          toastMessage(`已在当前聊天第 1 楼启用「${curGreeting.label}」`, 'success');
-          renderBodyPreservingScroll();
-        } else {
-          toastMessage(res.message || '替换开场白失败', 'warning');
-        }
-      });
-    } else {
-      applyFloorBtn.textContent = profile.firstFloorHint || '已进入后续对话（仅开局第1楼可直接替换）';
-    }
-
-    const gFootRight = el('div', 'stm-cw-inline-actions');
-    const toggleEditBtn = el(
-      'button',
-      `stm-cw-mini-btn${editingGreeting ? ' is-accent' : ''}`,
-    );
-    toggleEditBtn.type = 'button';
-    toggleEditBtn.append(
-      createIconNode(doc, editingGreeting ? 'check' : 'edit', 'stm-inline-svg'),
-      el('span', '', editingGreeting ? '完成编辑' : '编辑开场白'),
-    );
-    toggleEditBtn.addEventListener('click', async () => {
-      if (editingGreeting) {
-        await flushAllPendingSaves();
-        editingGreeting = false;
-      } else {
-        editingGreeting = true;
-      }
+    greetHeadBtn.append(greetLeft, greetRight);
+    greetHeadBtn.addEventListener('click', () => {
+      greetingSectionOpen = !greetingSectionOpen;
+      confirmDeleteGreeting = false;
       renderBodyPreservingScroll();
     });
-    gFootRight.append(toggleEditBtn);
+    greetItem.append(greetHeadBtn);
 
-    if (!curGreeting.isPrimary) {
-      const delGreetBtn = el(
-        'button',
-        `stm-cw-mini-btn${confirmDeleteGreeting ? ' is-danger' : ''}`,
-      );
-      delGreetBtn.type = 'button';
-      delGreetBtn.append(
-        createIconNode(doc, 'trash', 'stm-inline-svg'),
-        el('span', '', confirmDeleteGreeting ? '确认删除此条?' : '删除此备用'),
-      );
-      delGreetBtn.addEventListener('click', async () => {
-        if (!confirmDeleteGreeting) {
-          confirmDeleteGreeting = true;
-          renderBodyPreservingScroll();
-          return;
+    if (greetingSectionOpen) {
+      const greetBody = el('div', 'stm-cw-field-body stm-cw-greetings-body');
+      const pillRowWrap = el('div', 'stm-cw-greeting-bar');
+      const pillBar = el('div', 'stm-cw-greeting-pills');
+      for (const g of profile.greetings) {
+        const isSelected = g.index === selectedGreetingIndex;
+        const isLiveFloor1 = profile.canReplaceFirstFloor && profile.activeFirstFloorIndex === g.index;
+        const pill = el(
+          'button',
+          `stm-cw-greeting-pill${isSelected ? ' is-active' : ''}${isLiveFloor1 ? ' is-live-floor' : ''}`,
+        );
+        pill.type = 'button';
+        if (isLiveFloor1) {
+          const liveDot = el('span', 'stm-wi-dot is-keyword');
+          liveDot.title = '当前聊天第1楼正在展示此开场白';
+          pill.append(liveDot);
         }
-        await flushAllPendingSaves();
-        const latest = readMergedCharProfile(getContext?.());
-        const delInfo = buildDeleteAlternateGreetingPatch(latest, curGreeting.index);
-        if (!delInfo.ok) return;
-        try {
-          await saveCharacterProfilePatch(delInfo.patch, { getContext, chid: latest.chid });
-          selectedGreetingIndex = delInfo.nextGreetingIndex;
+        pill.append(el('span', '', g.index === 0 ? '#1 主开场白' : `#${g.index + 1}`));
+        pill.addEventListener('click', () => {
+          if (selectedGreetingIndex === g.index) return;
+          selectedGreetingIndex = g.index;
           confirmDeleteGreeting = false;
-          setSaveBadge('ok', '已删除备用开场白');
+          renderBodyPreservingScroll();
+        });
+        pillBar.append(pill);
+      }
+
+      const addGreetBtn = el('button', 'stm-cw-mini-btn is-accent');
+      addGreetBtn.type = 'button';
+      addGreetBtn.append(createIconNode(doc, 'plus', 'stm-inline-svg'), el('span', '', '新增备用'));
+      addGreetBtn.addEventListener('click', async () => {
+        await flushAllPendingSaves();
+        const freshProfile = readMergedCharProfile(getContext?.());
+        const { patch, newGreetingIndex } = buildAddAlternateGreetingPatch(freshProfile, '');
+        try {
+          await saveCharacterProfilePatch(patch, { getContext, chid: freshProfile.chid });
+          selectedGreetingIndex = newGreetingIndex;
+          greetingSectionOpen = true;
+          editingGreeting = true;
+          confirmDeleteGreeting = false;
+          setSaveBadge('ok', `已新增 #${newGreetingIndex + 1} 备用开场白`);
           renderBodyPreservingScroll();
         } catch (err) {
-          toastMessage(err?.message || '删除备用开场白失败', 'error');
+          toastMessage(err?.message || '新增备用开场白失败', 'error');
         }
       });
-      gFootRight.append(delGreetBtn);
+
+      pillRowWrap.append(pillBar, addGreetBtn);
+      greetBody.append(pillRowWrap);
+
+      const curGreeting = profile.greetings[selectedGreetingIndex] || profile.greetings[0];
+
+      if (editingGreeting) {
+        const greetTextarea = el('textarea', 'stm-cw-textarea stm-cw-greeting-editor');
+        greetTextarea.rows = 7;
+        greetTextarea.placeholder = `在此编写 ${curGreeting.label} 正文（自动保存至角色卡）…`;
+        greetTextarea.value = curGreeting.content;
+        greetTextarea.addEventListener('input', () => {
+          const latest = readMergedCharProfile(getContext?.());
+          const patch = buildGreetingEditPatch(latest, curGreeting.index, greetTextarea.value);
+          queueCharacterDraftPatch(latest, patch);
+        });
+        greetBody.append(greetTextarea);
+      } else {
+        const previewBox = el(
+          'div',
+          `stm-cw-greeting-preview${curGreeting.content.trim() ? '' : ' is-empty'}`,
+          curGreeting.content.trim()
+            ? curGreeting.content
+            : '（该条开场白暂无内容，点击下方「编辑开场白」即可填写）',
+        );
+        greetBody.append(previewBox);
+      }
+
+      const gFoot = el('div', 'stm-cw-greeting-foot');
+      const applyFloorBtn = el(
+        'button',
+        `stm-cw-floor-apply-btn${profile.canReplaceFirstFloor ? ' is-ready' : ' is-disabled'}`,
+      );
+      applyFloorBtn.type = 'button';
+      applyFloorBtn.disabled = !profile.canReplaceFirstFloor;
+      if (profile.canReplaceFirstFloor) {
+        applyFloorBtn.append(
+          createIconNode(doc, 'check', 'stm-row-icon'),
+          el('span', '', '在当前聊天启用此开场白'),
+        );
+        applyFloorBtn.addEventListener('click', async () => {
+          await flushAllPendingSaves();
+          const res = await applyGreetingToFirstChatFloor(curGreeting.index, { getContext });
+          if (res.ok) {
+            toastMessage(`已在当前聊天第 1 楼启用「${curGreeting.label}」`, 'success');
+            renderBodyPreservingScroll();
+          } else {
+            toastMessage(res.message || '替换开场白失败', 'warning');
+          }
+        });
+      } else {
+        applyFloorBtn.textContent = profile.firstFloorHint || '已进入后续对话（仅开局第1楼可直接替换）';
+      }
+
+      const gFootRight = el('div', 'stm-cw-inline-actions');
+      const toggleEditBtn = el(
+        'button',
+        `stm-cw-mini-btn${editingGreeting ? ' is-accent' : ''}`,
+      );
+      toggleEditBtn.type = 'button';
+      toggleEditBtn.append(
+        createIconNode(doc, editingGreeting ? 'check' : 'edit', 'stm-inline-svg'),
+        el('span', '', editingGreeting ? '完成编辑' : '编辑开场白'),
+      );
+      toggleEditBtn.addEventListener('click', async () => {
+        if (editingGreeting) {
+          await flushAllPendingSaves();
+          editingGreeting = false;
+        } else {
+          editingGreeting = true;
+        }
+        renderBodyPreservingScroll();
+      });
+      gFootRight.append(toggleEditBtn);
+
+      if (!curGreeting.isPrimary) {
+        const delGreetBtn = el(
+          'button',
+          `stm-cw-mini-btn${confirmDeleteGreeting ? ' is-danger' : ''}`,
+        );
+        delGreetBtn.type = 'button';
+        delGreetBtn.append(
+          createIconNode(doc, 'trash', 'stm-inline-svg'),
+          el('span', '', confirmDeleteGreeting ? '确认删除此条?' : '删除此备用'),
+        );
+        delGreetBtn.addEventListener('click', async () => {
+          if (!confirmDeleteGreeting) {
+            confirmDeleteGreeting = true;
+            renderBodyPreservingScroll();
+            return;
+          }
+          await flushAllPendingSaves();
+          const latest = readMergedCharProfile(getContext?.());
+          const delInfo = buildDeleteAlternateGreetingPatch(latest, curGreeting.index);
+          if (!delInfo.ok) return;
+          try {
+            await saveCharacterProfilePatch(delInfo.patch, { getContext, chid: latest.chid });
+            selectedGreetingIndex = delInfo.nextGreetingIndex;
+            confirmDeleteGreeting = false;
+            setSaveBadge('ok', '已删除备用开场白');
+            renderBodyPreservingScroll();
+          } catch (err) {
+            toastMessage(err?.message || '删除备用开场白失败', 'error');
+          }
+        });
+        gFootRight.append(delGreetBtn);
+      }
+
+      gFoot.append(applyFloorBtn, gFootRight);
+      greetBody.append(gFoot);
+      greetItem.append(greetBody);
     }
 
-    gFoot.append(applyFloorBtn, gFootRight);
-    greetCard.append(gFoot);
-    container.append(greetCard);
+    sheetList.append(greetItem);
 
-    // 4. 核心设定折叠查看与编辑（自动双写 V1 + V2）
-    const fieldsStack = el('div', 'stm-cw-fields-stack');
+    // 4.2 第 2~7 项：核心设定折叠查看与编辑（自动双写 V1 + V2）
     for (const def of CORE_FIELD_DEFS) {
       const isExpanded = openFieldSections.has(def.id);
-      const card = el('div', `stm-cw-field-card${isExpanded ? ' is-open' : ''}`);
+      const card = el('div', `stm-cw-sheet-item stm-cw-field-card${isExpanded ? ' is-open' : ''}`);
 
       let charCount = 0;
       if (def.isDualPrompt) {
@@ -1255,10 +1395,10 @@ export function createCharWorldDock({
         card.append(bodyBox);
       }
 
-      fieldsStack.append(card);
+      sheetList.append(card);
     }
 
-    container.append(fieldsStack);
+    container.append(sheetList);
   }
 
   function renderCharTab(container) {
@@ -2192,8 +2332,10 @@ export function createCharWorldDock({
       lastChatSessionKey = curSessionKey;
       renamingCharName = false;
       selectedGreetingIndex = 0;
+      greetingSectionOpen = false;
       editingGreeting = false;
       confirmDeleteGreeting = false;
+      exportMenuOpen = false;
       const act = resolveWorldInfoActivationState({ getContext });
       selectedWorldBook = act.defaultBookName || '';
       expandedEntryUid = null;
@@ -2364,6 +2506,7 @@ export function createCharWorldDock({
     creatingBookOpen = false;
     libraryOpen = false;
     confirmDeleteGreeting = false;
+    exportMenuOpen = false;
     confirmDeleteEntryUid = null;
     if (dockEl) {
       dockEl.hidden = true;
@@ -2383,6 +2526,7 @@ export function createCharWorldDock({
     creatingBookOpen = false;
     libraryOpen = false;
     confirmDeleteGreeting = false;
+    exportMenuOpen = false;
     confirmDeleteEntryUid = null;
 
     await flushAllPendingSaves();

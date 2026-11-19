@@ -4904,13 +4904,14 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     'iOS @supports 抽屉定位规则必须使用 top + margin-top: 0 消除双倍空隙',
   );
 
-  // 确保全仓源码与清单已彻底升级至 v0.7.3，零残留 0.7.0 / 0.7.1 / 0.7.2
+  // 确保全仓源码与清单已彻底升级至 v0.7.4，零残留 0.7.0 / 0.7.1 / 0.7.2 / 0.7.3
   for (const file of collectFiles(suiteRoot)) {
     const content = fs.readFileSync(file, 'utf8');
     const rel = path.relative(suiteRoot, file);
     assert.equal(content.includes('0.7.0'), false, `文件 ${rel} 不得残留旧版 0.7.0 字符串`);
     assert.equal(content.includes('0.7.1'), false, `文件 ${rel} 不得残留旧版 0.7.1 字符串`);
     assert.equal(content.includes('0.7.2'), false, `文件 ${rel} 不得残留旧版 0.7.2 字符串`);
+    assert.equal(content.includes('0.7.3'), false, `文件 ${rel} 不得残留旧版 0.7.3 字符串`);
   }
 });
 
@@ -5399,6 +5400,16 @@ test('api-dock 90/9/1 progressive UI & aux model dropdown: 去重角标、清理
     await new Promise(r => setTimeout(r, 15));
 
     const dockRoot = doc.getElementById('stm-api-dock');
+    // 1. 站子选择栏默认折叠收纳（站子再多也只占一行），右端内嵌绿灯就绪态，点击可展开站子下拉列表
+    assert.equal(dockRoot.querySelector('.stm-api-status-line'), null, '已去除顶部复读站子名与模型名的冗余状态行');
+    const pickerBtn = dockRoot.querySelector('.stm-station-picker-btn');
+    assert.ok(pickerBtn, '配备当前站子下拉选择栏');
+    assert.equal(pickerBtn.querySelector('.stm-station-picker-name').textContent, '反代自己');
+    assert.equal(pickerBtn.querySelector('.stm-station-ready-text').textContent, '已就绪');
+    assert.equal(dockRoot.querySelector('.stm-station-dropdown').hidden, true, '站子下拉列表默认收起');
+    pickerBtn.click();
+    assert.equal(dockRoot.querySelector('.stm-station-dropdown').hidden, false, '点击选择栏展开全部站子下拉列表');
+
     const pills = dockRoot.findAll(n => n.classList.contains('stm-station-pill'));
     assert.equal(pills.length, 3);
     assert.equal(
@@ -5409,28 +5420,18 @@ test('api-dock 90/9/1 progressive UI & aux model dropdown: 去重角标、清理
     assert.equal(
       dockRoot.findAll(n => n.classList.contains('stm-station-pill-sub')).length,
       0,
-      '站子胶囊不再重复渲染「自定义反代」等冗余角标',
+      '站子选项不再重复渲染「自定义反代」等冗余角标',
     );
 
-    // 2. 日常态默认收起连接配置与后处理，零重名输入框干扰
+    // 2. 日常态默认收起连接配置与后处理，但「设为默认 / 复制 / 删除」直接在明面摘要栏可见易找！
     assert.equal(
       dockRoot.querySelector('.stm-station-config-panel'),
       null,
       '已配置站子打开时默认折叠低频连接表单，仅展示单行摘要',
     );
     assert.ok(dockRoot.querySelector('.stm-station-summary-bar'), '展示单行紧凑状态摘要');
-
-    // 点击「配置连接」展开表单，此时「提示词消息后处理」仍折叠在「高级选项」内
-    dockRoot.querySelector('.stm-cfg-toggle-btn').click();
-    assert.ok(dockRoot.querySelector('.stm-station-config-panel'), '点配置按钮后展开连接表单');
-    assert.equal(
-      dockRoot.querySelector('.stm-advanced-subbox'),
-      null,
-      '提示词消息后处理默认收纳在高级选项内不平铺占屏',
-    );
-
-    dockRoot.querySelector('.stm-adv-toggle-btn').click();
-    assert.ok(dockRoot.querySelector('.stm-advanced-subbox'), '点高级选项后按需显示消息后处理');
+    assert.ok(dockRoot.querySelector('.stm-set-default-btn'), '无需展开底层表单即可直接看到「设为默认」');
+    assert.ok(dockRoot.querySelector('.stm-station-del-btn'), '无需展开底层表单即可直接看到「删除」按钮');
 
     // 点击「设为默认」将「反代自己」置顶到第 1 位并打上用户专属「默认」微标
     dockRoot.querySelector('.stm-set-default-btn').click();
@@ -5444,6 +5445,18 @@ test('api-dock 90/9/1 progressive UI & aux model dropdown: 去重角标、清理
       1,
       '全栏仅用户主动指定的默认主站带「默认」标识',
     );
+
+    // 点击「配置连接」展开表单，此时「提示词消息后处理」仍折叠在「高级选项」内
+    dockRoot.querySelector('.stm-cfg-toggle-btn').click();
+    assert.ok(dockRoot.querySelector('.stm-station-config-panel'), '点配置按钮后展开连接表单');
+    assert.equal(
+      dockRoot.querySelector('.stm-advanced-subbox'),
+      null,
+      '提示词消息后处理默认收纳在高级选项内不平铺占屏',
+    );
+
+    dockRoot.querySelector('.stm-adv-toggle-btn').click();
+    assert.ok(dockRoot.querySelector('.stm-advanced-subbox'), '点高级选项后按需显示消息后处理');
 
     // 3. 验证「副 API 通道」：切至独立指定 -> 选定「橘子汽水」 -> 一键后台拉取模型且零切主站 -> 下拉点选模型
     const auxModePills = dockRoot.findAll(n => n.classList.contains('stm-aux-mode-pill'));
@@ -5502,7 +5515,7 @@ test('api-dock 90/9/1 progressive UI & aux model dropdown: 去重角标、清理
   }
 });
 
-test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对比分段与参数折叠、角色画册立绘C位', () => {
+test('suite UI declutter v0.7.4: 设置微透分组与常用置顶、预设馆上下主次分区、角色画册去框Tag与按需世界书', () => {
   const prevDoc = globalThis.document;
   const prevWin = globalThis.window;
   const { doc, win } = createMiniDomHarness();
@@ -5516,6 +5529,14 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
       groupId: null,
       name2: '裴敬之',
       chatId: 'chat_pei_1',
+      tags: [
+        { id: 't1', name: '民国洋场' },
+        { id: 't2', name: '兄妹骨科' },
+        { id: 't3', name: '恶人主控' },
+      ],
+      tagMap: {
+        '裴敬之1.png': ['t1', 't2', 't3'],
+      },
       characters: [
         {
           name: '裴敬之',
@@ -5550,7 +5571,7 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
     store.hydrate();
     const moduleBridge = createModuleBridge({ root: globalThis, getContext: () => ctx, store });
 
-    // 1. 设置中心：2 页签 + 单行「名称 ? 开关」按需展开说明 + 彻底剔除重复阅读滑杆
+    // 1. 设置中心：微透分组列表 + 单行「名称 ? 开关」+ 「扩展与原生」首两行固定美化主题与第三方扩展
     const settingsDialog = createSettingsDialog({
       getContext: () => ctx,
       store,
@@ -5560,6 +5581,11 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
     const dlg = doc.getElementById('stm-settings-dialog');
     const tabBtns = dlg.findAll(n => n.classList.contains('stm-tab-btn'));
     assert.equal(tabBtns.length, 2, '设置中心已精简合并为「功能开关」与「扩展与原生」2 页签');
+    assert.equal(
+      dlg.findAll(n => n.classList.contains('stm-settings-group')).length,
+      2,
+      '功能开关聚合成 2 张清爽分组列表卡片，告别 11 个生硬独立方框',
+    );
     assert.equal(
       dlg.findAll(n => n.classList.contains('stm-range-input')).length,
       0,
@@ -5583,9 +5609,17 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
     assert.equal(dlg.findAll(n => n.classList.contains('stm-switch-help-pop')).length, 1);
     dlg.findAll(n => n.classList.contains('stm-help-btn'))[2].click();
     assert.equal(dlg.findAll(n => n.classList.contains('stm-switch-help-pop')).length, 0);
+
+    // 切到「扩展与原生」页签：验证第 1 行为「酒馆界面与美化主题」，第 2 行为「第三方扩展设置」
+    tabBtns[1].click();
+    const shortcutTitles = dlg
+      .findAll(n => n.classList.contains('stm-shortcut-item'))
+      .map(n => n.querySelector('.stm-switch-title')?.textContent);
+    assert.equal(shortcutTitles[0], '酒馆界面与美化主题');
+    assert.equal(shortcutTitles[1], '第三方扩展设置');
     settingsDialog.close();
 
-    // 2. 预设馆：高对比 .stm-vault-tab + 非激活行收起 5 按钮 + 核心生成参数默认收起
+    // 2. 预设馆：单行紧凑顶栏 + 改名归入预设行操作栏 + 上下主次分区 + 无外框弱化生成参数行
     const sel = doc.createElement('select');
     sel.id = 'settings_preset_openai';
     for (const [val, text] of [
@@ -5603,6 +5637,8 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
     const presetDock = createPresetDock({ getContext: () => ctx, store });
     presetDock.open();
     const pDock = doc.getElementById('stm-preset-dock');
+    assert.ok(pDock.querySelector('.stm-preset-topbar-compact'), '顶栏工具与自动存盘合并为单行省空间');
+    assert.ok(pDock.querySelector('.stm-preset-detail-zone'), '下半区明确划分为「当前预设内容」工作区');
     assert.equal(
       pDock.findAll(n => n.classList.contains('stm-vault-tab')).length,
       2,
@@ -5612,6 +5648,10 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
       pDock.findAll(n => n.classList.contains('stm-preset-item-actions')).length,
       1,
       '列表共 2 套预设，默认仅当前使用中那 1 套展开操作栏，其余行单行清爽',
+    );
+    assert.ok(
+      pDock.querySelector('.stm-preset-rename-btn'),
+      '「改名」已归入当前激活预设的操作栏内',
     );
     const manageToggle = pDock.querySelector('.stm-preset-manage-toggle');
     assert.ok(manageToggle, '非激活预设右侧提供轻量「管理」展开钮');
@@ -5624,7 +5664,7 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
       '核心生成参数默认折叠为单行摘要不占屏',
     );
     const paramBar = pDock.querySelector('.stm-param-summary-bar');
-    assert.ok(paramBar);
+    assert.ok(paramBar && paramBar.classList.contains('is-inline-subtle'), '生成参数融合于下半区标题下方，做无外框淡色单行展示');
     assert.match(
       paramBar.querySelector('.stm-param-summary-text').textContent,
       /上下文 2M · 回复 65535 · 温度 1\.0/,
@@ -5633,18 +5673,58 @@ test('suite UI declutter v0.7.3: 设置中心2页签+?气泡、预设馆高对�
     assert.ok(pDock.querySelector('.stm-preset-param-card'), '点击参数摘要条后展开微调滑杆');
     presetDock.close();
 
-    // 3. 角色档案画册海报模式：3:4 大幅立绘舞台 + 同图氛围背景层 + 内联双绑定 + 去文件名徽章
+    // 3. 角色档案无外框画册舞台：3:4 大幅立绘 + 角色名下 Tag 行 + 二合一导出 + 按需世界书 + 开场白默认收起
     const charWorldDock = createCharWorldDock({ getContext: () => ctx, store });
     charWorldDock.open('char');
     const cwRoot = doc.getElementById('stm-char-world-dock');
     assert.ok(cwRoot.querySelector('.stm-cw-hero.is-char-showcase'), '启用画册海报式角色主卡');
     assert.ok(cwRoot.querySelector('.stm-cw-portrait-ambient'), '配备手机竖屏同图虚化氛围底');
     assert.ok(cwRoot.querySelector('.stm-cw-portrait-btn.is-showcase'), '配备 3:4 大幅立绘按钮');
-    assert.ok(cwRoot.querySelector('.stm-cw-bind-grid.is-in-hero'), '专属预设与主世界书内联整合于主卡右侧');
-    const heroBadges = cwRoot
-      .querySelector('.stm-cw-hero-headblock')
-      .findAll(n => n.classList.contains('stm-cw-mini-badge'));
-    assert.equal(heroBadges.length, 0, '标题旁不再显示冗余的 .png 文件名胶囊');
+
+    // 验证角色名正下方展示角色 Tag 标签
+    const tagPills = cwRoot.findAll(n => n.classList.contains('stm-cw-tag-pill'));
+    assert.deepEqual(
+      tagPills.map(n => n.textContent),
+      ['民国洋场', '兄妹骨科', '恶人主控'],
+      '角色名正下方展示酒馆角色标签',
+    );
+
+    // 验证二合一导出按钮：默认只显示 1 颗「导出角色卡 ▾」，点击后展开 PNG / JSON 二选一
+    assert.equal(cwRoot.querySelector('.stm-cw-export-choices'), null);
+    cwRoot.querySelector('.stm-cw-export-trigger').click();
+    assert.equal(
+      cwRoot.findAll(n => n.classList.contains('stm-cw-export-choice-btn')).length,
+      2,
+      '点击导出后展开 PNG 与 JSON 两个选项',
+    );
+
+    // 验证开场白与设定统一归入无外框折页清单 .stm-cw-sheet-list，且开场白默认收起
+    assert.ok(cwRoot.querySelector('.stm-cw-sheet-list'), '下方统一采用无外框细线折页清单');
+    assert.equal(
+      cwRoot.querySelector('.stm-cw-greetings-body'),
+      null,
+      '开场白模块默认收起，减少首屏方框压迫感',
+    );
+    cwRoot.querySelector('.stm-cw-greet-fold-head').click();
+    assert.ok(cwRoot.querySelector('.stm-cw-greetings-body'), '点击开场白行后按需展开切换与预览');
+
+    // 验证世界书按需智能显隐：有角色主书时显示；当角色既无主书也无聊天/记忆书时自动隐藏该行
+    assert.ok(cwRoot.querySelector('.stm-cw-inline-bind-row.is-world-row'), '有角色世界书时显示世界书行');
+    ctx.characters[0].data.extensions.world = '';
+    ctx.chatMetadata = {};
+    charWorldDock.refresh();
+    assert.equal(
+      cwRoot.querySelector('.stm-cw-inline-bind-row.is-world-row'),
+      null,
+      '既无角色主书也无聊天记忆世界书时自动隐去世界书行，保持最简净度',
+    );
+    // 若记忆插件写入了当前聊天世界书 (chatMetadata.world_info)，则自动显现入口！
+    ctx.chatMetadata = { world_info: '裴敬之_叙事记忆书' };
+    charWorldDock.refresh();
+    assert.ok(
+      cwRoot.querySelector('.stm-cw-inline-bind-row.is-world-row'),
+      '启用叙事记忆聊天世界书时自动展示关联世界书快捷入口',
+    );
 
     charWorldDock.destroy();
     presetDock.destroy();

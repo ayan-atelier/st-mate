@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.7.3';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.3';
+import { saveExportBlob } from '../core/file-saver.js?v=0.7.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.4';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.7.3';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.7.3';
+} from '../shell/host-actions.js?v=0.7.4';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.7.4';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -49,7 +49,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.7.3';
+} from './preset-backend.js?v=0.7.4';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -76,7 +76,7 @@ export function createPresetDock({
   let bindingDrawerPreset = ''; // 当前展开一对多绑卡面板的预设名
   let bindingCharQuery = '';
   let bindingPinnedKeys = []; // 展开绑卡面板时锁定的置顶角色顺序（防连续勾选时行乱跳）
-  let renamingActive = false;
+  let renamingPresetName = '';
   let renameDraft = '';
   let confirmDeletePresetName = '';
   let paramsExpanded = false; // 核心生成参数默认收起为单行摘要
@@ -260,7 +260,7 @@ export function createPresetDock({
         toastMessage(`切换预设「${targetName}」失败`, 'warning');
         return;
       }
-      renamingActive = false;
+      renamingPresetName = '';
       expandedManagePreset = '';
       confirmDeletePresetName = '';
       confirmDeletePromptId = '';
@@ -416,8 +416,9 @@ export function createPresetDock({
 
     for (const item of list) {
       const isBindOpen = bindingDrawerPreset === item.name;
+      const isRenamingThis = renamingPresetName === item.name;
       const showManageBar =
-        item.isActive || expandedManagePreset === item.name || isBindOpen;
+        item.isActive || expandedManagePreset === item.name || isBindOpen || isRenamingThis;
       const card = el('div', `stm-preset-item-wrap${item.isActive ? ' is-active' : ''}`);
       const mainRow = el('div', 'stm-preset-item-row');
 
@@ -525,7 +526,31 @@ export function createPresetDock({
         });
         actions.append(defBtn);
 
-        // 3) 收进仓库 / 移回常用
+        // 3) 改名（就地展开输入框，自动同步全部角色卡绑定）
+        if (!hostState.isGuiPreset) {
+          const renBtn = el(
+            'button',
+            `stm-preset-mini-btn stm-preset-rename-btn${isRenamingThis ? ' is-active' : ''}`,
+          );
+          renBtn.type = 'button';
+          renBtn.title = `重命名「${item.name}」（自动同步更新全部角色卡绑定）`;
+          renBtn.append(
+            createIconNode(doc, 'edit', 'stm-inline-svg'),
+            el('span', '', isRenamingThis ? '取消改名' : '改名'),
+          );
+          renBtn.addEventListener('click', () => {
+            if (renamingPresetName === item.name) {
+              renamingPresetName = '';
+            } else {
+              renamingPresetName = item.name;
+              renameDraft = item.name;
+            }
+            renderPresetListOnly();
+          });
+          actions.append(renBtn);
+        }
+
+        // 4) 收进仓库 / 移回常用
         const archBtn = el('button', 'stm-preset-mini-btn');
         archBtn.type = 'button';
         archBtn.title = item.isArchived
@@ -545,6 +570,9 @@ export function createPresetDock({
           if (expandedManagePreset === item.name) {
             expandedManagePreset = '';
           }
+          if (renamingPresetName === item.name) {
+            renamingPresetName = '';
+          }
           toastMessage(
             item.isArchived
               ? `已将「${item.name}」移回常用预设`
@@ -555,7 +583,7 @@ export function createPresetDock({
         });
         actions.append(archBtn);
 
-        // 4) 导出备份
+        // 5) 导出备份
         const expBtn = el('button', 'stm-preset-mini-btn');
         expBtn.type = 'button';
         expBtn.title = `导出「${item.name}」为纯净 .json 备份文件（自动剥离连接敏感信息）`;
@@ -573,48 +601,114 @@ export function createPresetDock({
         });
         actions.append(expBtn);
 
-        // 5) 防误删二次确认删除
-        const cannotDelete = item.isActive || part.totalCount <= 1;
-        const isConfirmingDel = confirmDeletePresetName === item.name;
-        const delBtn = el(
-          'button',
-          `stm-preset-mini-btn is-danger${isConfirmingDel ? ' is-confirm' : ''}`,
-        );
-        delBtn.type = 'button';
-        delBtn.disabled = cannotDelete;
-        delBtn.title = cannotDelete
-          ? item.isActive
-            ? '当前正在使用的预设受防误删保护，请先切到其他预设再删除'
-            : '唯一仅剩的预设不可删除'
-          : '从酒馆永久删除此预设（建议删除前先点导出备份）';
-        delBtn.append(
-          createIconNode(doc, 'trash', 'stm-inline-svg'),
-          el('span', '', isConfirmingDel ? '确认删除?' : '删除'),
-        );
-        delBtn.addEventListener('click', async () => {
-          if (cannotDelete) return;
-          if (confirmDeletePresetName !== item.name) {
-            confirmDeletePresetName = item.name;
+        // 6) 防误删二次确认删除（仅非当前使用预设显示删除按钮，省去当前预设上的灰色无效按钮）
+        if (!item.isActive && part.totalCount > 1) {
+          const isConfirmingDel = confirmDeletePresetName === item.name;
+          const delBtn = el(
+            'button',
+            `stm-preset-mini-btn is-danger${isConfirmingDel ? ' is-confirm' : ''}`,
+          );
+          delBtn.type = 'button';
+          delBtn.title = '从酒馆永久删除此预设（建议删除前先点导出备份）';
+          delBtn.append(
+            createIconNode(doc, 'trash', 'stm-inline-svg'),
+            el('span', '', isConfirmingDel ? '确认删除?' : '删除'),
+          );
+          delBtn.addEventListener('click', async () => {
+            if (confirmDeletePresetName !== item.name) {
+              confirmDeletePresetName = item.name;
+              renderPresetListOnly();
+              return;
+            }
+            confirmDeletePresetName = '';
+            await flushPendingPersistIfAny();
+            const res = await deleteHostPreset({ presetName: item.name, store, getContext });
+            toastMessage(res.message, res.ok ? 'success' : 'warning');
+            if (bindingDrawerPreset === item.name) {
+              bindingDrawerPreset = '';
+              bindingPinnedKeys = [];
+            }
+            if (expandedManagePreset === item.name) {
+              expandedManagePreset = '';
+            }
+            if (renamingPresetName === item.name) {
+              renamingPresetName = '';
+            }
+            onPresetChanged?.();
+            if (isOpen) renderBodyPreservingVaultScroll();
+          });
+          actions.append(delBtn);
+        }
+
+        card.append(actions);
+      }
+
+      // 若点击了该预设的「改名」，就地在预设行内展开改名框
+      if (isRenamingThis) {
+        const renameBar = el('div', 'stm-preset-rename-bar');
+        const rInput = el('input', 'stm-api-input stm-compact-input');
+        rInput.type = 'text';
+        rInput.value = renameDraft;
+        rInput.placeholder = '输入新的预设名称…';
+
+        const submitRename = async () => {
+          const nextName = rInput.value.trim();
+          if (!nextName || nextName === item.name) {
+            renamingPresetName = '';
             renderPresetListOnly();
             return;
           }
-          confirmDeletePresetName = '';
-          await flushPendingPersistIfAny();
-          const res = await deleteHostPreset({ presetName: item.name, store, getContext });
-          toastMessage(res.message, res.ok ? 'success' : 'warning');
-          if (bindingDrawerPreset === item.name) {
-            bindingDrawerPreset = '';
-            bindingPinnedKeys = [];
+          try {
+            await flushPendingPersistIfAny();
+            const res = await renameHostPreset({
+              oldName: item.name,
+              newName: nextName,
+              store,
+              getContext,
+            });
+            renamingPresetName = '';
+            if (expandedManagePreset === item.name) {
+              expandedManagePreset = res.name || '';
+            }
+            if (res.ok) {
+              toastMessage(`已重命名为「${res.name}」（角色绑定已自动同步）`, 'success');
+              setSaveState('ok', '重命名已生效');
+              onPresetChanged?.();
+            }
+            renderBodyPreservingVaultScroll();
+          } catch (err) {
+            toastMessage(err?.message || '重命名失败', 'warning');
           }
-          if (expandedManagePreset === item.name) {
-            expandedManagePreset = '';
-          }
-          onPresetChanged?.();
-          if (isOpen) renderBodyPreservingVaultScroll();
-        });
-        actions.append(delBtn);
+        };
 
-        card.append(actions);
+        rInput.addEventListener('input', () => {
+          renameDraft = rInput.value;
+        });
+        rInput.addEventListener('keydown', evt => {
+          if (evt.key === 'Enter') {
+            evt.preventDefault();
+            void submitRename();
+          } else if (evt.key === 'Escape') {
+            evt.stopPropagation();
+            renamingPresetName = '';
+            renderPresetListOnly();
+          }
+        });
+
+        const okBtn = el('button', 'stm-connect-btn stm-compact-btn', '确认');
+        okBtn.type = 'button';
+        okBtn.addEventListener('click', () => void submitRename());
+
+        const cancelBtn = el('button', 'stm-probe-btn stm-compact-btn', '取消');
+        cancelBtn.type = 'button';
+        cancelBtn.addEventListener('click', () => {
+          renamingPresetName = '';
+          renderPresetListOnly();
+        });
+
+        renameBar.append(rInput, okBtn, cancelBtn);
+        card.append(renameBar);
+        setTimeout(() => rInput.focus?.(), 10);
       }
 
       // 若点击了该预设的「绑卡」，在下方原地展开角色卡多选面板
@@ -1075,31 +1169,11 @@ export function createPresetDock({
     });
 
     // =========================================================================
-    // Section 1: 顶部紧凑工具栏（不复读顶栏超长预设名）+ 当前角色单行快捷绑卡条
+    // 上半区（综合预设库）：单行工具栏（自动存盘移至右端）+ 角色绑定轻提示 + 预设列表
     // =========================================================================
-    const secTop = el('section', 'stm-dock-section');
+    const secVault = el('section', 'stm-dock-section stm-preset-vault-zone');
 
-    const topHead = el('div', 'stm-api-tophead');
-    const leftStatus = el('div', 'stm-preset-headline');
-    leftStatus.append(el('span', `stm-status-dot ${hostState.isGuiPreset ? 'is-warn' : 'is-ok'}`));
-
-    const saveBadge = el('span', `stm-preset-save-badge is-${saveState.tone}`, saveState.text);
-    liveRefs.saveBadgeEl = saveBadge;
-    leftStatus.append(saveBadge);
-
-    if (!hostState.isGuiPreset && activePreset && !renamingActive) {
-      const renameTrigBtn = el('button', 'stm-ghost-link');
-      renameTrigBtn.type = 'button';
-      renameTrigBtn.title = `重命名「${activePreset}」（自动同步更新全部角色卡绑定）`;
-      renameTrigBtn.append(createIconNode(doc, 'edit', 'stm-inline-svg'), el('span', '', '改名'));
-      renameTrigBtn.addEventListener('click', () => {
-        renamingActive = true;
-        renameDraft = activePreset;
-        renderBody();
-      });
-      leftStatus.append(renameTrigBtn);
-    }
-
+    const topHead = el('div', 'stm-preset-topbar-compact');
     const fileActions = el('div', 'stm-api-head-links');
 
     const undoCount = assistantPanel.getUndoCount();
@@ -1171,79 +1245,26 @@ export function createPresetDock({
     });
 
     fileActions.append(astToggleBtn, importBtn, exportBtn, dupBtn);
-    topHead.append(leftStatus, fileActions);
-    secTop.append(topHead);
 
-    // 内联重命名栏
-    if (renamingActive && activePreset) {
-      const renameBar = el('div', 'stm-preset-rename-bar');
-      const rInput = el('input', 'stm-api-input stm-compact-input');
-      rInput.type = 'text';
-      rInput.value = renameDraft;
-      rInput.placeholder = '输入新的预设名称…';
+    const rightSaveStatus = el('div', 'stm-preset-save-inline');
+    rightSaveStatus.append(
+      el('span', `stm-status-dot ${hostState.isGuiPreset ? 'is-warn' : 'is-ok'}`),
+    );
+    const saveBadge = el('span', `stm-preset-save-badge is-${saveState.tone}`, saveState.text);
+    liveRefs.saveBadgeEl = saveBadge;
+    rightSaveStatus.append(saveBadge);
 
-      const submitRename = async () => {
-        const nextName = rInput.value.trim();
-        if (!nextName || nextName === activePreset) {
-          renamingActive = false;
-          renderBody();
-          return;
-        }
-        try {
-          await flushPendingPersistIfAny();
-          const res = await renameHostPreset({
-            oldName: activePreset,
-            newName: nextName,
-            store,
-            getContext,
-          });
-          renamingActive = false;
-          if (res.ok) {
-            toastMessage(`已重命名为「${res.name}」（角色绑定已自动同步）`, 'success');
-            setSaveState('ok', '重命名已生效');
-            onPresetChanged?.();
-          }
-          renderBody();
-        } catch (err) {
-          toastMessage(err?.message || '重命名失败', 'warning');
-        }
-      };
+    topHead.append(fileActions, rightSaveStatus);
+    secVault.append(topHead);
 
-      rInput.addEventListener('keydown', evt => {
-        if (evt.key === 'Enter') {
-          evt.preventDefault();
-          void submitRename();
-        } else if (evt.key === 'Escape') {
-          evt.stopPropagation();
-          renamingActive = false;
-          renderBody();
-        }
-      });
-
-      const okBtn = el('button', 'stm-connect-btn stm-compact-btn', '确认改名');
-      okBtn.type = 'button';
-      okBtn.addEventListener('click', () => void submitRename());
-
-      const cancelBtn = el('button', 'stm-probe-btn stm-compact-btn', '取消');
-      cancelBtn.type = 'button';
-      cancelBtn.addEventListener('click', () => {
-        renamingActive = false;
-        renderBody();
-      });
-
-      renameBar.append(rInput, okBtn, cancelBtn);
-      secTop.append(renameBar);
-      setTimeout(() => rInput.focus(), 10);
-    }
-
-    // 当前角色/群聊快捷绑定条（当处于活跃对话中时醒目展示）
+    // 当前角色/群聊快捷绑定轻提示条（无厚外框）
     const entityMeta = getCurrentEntityMeta(ctx);
     const entityKey = getEntityBindingKey(ctx);
     if (entityMeta.active && entityKey) {
       const boundPreset = getBoundPresetForEntity(ps, entityKey);
       const boundExists = boundPreset ? hostState.presetNames.includes(boundPreset) : false;
 
-      const charBar = el('div', 'stm-char-bind-banner');
+      const charBar = el('div', 'stm-char-bind-banner is-clean-strip');
       const charInfo = el('div', 'stm-char-bind-left');
 
       if (entityMeta.thumbUrl) {
@@ -1328,24 +1349,18 @@ export function createPresetDock({
       }
 
       charBar.append(charInfo, charBtns);
-      secTop.append(charBar);
+      secVault.append(charBar);
     }
 
-    bodyEl.append(secTop);
-
-    // Section 1.5: 内嵌「伴侣预设助手」工作面板（挂载持久化 DOM 节点，重绘列表不丢对话与滚动态）
+    // 内嵌「伴侣预设助手」工作面板（挂载持久化 DOM 节点，重绘列表不丢对话与滚动态）
     if (assistantOpen) {
       const astEl = assistantPanel.getElement();
       if (astEl) {
         assistantPanel.syncStatus();
-        bodyEl.append(astEl);
+        secVault.append(astEl);
       }
     }
 
-    // =========================================================================
-    // Section 2: 「常用预设 (M)」与「预设仓库 (K)」双视图 + 秒筛搜索
-    // =========================================================================
-    const secVault = el('section', 'stm-dock-section');
     const vaultToolbar = el('div', 'stm-preset-vault-bar');
 
     const tabsGroup = el('div', 'stm-preset-vault-tabs');
@@ -1364,6 +1379,7 @@ export function createPresetDock({
         activeVaultTab = tabKey;
         expandedManagePreset = '';
         confirmDeletePresetName = '';
+        renamingPresetName = '';
         renderBody();
       });
       tabsGroup.append(tabBtn);
@@ -1392,20 +1408,58 @@ export function createPresetDock({
     bodyEl.append(secVault);
 
     // =========================================================================
-    // Section 3: 核心生成参数（默认折叠为单行状态摘要，点击按需展开滑杆）
+    // 下半区（当前预设内部内容）：明确分区承接 + 弱化单行生成参数 + 提示词条目列表
     // =========================================================================
-    const secParams = el('section', 'stm-dock-section');
-    const genParams = readGenerationParams(ctx);
+    const secPrompts = el('section', 'stm-dock-section stm-preset-detail-zone');
 
+    const promptHead = el('div', 'stm-sec-head stm-preset-detail-head');
+    const promptHeadLeft = el('div', 'stm-prompt-head-left');
+    promptHeadLeft.append(el('span', 'stm-sec-title stm-preset-detail-title', '当前预设内容 · 提示词条目'));
+    const countBadge = el('span', 'stm-preset-badge is-subtle', '');
+    liveRefs.promptCountSpan = countBadge;
+    promptHeadLeft.append(countBadge);
+
+    const addPromptBtn = el('button', 'stm-station-add-btn stm-prompt-add-btn');
+    addPromptBtn.type = 'button';
+    addPromptBtn.append(createIconNode(doc, 'plus', 'stm-inline-svg'), el('span', '', '新增条目'));
+    addPromptBtn.addEventListener('click', () => {
+      const oai = getContext?.()?.chatCompletionSettings;
+      if (!oai) return;
+      const created = createCustomPromptEntry(oai, {
+        name: '自定义提示词',
+        role: 'system',
+        enabled: true,
+        content: '',
+      });
+      if (created) {
+        promptFilterMode = 'all';
+        promptSearchQuery = '';
+        expandedPromptId = created.identifier;
+        void syncHostPromptManagerAndSettings({
+          getContext,
+          changedPromptId: created.identifier,
+          immediateRender: true,
+          structuralChange: true,
+        });
+        scheduleAutoPersist();
+        renderBody();
+      }
+    });
+
+    promptHead.append(promptHeadLeft, addPromptBtn);
+    secPrompts.append(promptHead);
+
+    // 融合在「当前预设内容」标题正下方的无外框淡色单行生成参数（不抢戏，点「微调 ▾」按需展开滑杆）
+    const genParams = readGenerationParams(ctx);
     const paramToggleBar = el(
       'button',
-      `stm-param-summary-bar${paramsExpanded ? ' is-open' : ''}`,
+      `stm-param-summary-bar is-inline-subtle${paramsExpanded ? ' is-open' : ''}`,
     );
     paramToggleBar.type = 'button';
     paramToggleBar.setAttribute('aria-expanded', String(paramsExpanded));
 
     const paramLeft = el('span', 'stm-param-summary-left');
-    paramLeft.append(el('span', 'stm-sec-title', '核心生成参数'));
+    paramLeft.append(el('span', 'stm-param-inline-prefix', '生成参数：'));
     const paramSummarySpan = el(
       'span',
       'stm-param-summary-text',
@@ -1416,13 +1470,13 @@ export function createPresetDock({
 
     paramToggleBar.append(
       paramLeft,
-      el('span', 'stm-param-summary-cta', paramsExpanded ? '收起 ▴' : '展开微调 ▾'),
+      el('span', 'stm-param-summary-cta', paramsExpanded ? '收起 ▴' : '微调 ▾'),
     );
     paramToggleBar.addEventListener('click', () => {
       paramsExpanded = !paramsExpanded;
       renderBodyPreservingVaultScroll();
     });
-    secParams.append(paramToggleBar);
+    secPrompts.append(paramToggleBar);
 
     if (paramsExpanded) {
       const paramCard = el('div', 'stm-preset-param-card');
@@ -1602,51 +1656,8 @@ export function createPresetDock({
 
       dualParams.append(tokBlock, tempBlock);
       paramCard.append(dualParams);
-      secParams.append(paramCard);
+      secPrompts.append(paramCard);
     }
-    bodyEl.append(secParams);
-
-    // =========================================================================
-    // Section 4: 清爽提示词条目列表 (prompts + prompt_order) + 底部原生兜底入口
-    // =========================================================================
-    const secPrompts = el('section', 'stm-dock-section');
-
-    const promptHead = el('div', 'stm-sec-head');
-    const promptHeadLeft = el('div', 'stm-prompt-head-left');
-    promptHeadLeft.append(el('span', 'stm-sec-title', '提示词条目'));
-    const countBadge = el('span', 'stm-preset-badge is-subtle', '');
-    liveRefs.promptCountSpan = countBadge;
-    promptHeadLeft.append(countBadge);
-
-    const addPromptBtn = el('button', 'stm-station-add-btn stm-prompt-add-btn');
-    addPromptBtn.type = 'button';
-    addPromptBtn.append(createIconNode(doc, 'plus', 'stm-inline-svg'), el('span', '', '新增条目'));
-    addPromptBtn.addEventListener('click', () => {
-      const oai = getContext?.()?.chatCompletionSettings;
-      if (!oai) return;
-      const created = createCustomPromptEntry(oai, {
-        name: '自定义提示词',
-        role: 'system',
-        enabled: true,
-        content: '',
-      });
-      if (created) {
-        promptFilterMode = 'all';
-        promptSearchQuery = '';
-        expandedPromptId = created.identifier;
-        void syncHostPromptManagerAndSettings({
-          getContext,
-          changedPromptId: created.identifier,
-          immediateRender: true,
-          structuralChange: true,
-        });
-        scheduleAutoPersist();
-        renderBody();
-      }
-    });
-
-    promptHead.append(promptHeadLeft, addPromptBtn);
-    secPrompts.append(promptHead);
 
     // 搜索框 + 全部/仅看已开/隐藏系统槽过滤胶囊
     const promptFilterBar = el('div', 'stm-preset-vault-bar');
@@ -1774,9 +1785,9 @@ export function createPresetDock({
       };
       const onDocKeyDown = evt => {
         if (isOpen && evt.key === 'Escape') {
-          if (renamingActive) {
-            renamingActive = false;
-            renderBody();
+          if (renamingPresetName) {
+            renamingPresetName = '';
+            renderPresetListOnly();
             return;
           }
           evt.stopPropagation();
@@ -1814,7 +1825,7 @@ export function createPresetDock({
     lastOpenedAt = Date.now();
     confirmDeletePresetName = '';
     confirmDeletePromptId = '';
-    renamingActive = false;
+    renamingPresetName = '';
 
     void primeHostOpenAiModule().then(mod => {
       if (mod && isOpen) {
@@ -1844,7 +1855,7 @@ export function createPresetDock({
     }
     void flushPendingPersistIfAny();
     isOpen = false;
-    renamingActive = false;
+    renamingPresetName = '';
     confirmDeletePresetName = '';
     confirmDeletePromptId = '';
     if (dockEl) dockEl.hidden = true;

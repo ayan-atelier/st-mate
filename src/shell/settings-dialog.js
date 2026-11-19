@@ -6,16 +6,23 @@
  * 3. 全套 1.5px 纯色细线 SVG 图标（零彩色 Emoji），100% 跟随当前酒馆 SmartTheme 主题配色。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.3';
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.4';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.4';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '功能开关' },
   { id: 'native', icon: 'layers', label: '扩展与原生' },
 ]);
 
-const NATIVE_SHORTCUTS = Object.freeze([
+const PRIMARY_NATIVE_SHORTCUTS = Object.freeze([
+  {
+    key: 'theme',
+    drawerId: 'user-settings-button',
+    icon: 'palette',
+    title: '酒馆界面与美化主题',
+    desc: '调整酒馆 UI 主题配色、自定义美化 CSS、气泡样式与流式速度。',
+  },
   {
     key: 'ext',
     drawerId: 'extensions-settings-button',
@@ -23,13 +30,9 @@ const NATIVE_SHORTCUTS = Object.freeze([
     title: '第三方扩展设置',
     desc: '集中打开酒馆助手、TTS语音、文生图、正则等外部插件的设置面板。',
   },
-  {
-    key: 'wi',
-    drawerId: 'WI-SP-button',
-    icon: 'globe',
-    title: '酒馆原生世界书面板',
-    desc: '配置高级递归预算、批量组打分或词条向量参数时直达原生面板。',
-  },
+]);
+
+const MORE_NATIVE_SHORTCUTS = Object.freeze([
   {
     key: 'char',
     drawerId: 'rightNavHolder',
@@ -38,11 +41,11 @@ const NATIVE_SHORTCUTS = Object.freeze([
     desc: '更换角色卡原图文件、编辑群聊自动发言策略或原生标签管理。',
   },
   {
-    key: 'theme',
-    drawerId: 'user-settings-button',
-    icon: 'palette',
-    title: '酒馆界面与美化主题',
-    desc: '调整酒馆 UI 主题配色、气泡样式、流式速度与用户偏好。',
+    key: 'wi',
+    drawerId: 'WI-SP-button',
+    icon: 'globe',
+    title: '酒馆原生世界书面板',
+    desc: '配置高级递归预算、批量组打分或词条向量参数时直达原生面板。',
   },
   {
     key: 'bg',
@@ -125,7 +128,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'v0.7.3');
+    const badge = el('span', 'stm-dialog-badge', 'v0.7.4');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -246,7 +249,8 @@ export function createSettingsDialog({
   }
 
   function renderModulesTab(container, current) {
-    container.append(
+    const coreGroup = el('div', 'stm-settings-group');
+    coreGroup.append(
       makeSwitchRow({
         helpKey: 'shell_master',
         icon: 'home',
@@ -275,7 +279,7 @@ export function createSettingsDialog({
         badgeText = `v${mod.version}`;
       }
 
-      container.append(
+      coreGroup.append(
         makeSwitchRow({
           helpKey: `mod_${mod.key}`,
           icon: mod.icon,
@@ -298,10 +302,12 @@ export function createSettingsDialog({
         }),
       );
     }
+    container.append(coreGroup);
 
     container.append(el('div', 'stm-settings-subhead', '阅读手势与菜单精简'));
 
-    container.append(
+    const tidyGroup = el('div', 'stm-settings-group');
+    tidyGroup.append(
       makeSwitchRow({
         helpKey: 'tap_pure_reading',
         icon: 'spark',
@@ -323,12 +329,52 @@ export function createSettingsDialog({
         },
       }),
     );
+    container.append(tidyGroup);
+  }
+
+  function buildShortcutGroup(doc, items) {
+    const group = el('div', 'stm-settings-group stm-shortcut-list');
+    for (const item of items) {
+      const helpKey = `native_${item.key}`;
+      const isHelpOpen = expandedHelpKey === helpKey;
+      const wrap = el('div', `stm-shortcut-item is-compact${isHelpOpen ? ' is-help-open' : ''}`);
+
+      const mainBar = el('div', 'stm-shortcut-bar');
+      const head = el('div', 'stm-switch-head');
+      head.append(
+        createIconNode(doc, item.icon, 'stm-row-icon'),
+        el('strong', 'stm-switch-title', item.title),
+        makeHelpTriggerButton(helpKey, item.title),
+      );
+      mainBar.append(head, el('span', 'stm-shortcut-arrow', '›'));
+      mainBar.addEventListener('click', evt => {
+        const target = evt.target;
+        if (target && typeof target.closest === 'function' && target.closest('.stm-help-btn')) {
+          return;
+        }
+        close();
+        openNativeDrawer(item.drawerId, { getContext });
+      });
+
+      wrap.append(mainBar);
+      if (isHelpOpen) {
+        wrap.append(el('div', 'stm-switch-help-pop', item.desc));
+      }
+      group.append(wrap);
+    }
+    return group;
   }
 
   function renderNativeTab(container, current) {
     const doc = globalThis.document;
 
-    container.append(el('div', 'stm-settings-subhead is-first', '伴侣工作台直达（书架首页亦可随时呼出）'));
+    // 首屏第 1、2 行直接固定最高频的「酒馆界面与美化主题」与「第三方扩展设置」
+    container.append(buildShortcutGroup(doc, PRIMARY_NATIVE_SHORTCUTS));
+
+    container.append(el('div', 'stm-settings-subhead', '更多酒馆原生面板'));
+    container.append(buildShortcutGroup(doc, MORE_NATIVE_SHORTCUTS));
+
+    container.append(el('div', 'stm-settings-subhead', '伴侣工作台直达'));
 
     const btnRow = el('div', 'stm-action-grid');
     const openApiBtn = el('button', 'stm-action-card');
@@ -383,52 +429,6 @@ export function createSettingsDialog({
 
     btnRow.append(openApiBtn, openPresetBtn, openAssistantBtn, openCharWorldBtn);
     container.append(btnRow);
-
-    container.append(el('div', 'stm-settings-subhead', '第三方插件与酒馆原生面板'));
-
-    const list = el('div', 'stm-shortcut-list');
-    for (const item of NATIVE_SHORTCUTS) {
-      const helpKey = `native_${item.key}`;
-      const isHelpOpen = expandedHelpKey === helpKey;
-      const wrap = el('div', `stm-shortcut-item is-compact${isHelpOpen ? ' is-help-open' : ''}`);
-
-      const mainBar = el('div', 'stm-shortcut-bar');
-      const head = el('div', 'stm-switch-head');
-      head.append(
-        createIconNode(doc, item.icon, 'stm-row-icon'),
-        el('strong', 'stm-switch-title', item.title),
-        makeHelpTriggerButton(helpKey, item.title),
-      );
-      mainBar.append(head, el('span', 'stm-shortcut-arrow', '›'));
-      mainBar.addEventListener('click', evt => {
-        const target = evt.target;
-        if (target && typeof target.closest === 'function' && target.closest('.stm-help-btn')) {
-          return;
-        }
-        close();
-        openNativeDrawer(item.drawerId, { getContext });
-      });
-
-      wrap.append(mainBar);
-      if (isHelpOpen) {
-        wrap.append(el('div', 'stm-switch-help-pop', item.desc));
-      }
-      list.append(wrap);
-    }
-    container.append(list);
-
-    const toggleBtn = el(
-      'button',
-      'stm-primary-btn',
-      current.shellEnabled ? '暂时切回原生酒馆界面' : '立即恢复 ST伴侣沉浸界面',
-    );
-    toggleBtn.type = 'button';
-    toggleBtn.addEventListener('click', () => {
-      const next = !store.get().shellEnabled;
-      onToggleShell?.(next);
-      close();
-    });
-    container.append(toggleBtn);
   }
 
   function render() {
@@ -587,7 +587,7 @@ export function createSettingsDialog({
       const s = store.get();
       const statusNode = wrap.querySelector('.stm-ext-status');
       if (statusNode) {
-        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.3 · ${
+        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.4 · ${
           s.modules.turbo ? '流畅渲染加速运行中' : '流畅渲染加速已关闭'
         }`;
       }

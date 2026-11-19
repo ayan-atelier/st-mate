@@ -6,8 +6,8 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
-import { svgMarkup } from '../core/icons.js?v=0.7.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
+import { svgMarkup } from '../core/icons.js?v=0.7.4';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -15,7 +15,7 @@ import {
   getOpenNativeDrawerIds,
   openNativeDrawer,
   returnToHomeScreen,
-} from './host-actions.js?v=0.7.3';
+} from './host-actions.js?v=0.7.4';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -165,6 +165,43 @@ export function createTopbar({
     openNativeDrawer('sys-settings-button', { toggleIfOpen: false, getContext });
   }
 
+  function syncPersonaTakeoverChrome(doc, shouldSuppress) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') return;
+    const ws = doc.getElementById?.('yt-persona-native-workspace');
+    const wsActive = Boolean(
+      shouldSuppress &&
+        ws &&
+        !ws.hidden &&
+        !ws.hasAttribute?.('hidden') &&
+        doc.getElementById?.('persona-management-block')?.classList?.contains?.('ytps-takeover'),
+    );
+    const targets = doc.querySelectorAll(
+      '#PersonaManagement .user_stats_button, #PersonaManagement #personas_backup, #PersonaManagement #personas_restore, #PersonaManagement > .flex-container:first-child > .flex-container:first-child',
+    );
+    for (const node of targets) {
+      if (!node?.style) continue;
+      if (wsActive) {
+        if (node.dataset && !Object.prototype.hasOwnProperty.call(node.dataset, 'stmOrigDisplay')) {
+          node.dataset.stmOrigDisplay = node.style.getPropertyValue?.('display') || node.style.display || '';
+        }
+        if (typeof node.style.setProperty === 'function') {
+          node.style.setProperty('display', 'none', 'important');
+        } else {
+          node.style.display = 'none';
+        }
+      } else if (node.dataset && Object.prototype.hasOwnProperty.call(node.dataset, 'stmOrigDisplay')) {
+        const orig = node.dataset.stmOrigDisplay || '';
+        if (typeof node.style.removeProperty === 'function') {
+          node.style.removeProperty('display');
+          if (orig) node.style.display = orig;
+        } else {
+          node.style.display = orig;
+        }
+        delete node.dataset.stmOrigDisplay;
+      }
+    }
+  }
+
   function handlePersonaClick() {
     onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
@@ -178,10 +215,17 @@ export function createTopbar({
     if (opened && settings.modules.persona) {
       const handle = moduleBridge.getRegisteredHandle('yantai-persona-studio');
       if (handle && typeof handle.open === 'function') {
-        void Promise.resolve(handle.open({ ensureNative: false, tab: 'current' })).catch(err => {
-          console.warn('[ST伴侣] 唤醒人设馆工作区异常:', err);
-        });
+        void Promise.resolve(handle.open({ ensureNative: false, tab: 'current' }))
+          .then(() => {
+            syncPersonaTakeoverChrome(globalThis.document, true);
+          })
+          .catch(err => {
+            console.warn('[ST伴侣] 唤醒人设馆工作区异常:', err);
+          });
       }
+      setTimeout(() => {
+        syncPersonaTakeoverChrome(globalThis.document, Boolean(store.get().shellEnabled && store.get().modules.persona));
+      }, 20);
     }
   }
 
@@ -408,9 +452,12 @@ export function createTopbar({
     doc.body.classList.toggle('stm-shell-active', Boolean(current.shellEnabled));
 
     if (!current.shellEnabled) {
+      syncPersonaTakeoverChrome(doc, false);
       if (rootEl) rootEl.hidden = true;
       return;
     }
+
+    syncPersonaTakeoverChrome(doc, Boolean(current.modules.persona));
 
     mountDom();
     rootEl.hidden = false;
@@ -468,6 +515,7 @@ export function createTopbar({
       boundHolder.removeEventListener('change', onHolderChange);
       boundHolder = null;
     }
+    syncPersonaTakeoverChrome(globalThis.document, false);
     globalThis.document?.body.classList.remove('stm-shell-active');
     rootEl?.remove();
     rootEl = null;

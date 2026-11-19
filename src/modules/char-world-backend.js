@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.3';
-import { saveExportBlob } from '../core/file-saver.js?v=0.7.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
+import { saveExportBlob } from '../core/file-saver.js?v=0.7.4';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.7.3';
+} from './preset-backend.js?v=0.7.4';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -460,6 +460,32 @@ export function readActiveCharacterProfile(ctx, { doc = globalThis.document } = 
     : [];
   const primaryWorld = String(data.extensions?.world ?? '').trim();
 
+  // 读取角色卡标签：优先走酒馆标签管理库 (ctx.tags / ctx.tagMap)，离线或最小测试环境回退卡片内嵌 tags
+  const rawTagList = Array.isArray(ctx?.tags)
+    ? ctx.tags
+    : Array.isArray(ctx?.powerUserSettings?.tags)
+      ? ctx.powerUserSettings.tags
+      : [];
+  const rawTagMap =
+    ctx?.tagMap && typeof ctx.tagMap === 'object'
+      ? ctx.tagMap
+      : ctx?.powerUserSettings?.tag_map && typeof ctx.powerUserSettings.tag_map === 'object'
+        ? ctx.powerUserSettings.tag_map
+        : null;
+  let resolvedTags = [];
+  if (rawTagMap && avatar && Array.isArray(rawTagMap[avatar])) {
+    const tagById = new Map(rawTagList.map(t => [String(t?.id ?? ''), String(t?.name ?? '').trim()]));
+    resolvedTags = rawTagMap[avatar].map(id => tagById.get(String(id)) || '').filter(Boolean);
+  } else if (!rawTagMap) {
+    const fallbackTags = Array.isArray(char.tags)
+      ? char.tags
+      : Array.isArray(data.tags)
+        ? data.tags
+        : [];
+    resolvedTags = fallbackTags.map(t => String(t ?? '').trim()).filter(Boolean);
+  }
+  const tags = [...new Set(resolvedTags)];
+
   const greetings = [
     {
       index: 0,
@@ -560,6 +586,7 @@ export function readActiveCharacterProfile(ctx, { doc = globalThis.document } = 
     alternateGreetings,
     greetings,
     primaryWorld,
+    tags,
     canExport: Boolean(avatar),
     canReplaceFirstFloor: firstFloorCheck.allowed,
     firstFloorReason: firstFloorCheck.reason,
