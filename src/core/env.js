@@ -109,7 +109,7 @@ export function syncTauriSafeAreaGuard(root = globalThis) {
   probe.setAttribute('aria-hidden', 'true');
   if (probe.style) {
     probe.style.cssText =
-      'position:fixed;top:0;left:0;width:0;height:0;padding-top:env(safe-area-inset-top, 0px);visibility:hidden;pointer-events:none;z-index:-1;';
+      'position:fixed;top:0;left:0;width:0;height:0;padding-top:max(env(safe-area-inset-top, 0px), var(--tt-inset-top, 0px));visibility:hidden;pointer-events:none;z-index:-1;';
   }
   doc.body.appendChild(probe);
 

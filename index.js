@@ -10,33 +10,33 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.7.4';
+} from './src/core/env.js?v=0.7.5';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.7.4';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.4';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.4';
-import { closeAllNativeDrawers, toastMessage } from './src/shell/host-actions.js?v=0.7.4';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.4';
-import { createTopbar } from './src/shell/topbar.js?v=0.7.4';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.4';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.4';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.4';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.4';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.4';
-import { createApiDock } from './src/modules/api-dock.js?v=0.7.4';
+} from './src/core/file-saver.js?v=0.7.5';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.5';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.5';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.5';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.5';
+import { createTopbar } from './src/shell/topbar.js?v=0.7.5';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.5';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.5';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.5';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.5';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.5';
+import { createApiDock } from './src/modules/api-dock.js?v=0.7.5';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.7.4';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.4';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.4';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.4';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.4';
+} from './src/modules/preset-backend.js?v=0.7.5';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.5';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.5';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.5';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.5';
 
-const STM_VERSION = '0.7.4';
+const STM_VERSION = '0.7.5';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -389,6 +389,7 @@ function createStMateRuntime() {
         Boolean(presetDock?.isOpen()) ||
         Boolean(apiDock?.isOpen()) ||
         Boolean(readerDock?.isOpen()) ||
+        getOpenNativeDrawerIds().length > 0 ||
         Date.now() - lastDockDismissedAt < 320,
     });
 
@@ -493,6 +494,10 @@ function createStMateRuntime() {
       onOpenStateChange: () => {
         ttOverlayBackGuard?.sync();
       },
+      onAfterOpenNativeDrawer: () => {
+        topbar?.refresh();
+        ttOverlayBackGuard?.sync();
+      },
       onOpenReaderDock: () => {
         apiDock?.close();
         presetDock?.close();
@@ -557,6 +562,12 @@ function createStMateRuntime() {
         presetDock?.close();
         charWorldDock?.close();
       },
+      onNativeDrawerStateChange: opened => {
+        if (!opened) {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+      },
       onExitPureReading: () => tapImmersive.exit(),
     });
 
@@ -575,7 +586,8 @@ function createStMateRuntime() {
           Boolean(readerDock?.isOpen?.()) ||
           Boolean(apiDock?.isOpen?.()) ||
           Boolean(presetDock?.isOpen?.()) ||
-          Boolean(charWorldDock?.isOpen?.()),
+          Boolean(charWorldDock?.isOpen?.()) ||
+          Boolean(store.get().shellEnabled && getOpenNativeDrawerIds().length > 0),
         closeTopmostOverlay: () => {
           if (isExportFallbackDialogOpen(globalThis.document)) {
             closeExportFallbackDialog(globalThis.document, globalThis);
@@ -603,6 +615,11 @@ function createStMateRuntime() {
           }
           if (charWorldDock?.isOpen?.()) {
             charWorldDock.close();
+            return true;
+          }
+          if (store.get().shellEnabled && getOpenNativeDrawerIds().length > 0) {
+            closeAllNativeDrawers();
+            topbar?.refresh();
             return true;
           }
           return false;

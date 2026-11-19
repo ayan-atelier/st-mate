@@ -6,9 +6,9 @@
  * 3. 「副 API 通道」独立卡片清晰呈现，选定站子后支持直接下拉搜索该站子模型列表（收藏置顶）或后台静默拉取模型，告别纯手填。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.4';
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.7.4';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.7.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.5';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.7.5';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.7.5';
 import {
   API_SOURCES,
   MORE_SOURCE_IDS,
@@ -33,7 +33,7 @@ import {
   testStationChatReply,
   toggleFavoriteModel,
   writeStationSecret,
-} from './api-backend.js?v=0.7.4';
+} from './api-backend.js?v=0.7.5';
 
 export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOpen }) {
   let dockEl = null;

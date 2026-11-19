@@ -30,7 +30,13 @@ import {
 } from '../src/core/schema.js';
 import { INTERACTIVE_ANCESTOR_SELECTOR, shouldTogglePureReading } from '../src/core/tap-guard.js';
 import { CONTROL_REGISTRY_KEY, MODULE_DESCRIPTORS, createModuleBridge } from '../src/core/registry.js';
-import { formatShortPresetName, getSwipeGesturesEnabled, setSwipeGesturesEnabled } from '../src/shell/host-actions.js';
+import {
+  closeAllNativeDrawers,
+  formatShortPresetName,
+  getOpenNativeDrawerIds,
+  getSwipeGesturesEnabled,
+  setSwipeGesturesEnabled,
+} from '../src/shell/host-actions.js';
 import { buildPageOverrideCss, createAtmosphere } from '../src/shell/atmosphere.js';
 import { partitionChatMessages } from '../src/shell/perf-engine.js';
 import {
@@ -4134,14 +4140,21 @@ function createMiniDomHarness() {
       const self = this;
       this.style = {
         _props: new Map(),
-        setProperty(k, v) {
+        _prio: new Map(),
+        setProperty(k, v, prio) {
           this._props.set(k, String(v));
+          if (prio) this._prio.set(k, String(prio));
+          else this._prio.delete(k);
         },
         removeProperty(k) {
           this._props.delete(k);
+          this._prio.delete(k);
         },
         getPropertyValue(k) {
           return this._props.get(k) || '';
+        },
+        getPropertyPriority(k) {
+          return this._prio.get(k) || '';
         },
       };
       this.classList = {
@@ -4904,7 +4917,7 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     'iOS @supports 抽屉定位规则必须使用 top + margin-top: 0 消除双倍空隙',
   );
 
-  // 确保全仓源码与清单已彻底升级至 v0.7.4，零残留 0.7.0 / 0.7.1 / 0.7.2 / 0.7.3
+  // 确保全仓源码与清单已彻底升级至 v0.7.5，零残留 0.7.0 / 0.7.1 / 0.7.2 / 0.7.3 / 0.7.4
   for (const file of collectFiles(suiteRoot)) {
     const content = fs.readFileSync(file, 'utf8');
     const rel = path.relative(suiteRoot, file);
@@ -4912,7 +4925,13 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     assert.equal(content.includes('0.7.1'), false, `文件 ${rel} 不得残留旧版 0.7.1 字符串`);
     assert.equal(content.includes('0.7.2'), false, `文件 ${rel} 不得残留旧版 0.7.2 字符串`);
     assert.equal(content.includes('0.7.3'), false, `文件 ${rel} 不得残留旧版 0.7.3 字符串`);
+    assert.equal(content.includes('0.7.4'), false, `文件 ${rel} 不得残留旧版 0.7.4 字符串`);
   }
+  assert.ok(
+    cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar') &&
+      cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) {'),
+    '首页净空态在原生抽屉展开 (.stm-native-drawer-open) 时必须自动显露顶栏并让出 44px 抽屉顶边防卡死',
+  );
 });
 
 test('home bookshelf anti-shrink guard: 首页书架净空态下 atmosphere 100% 清空 #stm-page-overrides 且选择器严格排除首页与书架容器', () => {
@@ -5728,6 +5747,206 @@ test('suite UI declutter v0.7.4: 设置微透分组与常用置顶、预设馆�
 
     charWorldDock.destroy();
     presetDock.destroy();
+    settingsDialog.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.7.5 native drawer exit & persona seam guard: TT/书架首页打开用户设置不卡死（3路可退）+ 人设馆 movingUI/美化主题零顶缝', () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = { innerWidth: 390, innerHeight: 844 };
+
+  try {
+    const topHolder = doc.getElementById('top-settings-holder');
+
+    function mountNativeDrawer(buttonId, contentId) {
+      const drawer = doc.createElement('div');
+      drawer.id = buttonId;
+      drawer.className = 'drawer';
+      const toggle = doc.createElement('div');
+      toggle.className = 'drawer-toggle';
+      const content = doc.createElement('div');
+      content.id = contentId;
+      content.className = 'drawer-content closedDrawer';
+      toggle.addEventListener('click', () => {
+        const opening = !content.classList.contains('openDrawer');
+        content.classList.toggle('openDrawer', opening);
+        content.classList.toggle('closedDrawer', !opening);
+      });
+      drawer.append(toggle, content);
+      topHolder.append(drawer);
+      return { drawer, toggle, content };
+    }
+
+    const userDrawer = mountNativeDrawer('user-settings-button', 'user-settings-block');
+    const personaDrawer = mountNativeDrawer('persona-management-button', 'PersonaManagement');
+    const leftPinnedDrawer = mountNativeDrawer('ai-config-button', 'left-nav-panel');
+
+    const personaBlock = doc.createElement('div');
+    personaBlock.id = 'persona-management-block';
+    personaBlock.className = 'ytps-takeover';
+    const personaWs = doc.createElement('section');
+    personaWs.id = 'yt-persona-native-workspace';
+    personaBlock.append(personaWs);
+    personaDrawer.content.append(personaBlock);
+    personaDrawer.content.classList.add('ytps-drawer-takeover');
+
+    // 模拟残留 movingUI 历史内联坐标 top: 64px（曾导致与 44px 顶栏产生 20px 空隙）
+    doc.body.classList.add('movingUI', 'stm-home-cloak');
+    personaDrawer.content.style.setProperty('top', '64px');
+
+    const extSettings = {};
+    const ctx = {
+      extensionSettings: extSettings,
+      mainApi: 'openai',
+      characterId: undefined,
+      groupId: null,
+      characters: [],
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const moduleBridge = createModuleBridge({ root: {}, getContext: () => ctx, store });
+
+    const tauriListeners = new Map();
+    const pushedStates = [];
+    const tauriRoot = {
+      __TAURI__: {},
+      document: doc,
+      navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Tauri' },
+      history: {
+        pushState(state) {
+          pushedStates.push(state);
+        },
+      },
+      addEventListener(type, fn) {
+        tauriListeners.set(type, fn);
+      },
+      removeEventListener(type) {
+        tauriListeners.delete(type);
+      },
+    };
+
+    let topbar = null;
+    let settingsDialog = null;
+    const ttGuard = createTauriOverlayBackGuard({
+      root: tauriRoot,
+      hasAnyOverlayOpen: () =>
+        Boolean(settingsDialog?.isOpen?.()) ||
+        Boolean(store.get().shellEnabled && getOpenNativeDrawerIds().length > 0),
+      closeTopmostOverlay: () => {
+        if (settingsDialog?.isOpen?.()) {
+          settingsDialog.close();
+          return true;
+        }
+        if (store.get().shellEnabled && getOpenNativeDrawerIds().length > 0) {
+          closeAllNativeDrawers();
+          topbar?.refresh();
+          return true;
+        }
+        return false;
+      },
+    });
+
+    settingsDialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      onToggleShell: () => {},
+      onOpenStateChange: () => ttGuard.sync(),
+      onAfterOpenNativeDrawer: () => {
+        topbar?.refresh();
+        ttGuard.sync();
+      },
+    });
+
+    topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      onOpenSettings: () => settingsDialog.open(),
+      onNativeDrawerStateChange: () => ttGuard.sync(),
+    });
+
+    topbar.refresh();
+    const topbarEl = doc.getElementById('stm-topbar');
+    const backBtn = topbarEl.querySelector('.stm-topbar-back');
+    const settingsBtn = topbarEl.querySelector('.stm-topbar-settings-btn');
+
+    // 1. 书架首页无聊天且无原生抽屉展开时：左侧返回键隐藏，且不带 stm-native-drawer-open
+    assert.equal(backBtn.hidden, true, '纯书架首页无抽屉时隐藏返回键');
+    assert.equal(doc.body.classList.contains('stm-native-drawer-open'), false);
+
+    // 2. 人设馆接管态即使处于 movingUI 窄屏，也强制以 inline !important 贴齐 --stm-drawer-top 消除 20px 顶缝
+    assert.equal(personaDrawer.content.style.getPropertyValue('top'), 'var(--stm-drawer-top)');
+    assert.equal(personaDrawer.content.style.getPropertyPriority('top'), 'important');
+    assert.equal(personaDrawer.content.style.getPropertyValue('margin-top'), '0px');
+    assert.equal(personaDrawer.content.style.getPropertyValue('transform'), 'none');
+
+    // 3. 在书架首页通过「设置 -> 扩展与原生 -> 酒馆界面与美化主题」打开用户设置 (#user-settings-block)
+    settingsDialog.open('native');
+    const themeShortcut = doc.getElementById('stm-settings-dialog').querySelector('.stm-shortcut-bar');
+    themeShortcut.click();
+
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), true, '用户设置抽屉已展开');
+    assert.equal(
+      doc.body.classList.contains('stm-native-drawer-open'),
+      true,
+      '必须标记 stm-native-drawer-open 以解除首页顶栏隐藏并下移抽屉顶边',
+    );
+    assert.equal(backBtn.hidden, false, '即使在无角色聊天的书架首页，原生抽屉展开时左侧返回键也必须显现供一键退出');
+    assert.equal(backBtn.title, '收起当前面板');
+    assert.equal(settingsBtn.classList.contains('is-active'), true, '顶栏设置图标同步高亮指示当前处于原生设置面板');
+    assert.equal(userDrawer.content.style.getPropertyValue('top'), 'var(--stm-drawer-top)');
+    assert.equal(userDrawer.content.style.getPropertyPriority('top'), 'important');
+    assert.equal(ttGuard.isHistoryPushed(), true, 'TT 侧滑返回守卫必须同步保护已打开的原生抽屉');
+
+    // 退出路径 A：再次点击顶栏高亮的「设置」图标（"再点一下就行了"），直接收起用户设置且不弹回设置弹窗
+    settingsBtn.click();
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), false, '再点一下顶栏设置键即收起用户设置');
+    assert.equal(settingsDialog.isOpen(), false, '收起原生设置抽屉时不重新弹出设置中心弹窗');
+    assert.equal(doc.body.classList.contains('stm-native-drawer-open'), false);
+    assert.equal(backBtn.hidden, true, '收起抽屉回到书架首页后自动隐藏返回键');
+
+    // 退出路径 B：重新打开用户设置后，点击左上角「‹ 返回」键收起面板（对话中亦优先收起面板而非误退首页）
+    ctx.characterId = 0;
+    ctx.characters = [{ avatar: 'zhao.png', name: '赵与同' }];
+    userDrawer.toggle.click();
+    topbar.refresh();
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), true);
+    assert.equal(backBtn.title, '收起当前面板');
+    backBtn.click();
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), false, '点击左上角返回优先收起当前原生抽屉');
+    assert.equal(backBtn.title, '返回书架首页', '抽屉收起后恢复为返回书架首页');
+
+    // 退出路径 C：在 TauriTavern 中触发安卓/系统侧滑返回 (popstate)，直接收起原生抽屉
+    userDrawer.toggle.click();
+    topbar.refresh();
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), true);
+    tauriListeners.get('popstate')?.({ type: 'popstate' });
+    assert.equal(userDrawer.content.classList.contains('openDrawer'), false, 'TT 侧滑返回手势直接关闭原生抽屉');
+    assert.equal(doc.body.classList.contains('stm-native-drawer-open'), false);
+
+    // 4. 桌面端常驻锁定 (.pinnedOpen) 侧栏不被误判为临时遮罩抽屉
+    leftPinnedDrawer.content.classList.add('openDrawer', 'pinnedOpen');
+    leftPinnedDrawer.content.classList.remove('closedDrawer');
+    assert.deepEqual(getOpenNativeDrawerIds(), [], 'pinnedOpen 常驻侧栏不阻塞普通返回键');
+
+    // 5. 关闭伴侣外壳时 100% 无损还原人设馆原有内联 top: 64px
+    store.update({ shellEnabled: false });
+    topbar.refresh();
+    assert.equal(personaDrawer.content.style.getPropertyValue('top'), '64px', '关闭伴侣时完整还原宿主原始内联样式');
+    assert.equal(personaDrawer.content.style.getPropertyPriority('top'), '');
+
+    ttGuard.destroy();
+    topbar.destroy();
     settingsDialog.destroy();
   } finally {
     globalThis.document = prevDoc;

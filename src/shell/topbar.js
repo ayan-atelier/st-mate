@@ -6,8 +6,8 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
-import { svgMarkup } from '../core/icons.js?v=0.7.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.5';
+import { svgMarkup } from '../core/icons.js?v=0.7.5';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -15,7 +15,7 @@ import {
   getOpenNativeDrawerIds,
   openNativeDrawer,
   returnToHomeScreen,
-} from './host-actions.js?v=0.7.4';
+} from './host-actions.js?v=0.7.5';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -23,6 +23,13 @@ const PRESET_WATCH_IDS = new Set([
   'settings_preset_textgenerationwebui',
   'settings_preset_novel',
   'settings_preset',
+]);
+
+const SETTINGS_LAUNCHED_DRAWER_IDS = new Set([
+  'user-settings-button',
+  'extensions-settings-button',
+  'backgrounds-button',
+  'advanced-formatting-button',
 ]);
 
 export function createTopbar({
@@ -39,6 +46,7 @@ export function createTopbar({
   onToggleReaderDock,
   isReaderDockOpen,
   onNativeDrawerOpened,
+  onNativeDrawerStateChange,
   onExitPureReading,
 }) {
   let rootEl = null;
@@ -60,6 +68,7 @@ export function createTopbar({
   let desktopBoundsActive = false;
   let boundHolder = null;
   let lastCharDrawerId = 'rightNavHolder';
+  let lastHadOpenNativeDrawer = false;
 
   function applySheldBoundsNow() {
     boundsRaf = 0;
@@ -165,6 +174,77 @@ export function createTopbar({
     openNativeDrawer('sys-settings-button', { toggleIfOpen: false, getContext });
   }
 
+  function setInlineImportant(node, prop, keyVal, keyPrio, value) {
+    if (!node?.style) return;
+    if (node.dataset && !Object.prototype.hasOwnProperty.call(node.dataset, keyVal)) {
+      node.dataset[keyVal] = node.style.getPropertyValue?.(prop) || '';
+      node.dataset[keyPrio] = node.style.getPropertyPriority?.(prop) || '';
+    }
+    if (typeof node.style.setProperty === 'function') {
+      node.style.setProperty(prop, value, 'important');
+    } else {
+      node.style[prop] = value;
+    }
+  }
+
+  function restoreInlineProp(node, prop, keyVal, keyPrio) {
+    if (!node?.style || !node.dataset || !Object.prototype.hasOwnProperty.call(node.dataset, keyVal)) {
+      return;
+    }
+    const origVal = node.dataset[keyVal] || '';
+    const origPrio = node.dataset[keyPrio] || '';
+    if (typeof node.style.removeProperty === 'function') {
+      node.style.removeProperty(prop);
+      if (origVal) {
+        node.style.setProperty(prop, origVal, origPrio || undefined);
+      }
+    } else {
+      node.style[prop] = origVal;
+    }
+    delete node.dataset[keyVal];
+    delete node.dataset[keyPrio];
+  }
+
+  function syncOpenDrawerGeometry(doc, shouldLock) {
+    const holder = doc?.getElementById?.('top-settings-holder');
+    if (!holder || typeof holder.querySelectorAll !== 'function') return;
+
+    const win = globalThis.window || globalThis;
+    const isNarrow = typeof win.innerWidth === 'number' && win.innerWidth <= 1000;
+    const movingDesktop = Boolean(!isNarrow && doc.body?.classList?.contains?.('movingUI'));
+    const personaBlockTakeover = Boolean(
+      doc.getElementById?.('persona-management-block')?.classList?.contains?.('ytps-takeover'),
+    );
+
+    for (const content of holder.querySelectorAll(':scope > .drawer > .drawer-content')) {
+      if (!content?.style) continue;
+      const isPersonaTakeover =
+        content.id === 'PersonaManagement' &&
+        (Boolean(content.classList?.contains?.('ytps-drawer-takeover')) || personaBlockTakeover);
+      const isOpen = Boolean(
+        content.classList?.contains?.('openDrawer') && !content.classList?.contains?.('pinnedOpen'),
+      );
+      const manuallyDraggedOnDesktop = Boolean(
+        movingDesktop && content.getAttribute?.('data-dragged') === 'true',
+      );
+      const lockThis = Boolean(
+        shouldLock &&
+          (isOpen || isPersonaTakeover) &&
+          (!movingDesktop || (isPersonaTakeover && !manuallyDraggedOnDesktop)),
+      );
+
+      if (lockThis) {
+        setInlineImportant(content, 'top', 'stmOrigTop', 'stmOrigTopPrio', 'var(--stm-drawer-top)');
+        setInlineImportant(content, 'margin-top', 'stmOrigMarginTop', 'stmOrigMarginTopPrio', '0px');
+        setInlineImportant(content, 'transform', 'stmOrigTransform', 'stmOrigTransformPrio', 'none');
+      } else {
+        restoreInlineProp(content, 'top', 'stmOrigTop', 'stmOrigTopPrio');
+        restoreInlineProp(content, 'margin-top', 'stmOrigMarginTop', 'stmOrigMarginTopPrio');
+        restoreInlineProp(content, 'transform', 'stmOrigTransform', 'stmOrigTransformPrio');
+      }
+    }
+  }
+
   function syncPersonaTakeoverChrome(doc, shouldSuppress) {
     if (!doc || typeof doc.querySelectorAll !== 'function') return;
     const ws = doc.getElementById?.('yt-persona-native-workspace');
@@ -200,6 +280,7 @@ export function createTopbar({
         delete node.dataset.stmOrigDisplay;
       }
     }
+    syncOpenDrawerGeometry(doc, Boolean(shouldSuppress));
   }
 
   function handlePersonaClick() {
@@ -298,6 +379,11 @@ export function createTopbar({
     left.className = 'stm-topbar-left';
 
     backBtn = makeIconBtn('back', '返回书架首页', () => {
+      if (getOpenNativeDrawerIds().length > 0) {
+        closeAllNativeDrawers();
+        syncActiveDrawerHighlights();
+        return;
+      }
       onNativeDrawerOpened?.();
       void returnToHomeScreen(getContext);
     });
@@ -355,9 +441,16 @@ export function createTopbar({
     });
     btnReader.classList.add('stm-topbar-reader-btn');
     btnSettings = makeIconBtn('settings', 'ST伴侣设置中心', () => {
+      const openIds = getOpenNativeDrawerIds();
+      if (openIds.some(id => SETTINGS_LAUNCHED_DRAWER_IDS.has(id))) {
+        closeAllNativeDrawers();
+        syncActiveDrawerHighlights();
+        return;
+      }
       closeAllNativeDrawers();
       onOpenSettings?.();
     });
+    btnSettings.classList.add('stm-topbar-settings-btn');
 
     right.append(btnApi, btnPersona, btnReader, btnSettings);
     inner.append(left, right);
@@ -417,13 +510,30 @@ export function createTopbar({
 
   function syncActiveDrawerHighlights() {
     if (!rootEl) return;
+    const doc = globalThis.document;
+    const shellActive = Boolean(store.get().shellEnabled);
     const openIds = getOpenNativeDrawerIds();
+    const hasOpenDrawer = Boolean(shellActive && openIds.length > 0);
+
+    doc?.body?.classList?.toggle?.('stm-native-drawer-open', hasOpenDrawer);
+    syncOpenDrawerGeometry(doc, shellActive);
+
     if (openIds.includes('rightNavHolder')) lastCharDrawerId = 'rightNavHolder';
     if (openIds.includes('WI-SP-button')) lastCharDrawerId = 'WI-SP-button';
 
-    if (openIds.length > 0) {
+    if (hasOpenDrawer) {
       onExitPureReading?.();
       onNativeDrawerOpened?.();
+    }
+
+    if (backBtn) {
+      const hasChat = hasActiveChatSelection(getContext?.());
+      backBtn.hidden = !(hasChat || hasOpenDrawer);
+      const backLabel = hasOpenDrawer ? '收起当前面板' : '返回书架首页';
+      if (backBtn.title !== backLabel) {
+        backBtn.title = backLabel;
+        backBtn.setAttribute('aria-label', backLabel);
+      }
     }
 
     identityBtn?.classList.toggle(
@@ -442,6 +552,17 @@ export function createTopbar({
     );
     btnPersona?.classList.toggle('is-active', openIds.includes('persona-management-button'));
     btnReader?.classList.toggle('is-active', Boolean(isReaderDockOpen?.()));
+    btnSettings?.classList.toggle(
+      'is-active',
+      openIds.some(id => SETTINGS_LAUNCHED_DRAWER_IDS.has(id)),
+    );
+
+    if (hasOpenDrawer !== lastHadOpenNativeDrawer) {
+      lastHadOpenNativeDrawer = hasOpenDrawer;
+      onNativeDrawerStateChange?.(hasOpenDrawer, openIds);
+    } else if (hasOpenDrawer) {
+      onNativeDrawerStateChange?.(true, openIds);
+    }
   }
 
   function refresh() {
@@ -452,7 +573,13 @@ export function createTopbar({
     doc.body.classList.toggle('stm-shell-active', Boolean(current.shellEnabled));
 
     if (!current.shellEnabled) {
+      doc.body.classList.remove('stm-native-drawer-open');
       syncPersonaTakeoverChrome(doc, false);
+      syncOpenDrawerGeometry(doc, false);
+      if (lastHadOpenNativeDrawer) {
+        lastHadOpenNativeDrawer = false;
+        onNativeDrawerStateChange?.(false, []);
+      }
       if (rootEl) rootEl.hidden = true;
       return;
     }
@@ -502,6 +629,7 @@ export function createTopbar({
       boundsRaf = 0;
     }
     desktopBoundsActive = false;
+    lastHadOpenNativeDrawer = false;
     drawerObserver?.disconnect();
     presetSelectObserver?.disconnect();
     sheldResizeObserver?.disconnect();
@@ -516,7 +644,8 @@ export function createTopbar({
       boundHolder = null;
     }
     syncPersonaTakeoverChrome(globalThis.document, false);
-    globalThis.document?.body.classList.remove('stm-shell-active');
+    syncOpenDrawerGeometry(globalThis.document, false);
+    globalThis.document?.body.classList.remove('stm-shell-active', 'stm-native-drawer-open');
     rootEl?.remove();
     rootEl = null;
   }

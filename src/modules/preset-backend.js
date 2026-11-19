@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.4';
-import { normalizePresetStudio } from '../core/schema.js?v=0.7.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.5';
+import { normalizePresetStudio } from '../core/schema.js?v=0.7.5';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 

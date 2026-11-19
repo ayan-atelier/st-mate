@@ -1,5 +1,5 @@
 /**
- * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.4（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.5（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -9,8 +9,8 @@
 
 :root {
   --stm-bar-core-height: 44px;
-  --stm-safe-top: env(safe-area-inset-top, 0px);
-  --stm-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --stm-safe-top: max(env(safe-area-inset-top, 0px), var(--tt-inset-top, 0px));
+  --stm-safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tt-inset-bottom, 0px));
   --stm-active-top-offset: calc(var(--stm-bar-core-height) + var(--stm-safe-top));
   --stm-drawer-top: calc(var(--stm-bar-core-height) + var(--stm-safe-top));
   --stm-ink: var(--SmartThemeBodyColor, #ece8df);
@@ -37,9 +37,12 @@ body.stm-shell-active {
 }
 
 body.stm-shell-active.stm-home-cloak {
+  --bottomFormBlockSize: var(--stm-safe-bottom) !important;
+}
+
+body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) {
   --stm-active-top-offset: var(--stm-safe-top);
   --stm-drawer-top: var(--stm-safe-top);
-  --bottomFormBlockSize: var(--stm-safe-bottom) !important;
 }
 
 html body.stm-shell-active #top-bar,
@@ -64,7 +67,8 @@ html body.stm-shell-active.no-blur #top-bar {
   pointer-events: none !important;
 }
 
-html body.stm-shell-active #top-settings-holder {
+html body.stm-shell-active #top-settings-holder,
+html body.stm-shell-active #top-settings-holder#top-settings-holder {
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
@@ -84,6 +88,10 @@ html body.stm-shell-active #top-settings-holder {
   box-shadow: none !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  filter: none !important;
+  transform: none !important;
+  contain: none !important;
+  z-index: 3005 !important;
   overflow: visible !important;
 }
 
@@ -112,24 +120,39 @@ html body.stm-shell-active #top-settings-holder > .drawer {
 
 /* 展开的原生抽屉（含全部 9 个顶栏抽屉双 ID 高权重锁死）统一紧贴新顶栏下方 */
 html body.stm-shell-active:not(.movingUI) #top-settings-holder > .drawer > .drawer-content,
-html body.stm-shell-active:not(.movingUI) #top-settings-holder :is(#left-nav-panel, #rm_api_block, #AdvancedFormatting, #WorldInfo, #user-settings-block, #Backgrounds, #rm_extensions_block, #PersonaManagement, #right-nav-panel).drawer-content {
+html body.stm-shell-active:not(.movingUI) #top-settings-holder#top-settings-holder :is(#left-nav-panel, #rm_api_block, #AdvancedFormatting, #WorldInfo, #user-settings-block, #Backgrounds, #rm_extensions_block, #PersonaManagement, #right-nav-panel).drawer-content {
   top: var(--stm-drawer-top) !important;
   margin-top: 0 !important;
+  transform: none !important;
   max-height: calc(100vh - var(--stm-drawer-top)) !important;
   max-height: calc(100dvh - var(--stm-drawer-top)) !important;
 }
 
-/* 人设馆接管态加固：压制第三方美化主题强行顶出的「使用统计/导出/导入」原生顶栏，并消除三层套娃内边距 */
+/* 人设馆接管态加固：压制第三方美化主题强行顶出的「使用统计/导出/导入」原生顶栏，并消除三层套娃内边距与顶边空隙 */
 html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover > .flex-container:first-child > .flex-container:first-child,
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement:has(#persona-management-block.ytps-takeover) > .flex-container:first-child > .flex-container:first-child,
 html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover :is(.user_stats_button, #personas_backup, #personas_restore) {
   display: none !important;
 }
 
-html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover {
+html body.stm-shell-active #top-settings-holder#top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover:not([data-dragged="true"]),
+html body.stm-shell-active #top-settings-holder#top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement:has(#persona-management-block.ytps-takeover):not([data-dragged="true"]) {
+  top: var(--stm-drawer-top) !important;
+  margin-top: 0 !important;
   padding: 0 !important;
+  transform: none !important;
 }
 
-html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover #yt-persona-native-workspace {
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover > .flex-container:first-child,
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement:has(#persona-management-block.ytps-takeover) > .flex-container:first-child,
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement #persona-management-block.ytps-takeover {
+  margin: 0 !important;
+  padding: 0 !important;
+  gap: 0 !important;
+}
+
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover #yt-persona-native-workspace,
+html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement:has(#persona-management-block.ytps-takeover) #yt-persona-native-workspace {
   border: 0 !important;
   border-radius: 0 !important;
   margin: 0 !important;
@@ -137,9 +160,22 @@ html body.stm-shell-active #top-settings-holder #persona-management-button #Pers
 }
 
 @media screen and (max-width: 1000px) {
-  html body.stm-shell-active:not(.movingUI) #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover {
+  html body.stm-shell-active #top-settings-holder > .drawer > .drawer-content,
+  html body.stm-shell-active #top-settings-holder#top-settings-holder :is(#left-nav-panel, #rm_api_block, #AdvancedFormatting, #WorldInfo, #user-settings-block, #Backgrounds, #rm_extensions_block, #PersonaManagement, #right-nav-panel).drawer-content {
+    position: fixed !important;
+    top: var(--stm-drawer-top) !important;
+    margin-top: 0 !important;
+    transform: none !important;
+    max-height: calc(100vh - var(--stm-drawer-top)) !important;
+    max-height: calc(100dvh - var(--stm-drawer-top)) !important;
+  }
+
+  html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement.ytps-drawer-takeover,
+  html body.stm-shell-active #top-settings-holder #persona-management-button #PersonaManagement#PersonaManagement:has(#persona-management-block.ytps-takeover) {
     left: 0 !important;
     right: 0 !important;
+    top: var(--stm-drawer-top) !important;
+    margin-top: 0 !important;
     width: 100vw !important;
     max-width: 100vw !important;
     padding: 0 !important;
@@ -147,6 +183,7 @@ html body.stm-shell-active #top-settings-holder #persona-management-button #Pers
     border-right: 0 !important;
     border-top: 0 !important;
     border-radius: 0 0 12px 12px !important;
+    transform: none !important;
   }
 }
 
@@ -212,10 +249,11 @@ html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
     max-height: calc(100dvh - var(--stm-safe-top)) !important;
   }
 
-  body.stm-shell-active #top-settings-holder .drawer-content,
-  body.stm-shell-active #character_popup {
+  html body.stm-shell-active #top-settings-holder#top-settings-holder .drawer-content,
+  html body.stm-shell-active #character_popup {
     top: var(--stm-drawer-top) !important;
     margin-top: 0 !important;
+    transform: none !important;
     height: calc(100dvh - var(--stm-drawer-top) - 12px) !important;
     max-height: calc(100dvh - var(--stm-drawer-top) - 12px) !important;
   }
@@ -225,8 +263,8 @@ html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
    2. 首页书架净空态 (stm-home-cloak) & 轻触全屏纯享阅读态 (stm-pure-reading)
    ========================================================================== */
 
-body.stm-shell-active.stm-home-cloak .stm-topbar,
-body.stm-shell-active.stm-pure-reading .stm-topbar {
+body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar,
+body.stm-shell-active.stm-pure-reading:not(.stm-native-drawer-open) .stm-topbar {
   opacity: 0 !important;
   transform: translate3d(0, -105%, 0) !important;
   pointer-events: none !important;
@@ -379,7 +417,7 @@ html body.stm-shell-active.stm-home-cloak #chat#chat {
   right: var(--stm-sheld-right, 0px);
   width: var(--stm-sheld-width, var(--sheldWidth, 100%));
   max-width: 100vw;
-  z-index: 3010;
+  z-index: 3020;
   height: calc(var(--stm-bar-core-height) + var(--stm-safe-top));
   padding-top: var(--stm-safe-top);
   padding-inline: max(8px, env(safe-area-inset-left, 0px)) max(8px, env(safe-area-inset-right, 0px));
