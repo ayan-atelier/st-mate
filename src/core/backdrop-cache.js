@@ -6,10 +6,13 @@
  * - 对玩家已上传至 /backgrounds/ 的自定义裁切底图直接原画直通，绝不二次压缩。
  */
 
+import { detectPlatform } from './env.js?v=0.7.7';
+
 const IDB_NAME = 'st_mate_backdrop_cache_v2';
 const IDB_STORE = 'covers';
 const IDB_MAX_ENTRIES = 45;
 const BASE_MAX_EDGE = 2160;
+const IOS_SAFE_MAX_EDGE = 1440;
 
 export function clarityToBlurPx(clarity) {
   const c = Number.isFinite(Number(clarity)) ? Math.min(100, Math.max(0, Number(clarity))) : 100;
@@ -82,6 +85,10 @@ function isAnimatedOrPrecompressedBg(url) {
 export function createBackdropCache({ root = globalThis } = {}) {
   let dbPromise = null;
   const inflightBase = new Map();
+  const platform = detectPlatform(root);
+  // iOS WKWebView (尤其 TauriTavern 多插件环境) 存在严格 Jetsam 显存红线：缩减内存位图池与最大边长防闪退
+  const lruLimit = platform.isIOS ? 3 : platform.isMobile ? 6 : 14;
+  const targetMaxEdge = platform.isIOS ? IOS_SAFE_MAX_EDGE : BASE_MAX_EDGE;
 
   const revokeUrl = url => {
     if (typeof url === 'string' && url.startsWith('blob:')) {
@@ -93,7 +100,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
     }
   };
 
-  const baseLru = createLruMap(14, (_key, entry) => {
+  const baseLru = createLruMap(lruLimit, (_key, entry) => {
     revokeUrl(entry?.objectUrl);
   });
 
@@ -306,7 +313,7 @@ export function createBackdropCache({ root = globalThis } = {}) {
         const nh = Number(img.naturalHeight || img.height || 0);
         if (!nw || !nh) return null;
 
-        const scale = Math.min(1, BASE_MAX_EDGE / Math.max(nw, nh));
+        const scale = Math.min(1, targetMaxEdge / Math.max(nw, nh));
         const tw = Math.max(1, Math.round(nw * scale));
         const th = Math.max(1, Math.round(nh * scale));
 
@@ -323,6 +330,9 @@ export function createBackdropCache({ root = globalThis } = {}) {
         ctx.drawImage(img, 0, 0, tw, th);
 
         const blob = await canvasToBlob(canvas, 'image/webp', 0.93);
+        // 立即释放 iOS WebKit IOSurface 离屏画布显存，不等 GC
+        canvas.width = 0;
+        canvas.height = 0;
         if (!blob) return null;
 
         void writeToIdb({

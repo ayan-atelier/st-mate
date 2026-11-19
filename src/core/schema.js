@@ -152,6 +152,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     charBindings: Object.freeze({}),
     archivedPresets: Object.freeze([]),
   }),
+  suiteProvisioned: Object.freeze([]),
 });
 
 function clampInt(value, min, max, fallback) {
@@ -465,6 +466,16 @@ export function normalizeSettings(raw = {}) {
       endpoint: typeof rawAux.endpoint === 'string' ? rawAux.endpoint.trim().slice(0, 500) : '',
     },
     presetStudio: normalizePresetStudio(rawPresetStudio),
+    suiteProvisioned: Array.isArray(src.suiteProvisioned)
+      ? [
+          ...new Set(
+            src.suiteProvisioned
+              .filter(item => typeof item === 'string' && /^[a-z0-9_-]{1,64}$/i.test(item.trim()))
+              .map(item => item.trim())
+              .slice(0, 20),
+          ),
+        ]
+      : [],
   };
 }
 

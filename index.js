@@ -10,38 +10,39 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.7.6';
+} from './src/core/env.js?v=0.7.7';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.7.6';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.6';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.6';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.6';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.6';
-import { createTopbar } from './src/shell/topbar.js?v=0.7.6';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.6';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.6';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.6';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.6';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.6';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.6';
+} from './src/core/file-saver.js?v=0.7.7';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.7';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.7';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.7.7';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.7';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.7';
+import { createTopbar } from './src/shell/topbar.js?v=0.7.7';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.7';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.7';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.7';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.7';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.7';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.7';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.7.6';
-import { createApiDock } from './src/modules/api-dock.js?v=0.7.6';
+} from './src/modules/assistant-core.js?v=0.7.7';
+import { createApiDock } from './src/modules/api-dock.js?v=0.7.7';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.7.6';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.6';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.6';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.6';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.6';
+} from './src/modules/preset-backend.js?v=0.7.7';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.7';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.7';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.7';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.7';
 
-const STM_VERSION = '0.7.6';
+const STM_VERSION = '0.7.7';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -63,6 +64,8 @@ function createStMateRuntime() {
   let enabled = false;
   let cancelBoot = null;
   let bootPollTimer = 0;
+  let autoProvisionTimer = 0;
+  let safeModeNotified = false;
   let unsubscribeStore = null;
   const eventCleanups = [];
   let controlHandle = null;
@@ -71,6 +74,7 @@ function createStMateRuntime() {
   const store = createSettingsStore({ getContext });
   const moduleBridge = createModuleBridge({ root: globalThis, getContext, store });
 
+  let suiteCoordinator = null;
   let settingsDialog = null;
   let homeCloak = null;
   let tapImmersive = null;
@@ -117,11 +121,23 @@ function createStMateRuntime() {
     void presetSyncScheduler.schedule(delayMs);
   }
 
+  function scheduleSuiteAutoProvision(delayMs = 1800) {
+    if (autoProvisionTimer) {
+      globalThis.clearTimeout(autoProvisionTimer);
+    }
+    autoProvisionTimer = globalThis.setTimeout(() => {
+      autoProvisionTimer = 0;
+      if (!enabled || !suiteCoordinator) return;
+      void suiteCoordinator.autoProvisionIfNeeded();
+    }, delayMs);
+  }
+
   async function toggleShell(nextEnabled) {
     const normalized = Boolean(nextEnabled);
     if (normalized) {
       store.update({ shellEnabled: true });
       await moduleBridge.applyAllFromStore();
+      scheduleSuiteAutoProvision(600);
     } else {
       apiDock?.flushPendingSave?.();
       await Promise.allSettled([
@@ -282,11 +298,13 @@ function createStMateRuntime() {
         SlashCommand.fromProps({
           name: 'stmate',
           helpString:
-            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，toggle 切换原生酒馆/伴侣界面）',
+            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {
               void toggleShell(!store.get().shellEnabled);
+            } else if (cmd === 'diag' || cmd === 'doctor') {
+              void suiteCoordinator?.copyDiagnosticReport?.();
             } else if (cmd === 'char' || cmd === 'character') {
               readerDock?.close();
               apiDock?.close();
@@ -357,6 +375,7 @@ function createStMateRuntime() {
       void moduleBridge.applyAllFromStore();
       refreshAll({ shouldHydrate: true });
       scheduleActiveChatPresetSync(40);
+      scheduleSuiteAutoProvision(1200);
     });
 
     subscribe(types.CHAT_CHANGED, () => {
@@ -428,6 +447,20 @@ function createStMateRuntime() {
   }
 
   function initSubsystems() {
+    suiteCoordinator = createSuiteCoordinator({
+      root: globalThis,
+      getContext,
+      store,
+      moduleBridge,
+      stmVersion: STM_VERSION,
+      notify: toastMessage,
+      onStateChange: () => {
+        if (!enabled) return;
+        settingsDialog?.renderIfOpen();
+        homeCloak?.schedule();
+      },
+    });
+
     perfEngine = createPerfEngine({
       store,
       root: globalThis,
@@ -549,6 +582,7 @@ function createStMateRuntime() {
       getContext,
       store,
       moduleBridge,
+      suiteCoordinator,
       onToggleShell: toggleShell,
       onPreviewAtmosphere: () => atmosphere?.refresh(),
       onOpenStateChange: () => {
@@ -712,10 +746,18 @@ function createStMateRuntime() {
         if (!ctx?.extensionSettings) return false;
 
         store.hydrate();
+        if (!safeModeNotified && isSafeModeRequested(globalThis)) {
+          safeModeNotified = true;
+          if (store.get().shellEnabled) {
+            store.update({ shellEnabled: false }, { silent: true });
+          }
+          toastMessage('已通过 ?stm_safe=1 安全模式挂起 ST伴侣界面接管，方便排查冲突', 'info');
+        }
         const bound = bindHostEvents();
         void moduleBridge.applyAllFromStore();
         refreshAll();
         scheduleActiveChatPresetSync(40);
+        scheduleSuiteAutoProvision(1800);
         return bound;
       };
 
@@ -741,6 +783,10 @@ function createStMateRuntime() {
     if (bootPollTimer) {
       globalThis.clearInterval(bootPollTimer);
       bootPollTimer = 0;
+    }
+    if (autoProvisionTimer) {
+      globalThis.clearTimeout(autoProvisionTimer);
+      autoProvisionTimer = 0;
     }
     presetSyncScheduler.cancel();
 
@@ -786,6 +832,7 @@ function createStMateRuntime() {
     tapImmersive = null;
     homeCloak = null;
     settingsDialog = null;
+    suiteCoordinator = null;
   }
 
   return {

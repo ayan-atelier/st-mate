@@ -6,9 +6,9 @@
  * 3. 全套 1.5px 纯色细线 SVG 图标（零彩色 Emoji），100% 跟随当前酒馆 SmartTheme 主题配色。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.6';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.6';
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.6';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.7';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.7';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.7';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '功能开关' },
@@ -67,6 +67,7 @@ export function createSettingsDialog({
   getContext,
   store,
   moduleBridge,
+  suiteCoordinator = null,
   onToggleShell,
   onOpenReaderDock,
   onOpenApiDock,
@@ -129,7 +130,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'v0.7.6');
+    const badge = el('span', 'stm-dialog-badge', 'v0.7.7');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -272,12 +273,22 @@ export function createSettingsDialog({
     );
 
     const modulesList = moduleBridge.inspectAll();
+    const suiteBusy = Boolean(suiteCoordinator?.isBusy?.());
     for (const mod of modulesList) {
+      const compInfo = suiteCoordinator?.getCompanionStatus?.(mod.key) || null;
       let badgeText = '';
       if (!current.shellEnabled && mod.enabled) {
         badgeText = '随原生挂起';
+      } else if (compInfo?.status === 'missing') {
+        badgeText = suiteBusy ? '正在安装…' : '未安装 · 点开即装';
+      } else if (compInfo?.status === 'host_disabled') {
+        badgeText = '扩展栏已停用 · 点开恢复';
+      } else if (compInfo?.status === 'outdated') {
+        badgeText = `${compInfo.version ? `v${compInfo.version} · ` : ''}建议更新`;
       } else if (mod.standaloneConnected && mod.version) {
         badgeText = `v${mod.version}`;
+      } else if (compInfo?.version) {
+        badgeText = `v${compInfo.version}`;
       }
 
       coreGroup.append(
@@ -292,7 +303,18 @@ export function createSettingsDialog({
             internalUpdating = true;
             try {
               store.update({ modules: { [mod.key]: val } });
-              if (store.get().shellEnabled) {
+              const latestComp = suiteCoordinator?.getCompanionStatus?.(mod.key) || null;
+              if (
+                val &&
+                suiteCoordinator &&
+                latestComp &&
+                (latestComp.status === 'missing' || latestComp.status === 'host_disabled')
+              ) {
+                await suiteCoordinator.installCompanions({
+                  moduleKeys: [mod.key],
+                  forceReinstall: true,
+                });
+              } else if (store.get().shellEnabled) {
                 await moduleBridge.syncModuleEnabled(mod.key, val);
               }
             } finally {
@@ -304,6 +326,57 @@ export function createSettingsDialog({
       );
     }
     container.append(coreGroup);
+
+    if (suiteCoordinator) {
+      const auditState = suiteCoordinator.getAuditState?.();
+      const missingItems = (auditState?.companions || []).filter(c => c.status === 'missing');
+      const outdatedItems = (auditState?.companions || []).filter(c => c.status === 'outdated');
+
+      if (suiteBusy) {
+        const banner = el('div', 'stm-suite-banner');
+        banner.append(
+          createIconNode(globalThis.document, 'refresh', 'stm-row-icon'),
+          el('span', 'stm-suite-banner-text', suiteCoordinator.getBusyLabel?.() || '正在同步砚台配套组件…'),
+        );
+        container.append(banner);
+      } else if (missingItems.length > 0) {
+        const banner = el('div', 'stm-suite-banner');
+        banner.append(
+          createIconNode(globalThis.document, 'download', 'stm-row-icon'),
+          el(
+            'span',
+            'stm-suite-banner-text',
+            `尚有 ${missingItems.length} 项配套组件未安装（${missingItems.map(i => i.displayName.replace(/^砚台\s*·\s*/, '')).join(' / ')}）`,
+          ),
+        );
+        const fixBtn = el('button', 'stm-pill-btn stm-suite-banner-btn', '一键补齐套件');
+        fixBtn.type = 'button';
+        fixBtn.addEventListener('click', async () => {
+          await suiteCoordinator.installCompanions({ forceReinstall: true });
+          render();
+        });
+        banner.append(fixBtn);
+        container.append(banner);
+      } else if (outdatedItems.length > 0) {
+        const banner = el('div', 'stm-suite-banner');
+        banner.append(
+          createIconNode(globalThis.document, 'refresh', 'stm-row-icon'),
+          el(
+            'span',
+            'stm-suite-banner-text',
+            `检测到 ${outdatedItems.length} 项配套组件可升级至兼容新版`,
+          ),
+        );
+        const upBtn = el('button', 'stm-pill-btn stm-suite-banner-btn', '一键更新套件');
+        upBtn.type = 'button';
+        upBtn.addEventListener('click', async () => {
+          await suiteCoordinator.updateOutdatedCompanions();
+          render();
+        });
+        banner.append(upBtn);
+        container.append(banner);
+      }
+    }
 
     container.append(el('div', 'stm-settings-subhead', '阅读手势与菜单精简'));
 
@@ -435,6 +508,41 @@ export function createSettingsDialog({
 
     btnRow.append(openApiBtn, openPresetBtn, openAssistantBtn, openCharWorldBtn);
     container.append(btnRow);
+
+    if (suiteCoordinator) {
+      container.append(el('div', 'stm-settings-subhead', '排障与环境体检'));
+      const diagGroup = el('div', 'stm-settings-group stm-shortcut-list');
+      const diagHelpKey = 'native_diag_report';
+      const isDiagHelpOpen = expandedHelpKey === diagHelpKey;
+      const diagWrap = el('div', `stm-shortcut-item is-compact${isDiagHelpOpen ? ' is-help-open' : ''}`);
+      const diagBar = el('div', 'stm-shortcut-bar stm-diag-copy-bar');
+      const diagHead = el('div', 'stm-switch-head');
+      diagHead.append(
+        createIconNode(doc, 'copy', 'stm-row-icon'),
+        el('strong', 'stm-switch-title', '复制环境排障体检单'),
+        makeHelpTriggerButton(diagHelpKey, '复制环境排障体检单'),
+      );
+      diagBar.append(diagHead, el('span', 'stm-shortcut-arrow', '复制'));
+      diagBar.addEventListener('click', evt => {
+        const target = evt.target;
+        if (target && typeof target.closest === 'function' && target.closest('.stm-help-btn')) {
+          return;
+        }
+        void suiteCoordinator.copyDiagnosticReport();
+      });
+      diagWrap.append(diagBar);
+      if (isDiagHelpOpen) {
+        diagWrap.append(
+          el(
+            'div',
+            'stm-switch-help-pop',
+            '一键复制当前设备容器、主题、砚台套件版本与已装第三方扩展名单（不含任何 API 密钥与聊天隐私），方便快速定位多插件冲突。若遇极端冲突无法进酒馆，可在网址末尾附加 ?stm_safe=1 以安全模式启动。',
+          ),
+        );
+      }
+      diagGroup.append(diagWrap);
+      container.append(diagGroup);
+    }
   }
 
   function render() {
@@ -466,6 +574,7 @@ export function createSettingsDialog({
     const dlg = ensureDialog();
     if (!dlg) return;
     render();
+    void suiteCoordinator?.audit?.();
     if (!isDialogOpen()) {
       try {
         dlg.showModal();
@@ -593,7 +702,7 @@ export function createSettingsDialog({
       const s = store.get();
       const statusNode = wrap.querySelector('.stm-ext-status');
       if (statusNode) {
-        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.6 · ${
+        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.7 · ${
           s.modules.turbo ? '流畅渲染加速运行中' : '流畅渲染加速已关闭'
         }`;
       }

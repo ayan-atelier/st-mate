@@ -31,6 +31,13 @@ import {
 import { INTERACTIVE_ANCESTOR_SELECTOR, shouldTogglePureReading } from '../src/core/tap-guard.js';
 import { CONTROL_REGISTRY_KEY, MODULE_DESCRIPTORS, createModuleBridge } from '../src/core/registry.js';
 import {
+  COMPANION_PLUGINS,
+  compareSemver,
+  createSuiteCoordinator,
+  isSafeModeRequested,
+  retireRedundantLegacyPlugins,
+} from '../src/core/suite-guard.js';
+import {
   closeAllNativeDrawers,
   formatShortPresetName,
   getOpenNativeDrawerIds,
@@ -4933,7 +4940,7 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     'iOS @supports 抽屉定位规则必须使用 top + margin-top: 0 消除双倍空隙',
   );
 
-  // 确保全仓源码与清单已彻底升级至 v0.7.5，零残留 0.7.0 / 0.7.1 / 0.7.2 / 0.7.3 / 0.7.4
+  // 确保全仓源码与清单已彻底升级至 v0.7.7，零残留 0.7.0 ~ 0.7.6
   for (const file of collectFiles(suiteRoot)) {
     const content = fs.readFileSync(file, 'utf8');
     const rel = path.relative(suiteRoot, file);
@@ -4942,6 +4949,8 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     assert.equal(content.includes('0.7.2'), false, `文件 ${rel} 不得残留旧版 0.7.2 字符串`);
     assert.equal(content.includes('0.7.3'), false, `文件 ${rel} 不得残留旧版 0.7.3 字符串`);
     assert.equal(content.includes('0.7.4'), false, `文件 ${rel} 不得残留旧版 0.7.4 字符串`);
+    assert.equal(content.includes('0.7.5'), false, `文件 ${rel} 不得残留旧版 0.7.5 字符串`);
+    assert.equal(content.includes('0.7.6'), false, `文件 ${rel} 不得残留旧版 0.7.6 字符串`);
   }
   assert.ok(
     cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar') &&
@@ -5963,6 +5972,254 @@ test('v0.7.5 native drawer exit & persona seam guard: TT/书架首页打开用�
 
     ttGuard.destroy();
     topbar.destroy();
+    settingsDialog.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.7.7 suite-guard: 新用户零基础一键配齐四件套（预写待命开关）+ 尊重主动卸载与点开重装 + 自动停用旧界面整理 + ?stm_safe=1 与零隐私体检单', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    // 1. 语义化版本号对比与 URL 安全模式参数检测
+    assert.equal(compareSemver('1.4.5', '1.4.5'), 0);
+    assert.equal(compareSemver('1.3.9', '1.4.5'), -1);
+    assert.equal(compareSemver('1.5.0', '1.4.5'), 1);
+    assert.equal(compareSemver('1.4.5-beta.1', '1.4.5'), -1);
+    assert.equal(isSafeModeRequested({ location: { search: '?stm_safe=1', hash: '' } }), true);
+    assert.equal(isSafeModeRequested({ location: { search: '', hash: '#stm_safe=true' } }), true);
+    assert.equal(isSafeModeRequested({ location: { search: '?foo=1', hash: '' } }), false);
+
+    // 2. 构造旧版独立《砚台 · 界面整理》残留 DOM 与配置，验证自动无损休眠与样式清理
+    const optionsMenu = doc.createElement('div');
+    optionsMenu.id = 'options';
+    optionsMenu.classList.add('yt-if-menu');
+    const optionsContent = doc.createElement('div');
+    optionsContent.className = 'options-content';
+    const moreWrap = doc.createElement('div');
+    moreWrap.id = 'yt-interface-more';
+    const morePanel = doc.createElement('div');
+    morePanel.id = 'yt-interface-more-panel';
+    const rescuedItem = doc.createElement('a');
+    rescuedItem.id = 'option_author_note';
+    morePanel.append(rescuedItem);
+    moreWrap.append(morePanel);
+    optionsContent.append(moreWrap);
+    optionsMenu.append(optionsContent);
+    doc.body.append(optionsMenu);
+
+    const legacyStyle = doc.createElement('style');
+    legacyStyle.id = 'yt-interface-active-style';
+    doc.head.append(legacyStyle);
+
+    const extBlock = doc.createElement('div');
+    extBlock.id = 'extensions_settings';
+    extBlock.classList.add('yt-if-extension-column');
+    extBlock.style.setProperty('display', 'contents');
+    const extChild = doc.createElement('div');
+    extChild.classList.add('yt-if-extension-row');
+    extChild.style.setProperty('order', '2');
+    extBlock.append(extChild);
+    doc.body.append(extBlock);
+
+    const extSettings = {
+      disabledExtensions: [],
+      yantaiInterface: { enabled: true, hiddenTop: ['persona'] },
+    };
+    const ctx = {
+      extensionSettings: extSettings,
+      powerUserSettings: { theme: '角色映幕 · 日夜', movingUI: false, blur_strength: 0 },
+      getRequestHeaders: () => ({ 'X-CSRF-Token': 'mock-csrf' }),
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const mockRoot = {
+      location: { origin: 'http://127.0.0.1:8000', search: '', hash: '' },
+      document: doc,
+      window: { innerWidth: 390, innerHeight: 844 },
+      navigator: {
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) Tauri',
+        clipboard: {
+          copiedText: '',
+          async writeText(txt) {
+            this.copiedText = txt;
+          },
+        },
+      },
+    };
+    const moduleBridge = createModuleBridge({ root: mockRoot, getContext: () => ctx, store });
+
+    // 模拟宿主磁盘上的已安装扩展集合（初始仅安装了 st-mate 与旧版 yantai-interface，4 个配套组件均未安装！）
+    const diskExtensions = new Map([
+      ['third-party/st-mate', { type: 'local', version: '0.7.7' }],
+      ['third-party/yantai-interface', { type: 'local', version: '1.0.2' }],
+    ]);
+    const installCalls = [];
+    const updateCalls = [];
+    let reloadCount = 0;
+
+    const mockFetcher = async (url, init = {}) => {
+      const href = String(url);
+      if (href.endsWith('/api/extensions/discover')) {
+        const list = [...diskExtensions.entries()].map(([name, meta]) => ({
+          name,
+          type: meta.type,
+        }));
+        return { ok: true, status: 200, json: async () => list };
+      }
+      if (href.includes('/scripts/extensions/third-party/') && href.endsWith('/manifest.json')) {
+        const match = href.match(/third-party\/([^/]+)\/manifest\.json/);
+        const folder = match ? decodeURIComponent(match[1]) : '';
+        const meta = diskExtensions.get(`third-party/${folder}`);
+        if (!meta) return { ok: false, status: 404 };
+        return { ok: true, status: 200, json: async () => ({ version: meta.version }) };
+      }
+      if (href.endsWith('/api/extensions/install')) {
+        const body = JSON.parse(init.body || '{}');
+        installCalls.push(body);
+        const folder = String(body.url).split('/').pop();
+        const comp = COMPANION_PLUGINS.find(c => c.folderName === folder);
+        diskExtensions.set(`third-party/${folder}`, {
+          type: body.global ? 'global' : 'local',
+          version: comp?.minVersion || '1.0.0',
+        });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ folderName: folder, display_name: comp?.displayName || folder }),
+        };
+      }
+      if (href.endsWith('/api/extensions/update')) {
+        const body = JSON.parse(init.body || '{}');
+        updateCalls.push(body);
+        const comp = COMPANION_PLUGINS.find(c => c.folderName === body.extensionName);
+        if (comp && diskExtensions.has(`third-party/${comp.folderName}`)) {
+          diskExtensions.set(`third-party/${comp.folderName}`, {
+            type: body.global ? 'global' : 'local',
+            version: comp.minVersion,
+          });
+        }
+        return { ok: true, status: 200, json: async () => ({ shortCommitHash: 'abc1234' }) };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    const toasts = [];
+    const coordinator = createSuiteCoordinator({
+      root: mockRoot,
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      stmVersion: '0.7.7',
+      fetcher: mockFetcher,
+      reloadHostExtensions: async () => {
+        reloadCount += 1;
+        return true;
+      },
+      notify: (msg, type) => toasts.push({ msg, type }),
+    });
+
+    // 3. 新用户首次自动配齐：4 个配套插件全部按序安装，且默认关闭的 echoes/memory 装前已被预写为 false 待命！
+    const firstProvision = await coordinator.autoProvisionIfNeeded();
+    assert.equal(firstProvision.installed.length, 4, '新用户首次启动应自动补齐全部 4 项砚台配套插件');
+    assert.equal(installCalls.length, 4);
+    assert.equal(installCalls.every(c => c.global === false && c.branch === 'main'), true);
+    assert.equal(reloadCount, 1, '批量安装完成后集中触发一次宿主动态挂载');
+    assert.equal(extSettings.jingdu_bookshelf.enabled, true, '角色书架默认预写为开启');
+    assert.equal(extSettings['yantai-persona-studio'].enabled, true, '人设馆默认预写为开启');
+    assert.equal(extSettings.yantai_echoes.enabled, false, '重Roll助手默认预写为关闭待命（零拦截）');
+    assert.equal(extSettings.yantai.controlEnabled, false, '叙事记忆默认预写为关闭待命（零拦截）');
+    assert.deepEqual(
+      store.get().suiteProvisioned.slice().sort(),
+      ['yantai-bookshelf', 'yantai-echoes', 'yantai-memory', 'yantai-persona-studio'],
+      'suiteProvisioned 已记录全部 4 个子插件目录',
+    );
+
+    // 验证旧版独立《界面整理》已被同步休眠并清理危险 DOM/CSS
+    assert.equal(extSettings.yantaiInterface.enabled, false, '自动关闭独立版界面整理内部开关');
+    assert.ok(
+      extSettings.disabledExtensions.includes('third-party/yantai-interface'),
+      '将独立版界面整理加入 disabledExtensions 杜绝下次启动双跑闪退',
+    );
+    assert.equal(doc.getElementById('yt-interface-active-style'), null, '已移除旧界面整理样式表');
+    assert.equal(extBlock.style.getPropertyValue('display'), '', '已清除 #extensions_settings 上的 display:contents');
+    assert.equal(extChild.style.getPropertyValue('order'), '', '已清除子项内联 order');
+    assert.equal(optionsContent.contains(rescuedItem), true, '三横菜单内的被折叠项已无损救回');
+
+    // 4. 若玩家后续在酒馆扩展栏手动卸载了 yantai-memory：刷新不会强行重装，但在伴侣面板内点开开关即可按需重装并启用！
+    diskExtensions.delete('third-party/yantai-memory');
+    installCalls.length = 0;
+
+    const secondProvision = await coordinator.autoProvisionIfNeeded();
+    assert.equal(secondProvision.installed.length, 0, '尊重玩家主动卸载决定，刷新绝不强行重装');
+    assert.equal(coordinator.getCompanionStatus('memory')?.status, 'missing');
+
+    const settingsDialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      suiteCoordinator: coordinator,
+      onToggleShell: () => {},
+    });
+    settingsDialog.open('modules');
+    const dialogRoot = doc.getElementById('stm-settings-dialog');
+    const collectText = rootNode => rootNode.findAll(() => true).map(n => n.textContent || '').join(' ');
+    const dialogText = collectText(dialogRoot);
+    assert.ok(
+      dialogText.includes('未安装 · 点开即装'),
+      '被卸载子插件在设置中心清晰提示「未安装 · 点开即装」',
+    );
+    assert.ok(
+      dialogText.includes('一键补齐套件'),
+      '底部同时提供「一键补齐套件」快捷横幅',
+    );
+
+    // 找到「叙事记忆」开关并主动拨到开启 -> 自动触发按需重装并同步写为开启！
+    const switchCards = dialogRoot.findAll(n => n.classList?.contains('stm-switch-card'));
+    const memoryCard = switchCards.find(c => collectText(c).includes('叙事记忆'));
+    assert.ok(memoryCard, '应渲染叙事记忆开关行');
+    const memoryCheckbox = memoryCard.querySelector('.stm-switch-input');
+    memoryCheckbox.checked = true;
+    memoryCheckbox.dispatchEvent({ type: 'change' });
+    await new Promise(r => setTimeout(r, 30));
+
+    assert.equal(installCalls.length, 1, '用户在面板内主动打开未装模块时立即按需重装');
+    assert.ok(installCalls[0].url.endsWith('/yantai-memory'));
+    assert.equal(extSettings.yantai.controlEnabled, true, '主动点开安装后同步将该模块置为开启');
+
+    // 5. 版本水位线检测与一键升级：模拟角色书架停留在旧版 1.3.0 (< 1.4.5)
+    diskExtensions.set('third-party/yantai-bookshelf', { type: 'local', version: '1.3.0' });
+    await coordinator.audit({ forceManifestCheck: true });
+    assert.equal(coordinator.getCompanionStatus('bookshelf')?.status, 'outdated');
+
+    const updateRes = await coordinator.updateOutdatedCompanions();
+    assert.deepEqual(updateRes.updated, ['砚台 · 角色书架']);
+    assert.equal(updateCalls.length, 1);
+    assert.deepEqual(updateCalls[0], { extensionName: 'yantai-bookshelf', global: false });
+    assert.equal(coordinator.getCompanionStatus('bookshelf')?.status, 'ready');
+
+    // 6. 零隐私环境排障体检单：确认包含容器、主题与扩展清单，且绝不泄漏任何密钥字段
+    ctx.extensionSettings.st_mate.apiStations = [
+      { id: 'st1', name: '主力站', secretId: 'sec_super_secret_id_999', apiKey: 'sk-NEVER-LEAK-12345' },
+    ];
+    const diagRes = await coordinator.copyDiagnosticReport();
+    assert.equal(diagRes.ok, true);
+    assert.ok(diagRes.report.includes('iOS · TauriTavern (TT) (390x844)'));
+    assert.ok(diagRes.report.includes('角色映幕 · 日夜'));
+    assert.ok(diagRes.report.includes('砚台 · 角色书架'));
+    assert.equal(diagRes.report.includes('sk-NEVER-LEAK-12345'), false, '体检单严禁包含任何密钥字符串');
+    assert.equal(diagRes.report.includes('sec_super_secret_id_999'), false, '体检单严禁包含密钥保险箱 ID');
+    assert.equal(mockRoot.navigator.clipboard.copiedText, diagRes.report);
+
     settingsDialog.destroy();
   } finally {
     globalThis.document = prevDoc;

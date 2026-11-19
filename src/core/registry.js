@@ -4,6 +4,8 @@
  * 杜绝双份 DOM 挂载、重复事件监听与顶栏控制权打架。
  */
 
+import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.7.7';
+
 export const CONTROL_REGISTRY_KEY = Symbol.for('yantai.control.registry.v1');
 export const STM_RUNTIME_KEY = Symbol.for('yantai.st_mate.runtime.v1');
 
@@ -125,6 +127,26 @@ export function createModuleBridge({ root = globalThis, getContext, store }) {
 
     const ctx = getContext?.();
     const extSettings = ctx?.extensionSettings;
+    if (moduleKey === 'bookshelf' && extSettings && typeof extSettings === 'object') {
+      if (!extSettings.jingdu_bookshelf || typeof extSettings.jingdu_bookshelf !== 'object') {
+        extSettings.jingdu_bookshelf = {};
+      }
+      if (extSettings.jingdu_bookshelf.enabled !== targetState) {
+        extSettings.jingdu_bookshelf.enabled = targetState;
+        ctx.saveSettingsDebounced?.();
+      }
+      return true;
+    }
+    if (moduleKey === 'persona' && extSettings && typeof extSettings === 'object') {
+      if (!extSettings['yantai-persona-studio'] || typeof extSettings['yantai-persona-studio'] !== 'object') {
+        extSettings['yantai-persona-studio'] = {};
+      }
+      if (extSettings['yantai-persona-studio'].enabled !== targetState) {
+        extSettings['yantai-persona-studio'].enabled = targetState;
+        ctx.saveSettingsDebounced?.();
+      }
+      return true;
+    }
     if (moduleKey === 'memory' && extSettings && typeof extSettings === 'object') {
       if (!extSettings.yantai || typeof extSettings.yantai !== 'object') {
         extSettings.yantai = {};
@@ -159,18 +181,13 @@ export function createModuleBridge({ root = globalThis, getContext, store }) {
   }
 
   /**
-   * 当 ST伴侣开启顶栏接管时，若检测到旧版独立《砚台 · 界面整理》同时开启了 hiddenTop，
-   * 自动清空其 hiddenTop 顶栏隐藏项（保留其菜单/扩展折叠能力），防止两套插件同时改 #top-settings-holder。
+   * 当 ST伴侣开启顶栏接管时，若检测到旧版独立《砚台 · 界面整理》仍在运行，
+   * 自动将其无损停用并清理其 display:contents / hiddenTop 与三横菜单包裹，杜绝双跑与 iOS TT 闪退。
    */
   function yieldLegacyInterfaceTopbar() {
-    const ctx = getContext?.();
-    const yf = ctx?.extensionSettings?.yantaiInterface;
-    if (yf && Array.isArray(yf.hiddenTop) && yf.hiddenTop.length > 0 && store.get().shellEnabled) {
-      yf.hiddenTop = [];
-      ctx?.saveSettingsDebounced?.();
-      return true;
-    }
-    return false;
+    if (!store.get().shellEnabled) return false;
+    const res = retireRedundantLegacyPlugins({ root, getContext });
+    return Boolean(res.retiredInterface);
   }
 
   function inspectAll() {

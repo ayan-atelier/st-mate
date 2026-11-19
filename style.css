@@ -1,5 +1,5 @@
 /**
- * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.6（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.7（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -794,6 +794,7 @@ body.stm-turbo-mobile #bg_custom {
 }
 
 /* 移动端智能卸除酒馆多层重叠毛玻璃，保留原主题底色与高对比可读性 */
+body.stm-turbo-mobile .stm-topbar,
 body.stm-turbo-mobile #chat,
 body.stm-turbo-mobile #form_sheld,
 body.stm-turbo-mobile #send_form,
@@ -1023,6 +1024,31 @@ body.stm-turbo-mobile .popup {
   background: rgba(128, 128, 128, 0.05);
   background: color-mix(in srgb, var(--stm-card-bg) 68%, transparent);
   overflow: hidden;
+}
+
+.stm-suite-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 42%, var(--stm-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--stm-accent) 9%, var(--stm-card-bg));
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--stm-ink);
+}
+
+.stm-suite-banner-text {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.stm-suite-banner-btn {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .stm-section-intro {
