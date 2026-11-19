@@ -401,10 +401,11 @@ test('env & host-actions: 平台检测与角色名旁小字预设截断准确', 
   });
 });
 
-test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣时原样恢复勾选组合', async () => {
+test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣时原样恢复勾选组合（含叙事记忆）', async () => {
   const mockRoot = {};
   let bookshelfLive = true;
   let personaLive = true;
+  let memoryLive = true;
 
   mockRoot[CONTROL_REGISTRY_KEY] = {
     version: 1,
@@ -413,6 +414,7 @@ test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣�
         'yantai-bookshelf',
         {
           id: 'yantai-bookshelf',
+          inspect: () => ({ enabled: bookshelfLive }),
           async setEnabled(val) {
             bookshelfLive = val;
           },
@@ -422,8 +424,19 @@ test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣�
         'yantai-persona-studio',
         {
           id: 'yantai-persona-studio',
+          inspect: () => ({ enabled: personaLive }),
           async setEnabled(val) {
             personaLive = val;
+          },
+        },
+      ],
+      [
+        'yantai-memory',
+        {
+          id: 'yantai-memory',
+          inspect: () => ({ enabled: memoryLive }),
+          async setEnabled(val) {
+            memoryLive = val;
           },
         },
       ],
@@ -434,7 +447,7 @@ test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣�
     extensionSettings: {
       st_mate: {
         shellEnabled: true,
-        modules: { bookshelf: true, persona: true, echoes: true },
+        modules: { bookshelf: true, persona: true, echoes: true, memory: true },
       },
       yantai_echoes: { enabled: true },
     },
@@ -448,9 +461,11 @@ test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣�
   await bridge.suspendAllForNative();
   assert.equal(bookshelfLive, false);
   assert.equal(personaLive, false);
+  assert.equal(memoryLive, false);
   assert.equal(mockCtx.extensionSettings.yantai_echoes.enabled, false);
   assert.equal(store.get().modules.bookshelf, true);
   assert.equal(store.get().modules.echoes, true);
+  assert.equal(store.get().modules.memory, true);
 
   bookshelfLive = true;
   await bridge.applyAllFromStore();
@@ -460,6 +475,7 @@ test('registry: 点「原生酒馆」一键挂起全部子模块，回到伴侣�
   await bridge.applyAllFromStore();
   assert.equal(bookshelfLive, true);
   assert.equal(personaLive, true);
+  assert.equal(memoryLive, true);
   assert.equal(mockCtx.extensionSettings.yantai_echoes.enabled, true);
 });
 

@@ -10,33 +10,38 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.7.5';
+} from './src/core/env.js?v=0.7.6';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.7.5';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.5';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.5';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.5';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.5';
-import { createTopbar } from './src/shell/topbar.js?v=0.7.5';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.5';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.5';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.5';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.5';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.5';
-import { createApiDock } from './src/modules/api-dock.js?v=0.7.5';
+} from './src/core/file-saver.js?v=0.7.6';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.6';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.6';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.6';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.6';
+import { createTopbar } from './src/shell/topbar.js?v=0.7.6';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.6';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.6';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.6';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.6';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.6';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.6';
+import {
+  requestAssistantCompletion,
+  resolveAssistantRuntimeChannel,
+} from './src/modules/assistant-core.js?v=0.7.6';
+import { createApiDock } from './src/modules/api-dock.js?v=0.7.6';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.7.5';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.5';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.5';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.5';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.5';
+} from './src/modules/preset-backend.js?v=0.7.6';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.6';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.6';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.6';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.6';
 
-const STM_VERSION = '0.7.5';
+const STM_VERSION = '0.7.6';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -177,6 +182,37 @@ function createStMateRuntime() {
           topbarMode: s.topbarMode,
           modules: { ...s.modules },
         };
+      },
+      inspectAuxChannel() {
+        const ch = resolveAssistantRuntimeChannel({ store, getContext });
+        return {
+          available: true,
+          channelType: ch.channelType,
+          mode: ch.mode,
+          model: ch.model || '',
+          badgeLabel: ch.badgeLabel,
+          detailLabel: ch.detailLabel,
+        };
+      },
+      async requestAuxCompletion({
+        messages = [],
+        temperature = 0.25,
+        maxTokens = 8192,
+        signal = null,
+        timeoutMs = 180000,
+      } = {}) {
+        const preview = resolveAssistantRuntimeChannel({ store, getContext });
+        const secretsMap = preview.station?.secretId ? {} : await readSecretsMap({ getContext });
+        return requestAssistantCompletion({
+          messages,
+          store,
+          getContext,
+          secretsMap,
+          signal,
+          timeoutMs,
+          maxTokens,
+          temperature,
+        });
       },
       open(tabId) {
         if (tabId === 'reader-dock') {
@@ -357,6 +393,30 @@ function createStMateRuntime() {
     }
 
     const onControlUpdated = () => {
+      const current = store.get();
+      if (current.shellEnabled) {
+        for (const key of ['bookshelf', 'persona', 'echoes', 'memory']) {
+          const desired = Boolean(current.modules?.[key]);
+          const registryId =
+            key === 'bookshelf'
+              ? 'yantai-bookshelf'
+              : key === 'persona'
+                ? 'yantai-persona-studio'
+                : key === 'echoes'
+                  ? 'yantai-echoes'
+                  : 'yantai-memory';
+          const handle = moduleBridge.getRegisteredHandle(registryId);
+          if (handle && typeof handle.inspect === 'function' && typeof handle.setEnabled === 'function') {
+            try {
+              if (handle.inspect()?.enabled !== desired) {
+                void moduleBridge.syncModuleEnabled(key, desired);
+              }
+            } catch {
+              // ignore transient inspect errors
+            }
+          }
+        }
+      }
       settingsDialog?.renderIfOpen();
       homeCloak?.schedule();
     };

@@ -109,12 +109,32 @@ export function createModuleBridge({ root = globalThis, getContext, store }) {
     const targetState = Boolean(enabled);
     const handle = getRegisteredHandle(desc.registryId);
     if (handle && typeof handle.setEnabled === 'function') {
-      await handle.setEnabled(targetState);
+      let alreadyAligned = false;
+      if (typeof handle.inspect === 'function') {
+        try {
+          alreadyAligned = handle.inspect()?.enabled === targetState;
+        } catch {
+          alreadyAligned = false;
+        }
+      }
+      if (!alreadyAligned) {
+        await handle.setEnabled(targetState);
+      }
       return true;
     }
 
     const ctx = getContext?.();
     const extSettings = ctx?.extensionSettings;
+    if (moduleKey === 'memory' && extSettings && typeof extSettings === 'object') {
+      if (!extSettings.yantai || typeof extSettings.yantai !== 'object') {
+        extSettings.yantai = {};
+      }
+      if (extSettings.yantai.controlEnabled !== targetState) {
+        extSettings.yantai.controlEnabled = targetState;
+        ctx.saveSettingsDebounced?.();
+      }
+      return true;
+    }
     if (moduleKey === 'echoes' && extSettings && typeof extSettings === 'object') {
       if (!extSettings.yantai_echoes || typeof extSettings.yantai_echoes !== 'object') {
         extSettings.yantai_echoes = {};
@@ -193,7 +213,7 @@ export function createModuleBridge({ root = globalThis, getContext, store }) {
       return;
     }
     yieldLegacyInterfaceTopbar();
-    for (const key of ['bookshelf', 'persona', 'echoes']) {
+    for (const key of ['bookshelf', 'persona', 'echoes', 'memory']) {
       await syncModuleEnabled(key, current.modules[key]);
     }
   }

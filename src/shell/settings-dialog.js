@@ -6,9 +6,9 @@
  * 3. 全套 1.5px 纯色细线 SVG 图标（零彩色 Emoji），100% 跟随当前酒馆 SmartTheme 主题配色。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.5';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.5';
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.5';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.6';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.6';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.6';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '功能开关' },
@@ -129,7 +129,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'v0.7.5');
+    const badge = el('span', 'stm-dialog-badge', 'v0.7.6');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -593,7 +593,7 @@ export function createSettingsDialog({
       const s = store.get();
       const statusNode = wrap.querySelector('.stm-ext-status');
       if (statusNode) {
-        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.5 · ${
+        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.6 · ${
           s.modules.turbo ? '流畅渲染加速运行中' : '流畅渲染加速已关闭'
         }`;
       }

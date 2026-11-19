@@ -6,8 +6,8 @@
  *   确保切换时文字 0 像素跳动、百楼长聊天与前端美化卡片 60fps 零重排！
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.5';
-import { shouldTogglePureReading } from '../core/tap-guard.js?v=0.7.5';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.6';
+import { shouldTogglePureReading } from '../core/tap-guard.js?v=0.7.6';
 
 export function createTapImmersive({ getContext, store, isHomeCloaked, shouldSuppressTap }) {
   let active = false;
