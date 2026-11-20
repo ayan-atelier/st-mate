@@ -7,7 +7,7 @@
  * 4. 移动端软键盘弹出视口稳定锁，杜绝打字时整屏背景被压缩跳动与重绘。
  */
 
-import { detectPlatform } from '../core/env.js?v=0.7.8';
+import { detectPlatform } from '../core/env.js?v=0.7.9';
 
 const AWAKE_TAIL_COUNT = 8;
 const HIBERNATE_MIN_TOTAL = 12;

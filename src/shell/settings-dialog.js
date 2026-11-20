@@ -6,9 +6,9 @@
  * 3. 全套 1.5px 纯色细线 SVG 图标（零彩色 Emoji），100% 跟随当前酒馆 SmartTheme 主题配色。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.8';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.8';
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.8';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.9';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.9';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.9';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '功能开关' },
@@ -130,7 +130,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'v0.7.8');
+    const badge = el('span', 'stm-dialog-badge', 'v0.7.9');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -434,7 +434,7 @@ export function createSettingsDialog({
         helpKey: 'chat_image_button',
         icon: 'image',
         title: '底栏快捷发图与表情包（自动识图）',
-        desc: '在聊天输入框左侧增加精简图片按钮（支持手机原图自动瘦身防反代 413 报错，并自动帮你在底层开启发送内联媒体让角色看懂图片与表情包；纯文字 RP 党可随时关闭隐藏）。',
+        desc: '在聊天输入框右下角嵌入低调半透明图片小标（零挤占打字宽度，长文本多行输入时前几排满宽、图标始终停在最后一行最右；支持手机原图自动瘦身防反代 413 报错并自动开启底层识图）。',
         checked: current.chatImageButton,
         onChange: val => {
           updateStoreFromDialog({ chatImageButton: val });

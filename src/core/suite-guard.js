@@ -7,7 +7,7 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.7.8';
+import { detectPlatform } from './env.js?v=0.7.9';
 
 export const COMPANION_PLUGINS = Object.freeze([
   {
@@ -324,7 +324,7 @@ export function buildEnvironmentDiagnosticReport({
   getContext,
   store,
   auditState = null,
-  stmVersion = '0.7.8',
+  stmVersion = '0.7.9',
 } = {}) {
   const ctx = getContext?.();
   const s = store?.get?.() || {};
@@ -428,7 +428,7 @@ export function createSuiteCoordinator({
   getContext,
   store,
   moduleBridge,
-  stmVersion = '0.7.8',
+  stmVersion = '0.7.9',
   fetcher = (...args) => globalThis.fetch?.(...args),
   reloadHostExtensions = null,
   onStateChange = null,

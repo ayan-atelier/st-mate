@@ -6,8 +6,8 @@
  * 3. 严禁使用 display:contents 与 subtree:true 深度监听（彻底杜绝 iOS TauriTavern 多插件重排闪退），关闭开关时 100% 归位原始 DOM。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.8';
-import { closeAllNativeDrawers } from './host-actions.js?v=0.7.8';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.9';
+import { closeAllNativeDrawers } from './host-actions.js?v=0.7.9';
 
 export const LOW_FREQ_BUILTIN_CONTAINER_IDS = Object.freeze([
   'vectors_container',
@@ -97,7 +97,7 @@ export function classifyExtensionEntry(node) {
 export function createExtensionsTidy({
   root = globalThis,
   store,
-  stmVersion = '0.7.8',
+  stmVersion = '0.7.9',
   onOpenSettings,
   onToggleShell,
   onSwitchTopbarMode,

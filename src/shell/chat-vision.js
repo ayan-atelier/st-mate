@@ -1,14 +1,14 @@
 /**
  * ST伴侣 (st-mate) · 底栏聊天窗「一键发图 / 表情包识图」控制器
  * 核心能力：
- * 1. 在 #leftSendForm 挂载克制的 1.5px 细线「图片」按钮（纯文字 RP 玩家可在设置中心一键关闭隐藏，零打扰）；
+ * 1. 在 #nonQRFormItems 内锚定于 #send_textarea 右下角的克制半透明 1.5px 细线「图片」图标（零挤占左右栏宽度，多行输入时前几排满宽显示文字、始终贴合最后一行最右；纯文字 RP 玩家可一键关闭隐藏）；
  * 2. 选图或粘贴截图时，自动检测并帮玩家开启宿主隐藏的 `media_inlining`（发送内联媒体），让 Claude / Gemini / GPT / Grok 当场看懂图片与表情包；
  * 3. 手机原图智能无感瘦身（超 380KB 或长边超阈值时离屏压缩，动图 GIF 原样保留，画布用完即刻归零释放 iOS 显存），彻底告别反代站 413 报错；
  * 4. 在输入框上方附件条实时展示小缩略图预览，支持纯发表情包免打字直接发送。
  */
 
-import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.7.8';
-import { svgMarkup } from '../core/icons.js?v=0.7.8';
+import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.7.9';
+import { svgMarkup } from '../core/icons.js?v=0.7.9';
 
 export const IMAGE_COMPRESS_THRESHOLD_BYTES = 380 * 1024;
 export const DESKTOP_IMAGE_MAX_EDGE = 1440;
@@ -274,6 +274,9 @@ export function createChatVision({
   let thumbWrapEl = null;
   let boundFileForm = null;
   let boundTextarea = null;
+  let rightFormObserver = null;
+  let observedRightForm = null;
+  let resizeBound = false;
   let inliningNoticeShown = false;
   let busy = false;
   const activePreviewUrls = new Set();
@@ -294,6 +297,7 @@ export function createChatVision({
     revokePreviewUrls();
     thumbWrapEl?.remove?.();
     thumbWrapEl = null;
+    btnEl?.classList?.remove?.('has-attachment');
   }
 
   function renderThumbnailStrip(files) {
@@ -364,6 +368,7 @@ export function createChatVision({
 
       const merged = attachFilesToHostInput(processed, { root });
       renderThumbnailStrip(merged);
+      btnEl?.classList?.toggle?.('has-attachment', merged.length > 0);
       return merged;
     } finally {
       busy = false;
@@ -391,6 +396,35 @@ export function createChatVision({
     void processAndAttachImages(allFiles);
   }
 
+  function syncButtonOffset(doc = root?.document) {
+    if (!btnEl || btnEl.hidden || !doc) return;
+    const nonQR = doc.getElementById?.('nonQRFormItems');
+    const textarea = doc.getElementById?.('send_textarea');
+    if (
+      !nonQR ||
+      !textarea ||
+      btnEl.parentNode !== nonQR ||
+      typeof nonQR.getBoundingClientRect !== 'function' ||
+      typeof textarea.getBoundingClientRect !== 'function'
+    ) {
+      return;
+    }
+
+    const wrapRect = nonQR.getBoundingClientRect();
+    const taRect = textarea.getBoundingClientRect();
+    if (!wrapRect || !taRect || wrapRect.width <= 0 || taRect.width <= 0) return;
+
+    // 精准悬浮于 #send_textarea 右下角内侧（紧贴右下斜纹左侧，输入框多行撑高时前几排满宽、图标始终停在最后一行最右）
+    const rightInset = Math.max(8, Math.round(wrapRect.right - taRect.right + 10));
+    const bottomInset = Math.max(4, Math.round(wrapRect.bottom - taRect.bottom + 6));
+    btnEl.style.setProperty('--stm-img-btn-right', `${rightInset}px`);
+    btnEl.style.setProperty('--stm-img-btn-bottom', `${bottomInset}px`);
+  }
+
+  function onViewportResize() {
+    syncButtonOffset();
+  }
+
   function bindHostFormListeners(doc) {
     const fileForm = doc?.getElementById?.('file_form') || null;
     if (fileForm !== boundFileForm) {
@@ -409,19 +443,38 @@ export function createChatVision({
       }
       boundTextarea = textarea;
     }
+
+    const rightSend = doc?.getElementById?.('rightSendForm') || null;
+    if (rightSend !== observedRightForm) {
+      rightFormObserver?.disconnect?.();
+      rightFormObserver = null;
+      if (rightSend && typeof root?.ResizeObserver === 'function') {
+        rightFormObserver = new root.ResizeObserver(() => syncButtonOffset(doc));
+        rightFormObserver.observe(rightSend);
+      }
+      observedRightForm = rightSend;
+    }
+
+    if (!resizeBound && typeof root?.addEventListener === 'function') {
+      root.addEventListener('resize', onViewportResize, { passive: true });
+      resizeBound = true;
+    }
   }
 
   function ensureButtonMounted(doc) {
-    const leftSend = doc?.getElementById?.('leftSendForm');
-    if (!leftSend) return;
+    const hostWrap =
+      doc?.getElementById?.('nonQRFormItems') ||
+      doc?.getElementById?.('send_form') ||
+      doc?.getElementById?.('leftSendForm');
+    if (!hostWrap) return;
 
     if (!btnEl || !btnEl.isConnected) {
       btnEl = doc.getElementById?.('stm-send-image-btn') || doc.createElement('button');
       btnEl.id = 'stm-send-image-btn';
       btnEl.type = 'button';
       btnEl.className = 'stm-send-image-btn interactable';
-      btnEl.title = '发送图片 / 表情包（自动开启模型识图）';
-      btnEl.setAttribute('aria-label', '发送图片或表情包');
+      btnEl.title = '附加图片 / 表情包（自动开启模型识图）';
+      btnEl.setAttribute('aria-label', '附加图片或表情包');
       btnEl.innerHTML = svgMarkup('image');
       btnEl.addEventListener('click', evt => {
         evt.preventDefault();
@@ -447,11 +500,11 @@ export function createChatVision({
       });
     }
 
-    if (btnEl.parentNode !== leftSend) {
-      leftSend.appendChild(btnEl);
+    if (btnEl.parentNode !== hostWrap) {
+      hostWrap.appendChild(btnEl);
     }
-    if (pickerEl.parentNode !== leftSend) {
-      leftSend.appendChild(pickerEl);
+    if (pickerEl.parentNode !== hostWrap) {
+      hostWrap.appendChild(pickerEl);
     }
   }
 
@@ -483,6 +536,7 @@ export function createChatVision({
     ensureButtonMounted(doc);
     if (btnEl) {
       btnEl.hidden = false;
+      syncButtonOffset(doc);
     }
   }
 
@@ -493,6 +547,13 @@ export function createChatVision({
 
   function destroy() {
     clearThumbnailStrip();
+    rightFormObserver?.disconnect?.();
+    rightFormObserver = null;
+    observedRightForm = null;
+    if (resizeBound && typeof root?.removeEventListener === 'function') {
+      root.removeEventListener('resize', onViewportResize);
+      resizeBound = false;
+    }
     boundFileForm?.removeEventListener?.('reset', onFileFormReset);
     boundTextarea?.removeEventListener?.('paste', onTextareaPaste, true);
     boundFileForm = null;

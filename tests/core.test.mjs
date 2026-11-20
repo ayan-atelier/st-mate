@@ -5016,6 +5016,7 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     assert.equal(content.includes('0.7.5'), false, `文件 ${rel} 不得残留旧版 0.7.5 字符串`);
     assert.equal(content.includes('0.7.6'), false, `文件 ${rel} 不得残留旧版 0.7.6 字符串`);
     assert.equal(content.includes('0.7.7'), false, `文件 ${rel} 不得残留旧版 0.7.7 字符串`);
+    assert.equal(content.includes('0.7.8'), false, `文件 ${rel} 不得残留旧版 0.7.8 字符串`);
   }
   assert.ok(
     cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar') &&
@@ -6396,11 +6397,18 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     fileSizeSpan.className = 'file_size';
     fileAttached.append(fileInput, fileNameSpan, fileSizeSpan);
     fileForm.append(fileAttached);
+    const nonQRFormItems = doc.createElement('div');
+    nonQRFormItems.id = 'nonQRFormItems';
+    nonQRFormItems.getBoundingClientRect = () => ({ left: 0, right: 390, top: 0, bottom: 140, width: 390, height: 140 });
     const leftSendForm = doc.createElement('div');
     leftSendForm.id = 'leftSendForm';
     const sendTextarea = doc.createElement('textarea');
     sendTextarea.id = 'send_textarea';
-    sendForm.append(fileForm, leftSendForm, sendTextarea);
+    sendTextarea.getBoundingClientRect = () => ({ left: 68, right: 350, top: 0, bottom: 140, width: 282, height: 140 });
+    const rightSendForm = doc.createElement('div');
+    rightSendForm.id = 'rightSendForm';
+    nonQRFormItems.append(leftSendForm, sendTextarea, rightSendForm);
+    sendForm.append(fileForm, nonQRFormItems);
     doc.body.append(sendForm);
 
     const inliningCheckbox = doc.createElement('input');
@@ -6438,7 +6446,7 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     const extTidy = createExtensionsTidy({
       root: { document: doc },
       store,
-      stmVersion: '0.7.8',
+      stmVersion: '0.7.9',
       onOpenSettings: () => settingsDialog.open(),
       onSwitchTopbarMode: nextMode => store.update({ topbarMode: nextMode }),
     });
@@ -6575,10 +6583,22 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
       '关闭净化后 col2 所有条目按原始顺序 100% 归位',
     );
 
-    // === 验证 C：底栏聊天窗一键发图 / 表情包识图 + 自动开启 media_inlining + 大图压缩判断 ===
+    // === 验证 C：底栏输入框右下角半透明发图微标 + 自动开启 media_inlining + 大图压缩判断 ===
     chatVision.refresh();
     const imgBtn = doc.getElementById('stm-send-image-btn');
-    assert.ok(imgBtn && !imgBtn.hidden, '活跃对话中在 #leftSendForm 挂载一键发图按钮');
+    assert.ok(imgBtn && !imgBtn.hidden, '活跃对话中挂载一键发图微标');
+    assert.equal(imgBtn.parentNode, nonQRFormItems, '发图微标直接悬浮于 #nonQRFormItems 内，零挤占 #leftSendForm 宽度');
+    assert.equal(leftSendForm.children.length, 0, '左侧栏保持 100% 原样零多余图标');
+    assert.equal(
+      imgBtn.style.getPropertyValue('--stm-img-btn-right'),
+      '50px',
+      '精准贴合 #send_textarea 右边内侧 (390 - 350 + 10 = 50px)',
+    );
+    assert.equal(
+      imgBtn.style.getPropertyValue('--stm-img-btn-bottom'),
+      '6px',
+      '多行输入框撑高至 140px 时始终锁死在最后一行右下角 (bottom: 6px)',
+    );
 
     assert.equal(
       shouldCompressImageFile({ name: 'meme.gif', type: 'image/gif', size: 1024 * 1024 }),
@@ -6608,6 +6628,9 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     assert.equal(fileForm.classList.contains('displayNone'), false, '自动点亮输入框上方的附件预览条');
     assert.equal(fileNameSpan.textContent, 'cat_hug.png');
     assert.equal(Array.from(fileInput.files).length, 1);
+    assert.equal(imgBtn.classList.contains('has-attachment'), true, '已附带图片时微标点亮提示');
+    fileForm.dispatchEvent({ type: 'reset' });
+    assert.equal(imgBtn.classList.contains('has-attachment'), false, '清空附件后微标恢复低调半透明态');
 
     // 纯文字 RP 玩家关闭发图开关后，底栏按钮立即彻底移除零残留
     store.update({ chatImageButton: false });

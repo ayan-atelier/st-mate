@@ -1,5 +1,5 @@
 /**
- * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.8（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.9（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -1715,41 +1715,59 @@ body.stm-turbo-mobile .popup {
   display: none !important;
 }
 
-/* 底栏聊天输入框旁「一键发图 / 表情包」按钮与缩略图预览条 */
+/* 底栏聊天输入框右下角「半透明一键发图 / 表情包」微标与缩略图预览条 */
+#nonQRFormItems:has(> .stm-send-image-btn) {
+  position: relative;
+}
+
 .stm-send-image-btn {
+  position: absolute;
+  right: var(--stm-img-btn-right, calc(var(--bottomFormBlockSize, 36px) + 12px));
+  bottom: var(--stm-img-btn-bottom, 6px);
+  z-index: 6;
   appearance: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
   padding: 0 !important;
-  margin: 0 2px !important;
+  margin: 0 !important;
   border: 0 !important;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent !important;
-  color: var(--stm-ink);
-  opacity: 0.76;
+  color: var(--stm-muted);
+  opacity: 0.34;
   cursor: pointer;
-  flex-shrink: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  pointer-events: auto;
+  transition: opacity 0.16s ease, color 0.16s ease, background 0.16s ease;
 }
 
-.stm-send-image-btn:hover {
-  opacity: 1;
-  color: var(--stm-accent);
+.stm-send-image-btn[hidden] {
+  display: none !important;
+}
+
+.stm-send-image-btn:hover,
+.stm-send-image-btn:active {
+  opacity: 0.88;
+  color: var(--stm-ink);
   background: rgba(128, 128, 128, 0.12) !important;
 }
 
+.stm-send-image-btn.has-attachment {
+  opacity: 0.86;
+  color: var(--stm-accent);
+}
+
 .stm-send-image-btn.is-busy {
-  opacity: 0.42;
+  opacity: 0.25;
   pointer-events: none;
 }
 
 .stm-send-image-btn svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   pointer-events: none;
 }
 
