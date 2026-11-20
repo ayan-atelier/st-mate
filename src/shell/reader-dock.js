@@ -6,17 +6,17 @@
  * 3. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.7';
-import { svgMarkup } from '../core/icons.js?v=0.7.7';
-import { sanitizeAssetUrl } from '../core/schema.js?v=0.7.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.8';
+import { svgMarkup } from '../core/icons.js?v=0.7.8';
+import { sanitizeAssetUrl } from '../core/schema.js?v=0.7.8';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.7.7';
-import { openImageCropDialog } from './image-cropper.js?v=0.7.7';
+} from './host-actions.js?v=0.7.8';
+import { openImageCropDialog } from './image-cropper.js?v=0.7.8';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -651,7 +651,9 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
         if (!elTarget || typeof elTarget.closest !== 'function') return;
         if (
           dockEl.contains(elTarget) ||
-          elTarget.closest('#stm-pure-aa-pill, .stm-topbar-reader-btn, .stm-crop-dialog')
+          elTarget.closest(
+            '#stm-pure-aa-pill, .stm-topbar-reader-btn, #advanced-formatting-button > .drawer-toggle, .stm-crop-dialog',
+          )
         ) {
           return;
         }

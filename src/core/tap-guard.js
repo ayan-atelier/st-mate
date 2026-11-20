@@ -43,6 +43,8 @@ export const INTERACTIVE_ANCESTOR_SELECTOR = [
   '.stm-portrait-lightbox',
   '.stm-crop-dialog',
   '.stm-pure-aa-pill',
+  '#top-bar',
+  '#top-settings-holder',
   '.drawer-content',
   '#form_sheld',
   '#options',

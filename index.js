@@ -10,39 +10,41 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.7.7';
+} from './src/core/env.js?v=0.7.8';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.7.7';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.7';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.7';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.7.7';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.7';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.7';
-import { createTopbar } from './src/shell/topbar.js?v=0.7.7';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.7';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.7';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.7';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.7';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.7';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.7';
+} from './src/core/file-saver.js?v=0.7.8';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.8';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.8';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.7.8';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.8';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.8';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.7.8';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.7.8';
+import { createTopbar } from './src/shell/topbar.js?v=0.7.8';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.8';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.8';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.8';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.8';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.8';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.8';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.7.7';
-import { createApiDock } from './src/modules/api-dock.js?v=0.7.7';
+} from './src/modules/assistant-core.js?v=0.7.8';
+import { createApiDock } from './src/modules/api-dock.js?v=0.7.8';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.7.7';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.7';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.7';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.7';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.7';
+} from './src/modules/preset-backend.js?v=0.7.8';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.8';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.8';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.8';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.8';
 
-const STM_VERSION = '0.7.7';
+const STM_VERSION = '0.7.8';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -79,6 +81,8 @@ function createStMateRuntime() {
   let homeCloak = null;
   let tapImmersive = null;
   let drawerBridge = null;
+  let extensionsTidy = null;
+  let chatVision = null;
   let topbar = null;
   let atmosphere = null;
   let perfEngine = null;
@@ -172,6 +176,8 @@ function createStMateRuntime() {
     tapImmersive?.refresh();
     topbar?.refresh();
     drawerBridge?.sync();
+    extensionsTidy?.sync();
+    chatVision?.refresh();
     atmosphere?.refresh();
     readerDock?.refresh();
     apiDock?.refresh();
@@ -298,11 +304,18 @@ function createStMateRuntime() {
         SlashCommand.fromProps({
           name: 'stmate',
           helpString:
-            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
+            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {
               void toggleShell(!store.get().shellEnabled);
+            } else if (cmd === 'topbar' || cmd === 'bar') {
+              const nextMode = store.get().topbarMode === 'native' ? 'rp' : 'native';
+              store.update({ topbarMode: nextMode });
+              toastMessage(
+                nextMode === 'native' ? '已切换为酒馆原版顶栏模式' : '已切换为 ST伴侣极简顶栏模式',
+                'info',
+              );
             } else if (cmd === 'diag' || cmd === 'doctor') {
               void suiteCoordinator?.copyDiagnosticReport?.();
             } else if (cmd === 'char' || cmd === 'character') {
@@ -385,6 +398,7 @@ function createStMateRuntime() {
       apiDock?.close();
       readerDock?.close();
       void charWorldDock?.handleChatChanged?.();
+      chatVision?.handleChatChanged?.();
       tapImmersive?.exit();
       refreshAll();
       scheduleActiveChatPresetSync(30);
@@ -626,6 +640,34 @@ function createStMateRuntime() {
 
     drawerBridge = createDrawerBridge();
 
+    extensionsTidy = createExtensionsTidy({
+      root: globalThis,
+      store,
+      stmVersion: STM_VERSION,
+      onOpenSettings: () => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        settingsDialog?.open();
+      },
+      onToggleShell: toggleShell,
+      onSwitchTopbarMode: nextMode => {
+        store.update({ topbarMode: nextMode });
+        toastMessage(
+          nextMode === 'native' ? '已切换为酒馆原版顶栏模式' : '已切换为 ST伴侣极简顶栏模式',
+          'info',
+        );
+      },
+    });
+
+    chatVision = createChatVision({
+      root: globalThis,
+      getContext,
+      store,
+      notify: toastMessage,
+    });
+
     topbar = createTopbar({
       getContext,
       store,
@@ -638,6 +680,14 @@ function createStMateRuntime() {
         settingsDialog.open();
       },
       onToggleCharWorldDock: () => charWorldDock?.toggle(),
+      onOpenCharWorldTab: tab => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.open(tab);
+      },
+      onCloseCharWorldDock: () => charWorldDock?.close(),
+      getCharWorldActiveTab: () => charWorldDock?.getActiveTab?.() || 'char',
       isCharWorldDockOpen: () => Boolean(charWorldDock?.isOpen()),
       onTogglePresetDock: () => presetDock?.toggle(),
       isPresetDockOpen: () => Boolean(presetDock?.isOpen()),
@@ -816,6 +866,8 @@ function createStMateRuntime() {
     atmosphere?.destroy();
     perfEngine?.destroy();
     topbar?.destroy();
+    chatVision?.destroy();
+    extensionsTidy?.destroy();
     drawerBridge?.destroy();
     tapImmersive?.destroy();
     homeCloak?.destroy();
@@ -828,6 +880,8 @@ function createStMateRuntime() {
     atmosphere = null;
     perfEngine = null;
     topbar = null;
+    chatVision = null;
+    extensionsTidy = null;
     drawerBridge = null;
     tapImmersive = null;
     homeCloak = null;

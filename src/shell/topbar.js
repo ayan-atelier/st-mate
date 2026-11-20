@@ -6,8 +6,8 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.7';
-import { svgMarkup } from '../core/icons.js?v=0.7.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.8';
+import { svgMarkup } from '../core/icons.js?v=0.7.8';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -15,7 +15,8 @@ import {
   getOpenNativeDrawerIds,
   openNativeDrawer,
   returnToHomeScreen,
-} from './host-actions.js?v=0.7.7';
+  toastMessage,
+} from './host-actions.js?v=0.7.8';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -38,6 +39,9 @@ export function createTopbar({
   moduleBridge,
   onOpenSettings,
   onToggleCharWorldDock,
+  onOpenCharWorldTab,
+  onCloseCharWorldDock,
+  getCharWorldActiveTab,
   isCharWorldDockOpen,
   onTogglePresetDock,
   isPresetDockOpen,
@@ -72,10 +76,16 @@ export function createTopbar({
 
   function applySheldBoundsNow() {
     boundsRaf = 0;
-    if (!rootEl || rootEl.hidden) return;
-    const win = globalThis.window || globalThis;
     const doc = globalThis.document;
     if (!doc) return;
+
+    const current = store.get();
+    if (current.shellEnabled && current.topbarMode === 'native') {
+      syncNativeBarOffsetNow(doc);
+    }
+
+    if (!rootEl || rootEl.hidden) return;
+    const win = globalThis.window || globalThis;
 
     const isNarrow = typeof win.innerWidth === 'number' && win.innerWidth <= 1000;
     if (isNarrow) {
@@ -351,6 +361,194 @@ export function createTopbar({
     }
   }
 
+  function syncNativeBarOffsetNow(doc) {
+    if (!doc?.documentElement?.style) return;
+    const holder = doc.getElementById?.('top-settings-holder');
+    const topBar = doc.getElementById?.('top-bar');
+    const holderBottom =
+      typeof holder?.getBoundingClientRect === 'function'
+        ? Number(holder.getBoundingClientRect()?.bottom || 0)
+        : 0;
+    const barBottom =
+      typeof topBar?.getBoundingClientRect === 'function'
+        ? Number(topBar.getBoundingClientRect()?.bottom || 0)
+        : 0;
+    const bottomPx = Math.round(Math.max(holderBottom, barBottom));
+    if (bottomPx >= 28 && bottomPx <= 180) {
+      doc.documentElement.style.setProperty('--stm-native-bar-offset', `${bottomPx}px`);
+    }
+  }
+
+  function clearNativeBarOffset(doc) {
+    doc?.documentElement?.style?.removeProperty?.('--stm-native-bar-offset');
+  }
+
+  function syncNativeFormatIconTitle(doc, useReaderTitle) {
+    const icon = doc?.getElementById?.('advanced-formatting-button')?.querySelector?.('.drawer-icon');
+    if (!icon) return;
+    if (useReaderTitle) {
+      if (icon.dataset && !Object.prototype.hasOwnProperty.call(icon.dataset, 'stmOrigTitle')) {
+        icon.dataset.stmOrigTitle = icon.getAttribute?.('title') || icon.title || '';
+      }
+      icon.title = '页面排版与背景 (Aa)';
+      icon.setAttribute?.('title', '页面排版与背景 (Aa)');
+    } else if (icon.dataset && Object.prototype.hasOwnProperty.call(icon.dataset, 'stmOrigTitle')) {
+      const orig = icon.dataset.stmOrigTitle || '';
+      icon.title = orig;
+      if (orig) icon.setAttribute?.('title', orig);
+      else icon.removeAttribute?.('title');
+      delete icon.dataset.stmOrigTitle;
+    }
+  }
+
+  function syncNativeTopbarIconHighlights(doc, current) {
+    const holder = doc?.getElementById?.('top-settings-holder');
+    if (!holder) return;
+    const activeNativeMode = Boolean(current.shellEnabled && current.topbarMode === 'native');
+
+    const map = [
+      ['ai-config-button', activeNativeMode && Boolean(current.modules.presets && isPresetDockOpen?.())],
+      ['sys-settings-button', activeNativeMode && Boolean(isApiDockOpen?.())],
+      ['advanced-formatting-button', activeNativeMode && Boolean(current.modules.reader && isReaderDockOpen?.())],
+      [
+        'WI-SP-button',
+        activeNativeMode &&
+          Boolean(
+            current.modules.charWorld &&
+              isCharWorldDockOpen?.() &&
+              (getCharWorldActiveTab?.() || 'char') === 'world',
+          ),
+      ],
+      [
+        'rightNavHolder',
+        activeNativeMode &&
+          Boolean(
+            current.modules.charWorld &&
+              isCharWorldDockOpen?.() &&
+              (getCharWorldActiveTab?.() || 'char') === 'char',
+          ),
+      ],
+    ];
+
+    for (const [drawerId, highlighted] of map) {
+      const toggle = doc.getElementById?.(drawerId)?.querySelector?.('.drawer-toggle');
+      toggle?.classList?.toggle?.('stm-native-icon-active', highlighted);
+    }
+  }
+
+  function resolveClickedNativeToggle(target, holder) {
+    if (!target || !holder) return null;
+    if (typeof target.closest === 'function') {
+      const viaClosest = target.closest('#top-settings-holder > .drawer > .drawer-toggle');
+      if (viaClosest) return viaClosest;
+    }
+    let cur = target;
+    while (cur && cur !== holder) {
+      if (cur.classList?.contains?.('drawer-toggle') && cur.parentNode?.parentNode === holder) {
+        return cur;
+      }
+      cur = cur.parentNode;
+    }
+    return null;
+  }
+
+  function onNativeHolderClickCapture(event) {
+    const current = store.get();
+    if (!current.shellEnabled || current.topbarMode !== 'native') return;
+    if (!boundHolder) return;
+
+    const toggleEl = resolveClickedNativeToggle(event.target, boundHolder);
+    const drawerId = toggleEl?.parentNode?.id || '';
+    if (!drawerId) return;
+
+    const consume = () => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      event.stopImmediatePropagation?.();
+      onExitPureReading?.();
+    };
+
+    if (drawerId === 'ai-config-button' && current.modules.presets && typeof onTogglePresetDock === 'function') {
+      consume();
+      closeAllNativeDrawers();
+      onTogglePresetDock();
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    if (drawerId === 'sys-settings-button' && typeof onToggleApiDock === 'function') {
+      consume();
+      closeAllNativeDrawers();
+      onToggleApiDock();
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    if (drawerId === 'advanced-formatting-button' && current.modules.reader && typeof onToggleReaderDock === 'function') {
+      consume();
+      closeAllNativeDrawers();
+      if (hasActiveChatSelection(getContext?.())) {
+        onToggleReaderDock();
+      } else {
+        toastMessage('请先进入任意角色对话后再调整页面排版与背景', 'info');
+      }
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    if (drawerId === 'WI-SP-button' && current.modules.charWorld) {
+      consume();
+      closeAllNativeDrawers();
+      const alreadyWorld =
+        Boolean(isCharWorldDockOpen?.()) && (getCharWorldActiveTab?.() || 'char') === 'world';
+      if (alreadyWorld) {
+        if (typeof onCloseCharWorldDock === 'function') onCloseCharWorldDock();
+        else onToggleCharWorldDock?.();
+      } else if (typeof onOpenCharWorldTab === 'function') {
+        onOpenCharWorldTab('world');
+      } else {
+        onToggleCharWorldDock?.();
+      }
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    if (drawerId === 'rightNavHolder' && current.modules.charWorld && hasActiveChatSelection(getContext?.())) {
+      consume();
+      closeAllNativeDrawers();
+      const alreadyChar =
+        Boolean(isCharWorldDockOpen?.()) && (getCharWorldActiveTab?.() || 'char') === 'char';
+      if (alreadyChar) {
+        if (typeof onCloseCharWorldDock === 'function') onCloseCharWorldDock();
+        else onToggleCharWorldDock?.();
+      } else if (typeof onOpenCharWorldTab === 'function') {
+        onOpenCharWorldTab('char');
+      } else {
+        onToggleCharWorldDock?.();
+      }
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    // 其余原生图标（齿轮美化主题、拼图扩展、人设馆或未进卡时的角色列表）：先收起伴侣下拉面板，再放行原生抽屉开合
+    onExitPureReading?.();
+    onNativeDrawerOpened?.();
+    if (drawerId === 'persona-management-button' && current.modules.persona) {
+      setTimeout(() => {
+        const openIds = getOpenNativeDrawerIds();
+        if (openIds.includes('persona-management-button')) {
+          const handle = moduleBridge.getRegisteredHandle('yantai-persona-studio');
+          if (handle && typeof handle.open === 'function') {
+            void Promise.resolve(handle.open({ ensureNative: false, tab: 'current' }))
+              .then(() => syncPersonaTakeoverChrome(globalThis.document, true))
+              .catch(() => {});
+          }
+          syncPersonaTakeoverChrome(globalThis.document, true);
+        }
+      }, 20);
+    }
+  }
+
   function mountDom() {
     const doc = globalThis.document;
     if (!doc || rootEl?.isConnected) return;
@@ -475,6 +673,7 @@ export function createTopbar({
     globalThis.removeEventListener?.('resize', scheduleSheldBounds);
     if (boundHolder) {
       boundHolder.removeEventListener('change', onHolderChange);
+      boundHolder.removeEventListener('click', onNativeHolderClickCapture, true);
       boundHolder = null;
     }
 
@@ -485,6 +684,7 @@ export function createTopbar({
     if (!holder) return;
 
     holder.addEventListener('change', onHolderChange);
+    holder.addEventListener('click', onNativeHolderClickCapture, true);
     boundHolder = holder;
 
     if (typeof globalThis.MutationObserver !== 'function') return;
@@ -556,6 +756,7 @@ export function createTopbar({
       'is-active',
       openIds.some(id => SETTINGS_LAUNCHED_DRAWER_IDS.has(id)),
     );
+    syncNativeTopbarIconHighlights(doc, store.get());
 
     if (hasOpenDrawer !== lastHadOpenNativeDrawer) {
       lastHadOpenNativeDrawer = hasOpenDrawer;
@@ -570,10 +771,15 @@ export function createTopbar({
     if (!doc) return;
 
     const current = store.get();
+    const isNativeBar = Boolean(current.shellEnabled && current.topbarMode === 'native');
     doc.body.classList.toggle('stm-shell-active', Boolean(current.shellEnabled));
+    doc.body.classList.toggle('stm-native-topbar', isNativeBar);
 
     if (!current.shellEnabled) {
-      doc.body.classList.remove('stm-native-drawer-open');
+      doc.body.classList.remove('stm-native-drawer-open', 'stm-native-topbar');
+      clearNativeBarOffset(doc);
+      syncNativeFormatIconTitle(doc, false);
+      syncNativeTopbarIconHighlights(doc, current);
       syncPersonaTakeoverChrome(doc, false);
       syncOpenDrawerGeometry(doc, false);
       if (lastHadOpenNativeDrawer) {
@@ -585,8 +791,18 @@ export function createTopbar({
     }
 
     syncPersonaTakeoverChrome(doc, Boolean(current.modules.persona));
+    syncNativeFormatIconTitle(doc, Boolean(isNativeBar && current.modules.reader));
 
     mountDom();
+    if (isNativeBar) {
+      rootEl.hidden = true;
+      rootEl.dataset.mode = 'native';
+      syncNativeBarOffsetNow(doc);
+      syncActiveDrawerHighlights();
+      return;
+    }
+
+    clearNativeBarOffset(doc);
     rootEl.hidden = false;
     rootEl.dataset.mode = 'rp';
 
@@ -641,11 +857,16 @@ export function createTopbar({
     globalThis.removeEventListener?.('resize', scheduleSheldBounds);
     if (boundHolder) {
       boundHolder.removeEventListener('change', onHolderChange);
+      boundHolder.removeEventListener('click', onNativeHolderClickCapture, true);
       boundHolder = null;
     }
-    syncPersonaTakeoverChrome(globalThis.document, false);
-    syncOpenDrawerGeometry(globalThis.document, false);
-    globalThis.document?.body.classList.remove('stm-shell-active', 'stm-native-drawer-open');
+    const doc = globalThis.document;
+    clearNativeBarOffset(doc);
+    syncNativeFormatIconTitle(doc, false);
+    syncNativeTopbarIconHighlights(doc, { shellEnabled: false });
+    syncPersonaTakeoverChrome(doc, false);
+    syncOpenDrawerGeometry(doc, false);
+    doc?.body.classList.remove('stm-shell-active', 'stm-native-drawer-open', 'stm-native-topbar');
     rootEl?.remove();
     rootEl = null;
   }

@@ -6,9 +6,9 @@
  * 3. 全套 1.5px 纯色细线 SVG 图标（零彩色 Emoji），100% 跟随当前酒馆 SmartTheme 主题配色。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.7';
-import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.8';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.8';
+import { closeAllNativeDrawers, openNativeDrawer } from './host-actions.js?v=0.7.8';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'grid', label: '功能开关' },
@@ -130,7 +130,7 @@ export function createSettingsDialog({
     const header = el('header', 'stm-dialog-header');
     const titleWrap = el('div', 'stm-dialog-title-wrap');
     const title = el('h2', 'stm-dialog-title', 'ST伴侣');
-    const badge = el('span', 'stm-dialog-badge', 'v0.7.7');
+    const badge = el('span', 'stm-dialog-badge', 'v0.7.8');
     titleWrap.append(title, badge);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
@@ -250,6 +250,53 @@ export function createSettingsDialog({
     return card;
   }
 
+  function makeTopbarStyleRow(current) {
+    const doc = globalThis.document;
+    const helpKey = 'topbar_style_mode';
+    const desc =
+      '「伴侣顶栏」提供极简沉浸顶栏与一键退回书架；「原版顶栏」100% 保留当前美化主题的原版胶囊顶栏外观（齿轮仍开原生美化主题），同时将冗余的 T 键升级为 Aa 页面排版、隐去低频原生背景键，并照常使用伴侣各大工作台。';
+    const isHelpOpen = expandedHelpKey === helpKey;
+    const card = el('div', `stm-switch-card is-compact${isHelpOpen ? ' is-help-open' : ''}`);
+
+    const bar = el('div', 'stm-switch-bar stm-mode-bar');
+    const head = el('div', 'stm-switch-head');
+    head.append(
+      createIconNode(doc, 'layers', 'stm-row-icon'),
+      el('strong', 'stm-switch-title', '对话顶栏样式'),
+      makeHelpTriggerButton(helpKey, '对话顶栏样式'),
+    );
+
+    const seg = el('div', 'stm-mode-seg');
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-label', '对话顶栏样式切换');
+    for (const [modeId, label] of [
+      ['rp', '伴侣顶栏'],
+      ['native', '原版顶栏'],
+    ]) {
+      const btn = el(
+        'button',
+        `stm-mode-seg-btn${current.topbarMode === modeId ? ' is-active' : ''}`,
+        label,
+      );
+      btn.type = 'button';
+      btn.disabled = !current.shellEnabled;
+      btn.addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        if (!current.shellEnabled || current.topbarMode === modeId) return;
+        updateStoreFromDialog({ topbarMode: modeId });
+      });
+      seg.append(btn);
+    }
+
+    bar.append(head, seg);
+    card.append(bar);
+    if (isHelpOpen) {
+      card.append(el('div', 'stm-switch-help-pop', desc));
+    }
+    return card;
+  }
+
   function renderModulesTab(container, current) {
     const coreGroup = el('div', 'stm-settings-group');
     coreGroup.append(
@@ -270,6 +317,7 @@ export function createSettingsDialog({
           render();
         },
       }),
+      makeTopbarStyleRow(current),
     );
 
     const modulesList = moduleBridge.inspectAll();
@@ -378,10 +426,20 @@ export function createSettingsDialog({
       }
     }
 
-    container.append(el('div', 'stm-settings-subhead', '阅读手势与菜单精简'));
+    container.append(el('div', 'stm-settings-subhead', '阅读、发图与面板净化'));
 
     const tidyGroup = el('div', 'stm-settings-group');
     tidyGroup.append(
+      makeSwitchRow({
+        helpKey: 'chat_image_button',
+        icon: 'image',
+        title: '底栏快捷发图与表情包（自动识图）',
+        desc: '在聊天输入框左侧增加精简图片按钮（支持手机原图自动瘦身防反代 413 报错，并自动帮你在底层开启发送内联媒体让角色看懂图片与表情包；纯文字 RP 党可随时关闭隐藏）。',
+        checked: current.chatImageButton,
+        onChange: val => {
+          updateStoreFromDialog({ chatImageButton: val });
+        },
+      }),
       makeSwitchRow({
         helpKey: 'tap_pure_reading',
         icon: 'spark',
@@ -390,6 +448,16 @@ export function createSettingsDialog({
         checked: current.tapPureReading,
         onChange: val => {
           updateStoreFromDialog({ tapPureReading: val });
+        },
+      }),
+      makeSwitchRow({
+        helpKey: 'tidy_extensions_panel',
+        icon: 'grid',
+        title: '净化拼图「扩展面板」排序与收纳',
+        desc: '打开扩展面板时按「ST伴侣总台 -> 正则 -> 酒馆助手 -> 快速回复 -> 第三方插件」置顶排列，并将二十余项低频原生内置模块收进底部折叠夹。',
+        checked: current.tidy.tidyExtensionsPanel,
+        onChange: val => {
+          updateStoreFromDialog({ tidy: { tidyExtensionsPanel: val } });
         },
       }),
       makeSwitchRow({
@@ -606,111 +674,8 @@ export function createSettingsDialog({
       wandMenu.prepend(item);
     }
 
-    const extHost = doc.getElementById('extensions_settings2') || doc.getElementById('extensions_settings');
-    if (extHost) {
-      let wrap = doc.getElementById('stm-ext-inline-drawer');
-      if (!wrap) {
-        wrap = el('div');
-        wrap.id = 'stm-ext-inline-drawer';
-        const drawer = el('div', 'inline-drawer');
-        const header = el('div', 'inline-drawer-toggle inline-drawer-header');
-        const icon = el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down');
-        icon.setAttribute('aria-hidden', 'true');
-        header.append(el('b', '', '砚台 · ST伴侣'), icon);
-
-        const content = el('div', 'inline-drawer-content stm-ext-drawer-body');
-        const status = el('small', 'stm-ext-status', '');
-        const desc = el(
-          'p',
-          'stm-ext-help',
-          '集成沉浸顶栏、角色档案与清爽世界书、预设馆与伴侣助手、API多站子工作台、页面排版及流畅渲染引擎。所有模块均可独立开关，随时一键无损切回原生酒馆。',
-        );
-
-        const checkLabel = el('label', 'checkbox_label stm-ext-check');
-        const checkInput = el('input');
-        checkInput.type = 'checkbox';
-        checkInput.addEventListener('change', () => {
-          void Promise.resolve(onToggleShell?.(checkInput.checked)).then(() => {
-            installFallbackEntries();
-          });
-        });
-        checkLabel.append(checkInput, el('span', '', '启用 ST伴侣界面接管'));
-
-        const actions = el('div', 'stm-ext-actions');
-        const openBtn = el('button', 'menu_button', '打开设置中心');
-        openBtn.type = 'button';
-        openBtn.addEventListener('click', () => open());
-
-        const apiBtn = el('button', 'menu_button', 'API与模型工作台');
-        apiBtn.type = 'button';
-        apiBtn.addEventListener('click', () => {
-          closeAllNativeDrawers();
-          onOpenApiDock?.();
-        });
-
-        const presetBtn = el('button', 'menu_button', '预设馆面板');
-        presetBtn.type = 'button';
-        presetBtn.addEventListener('click', () => {
-          closeAllNativeDrawers();
-          if (store.get().shellEnabled && store.get().modules.presets && typeof onOpenPresetDock === 'function') {
-            onOpenPresetDock();
-          } else {
-            openNativeDrawer('ai-config-button', { getContext });
-          }
-        });
-
-        const readerBtn = el('button', 'menu_button', '页面排版与背景');
-        readerBtn.type = 'button';
-        readerBtn.addEventListener('click', () => {
-          if (!hasActiveChatSelection(getContext?.())) {
-            open('modules');
-            return;
-          }
-          closeAllNativeDrawers();
-          onOpenReaderDock?.();
-        });
-
-        const charWorldBtn = el('button', 'menu_button', '角色与清爽世界书');
-        charWorldBtn.type = 'button';
-        charWorldBtn.addEventListener('click', () => {
-          closeAllNativeDrawers();
-          if (store.get().shellEnabled && store.get().modules.charWorld && typeof onOpenCharWorldDock === 'function') {
-            onOpenCharWorldDock(hasActiveChatSelection(getContext?.()) ? 'char' : 'world');
-          } else {
-            openNativeDrawer('rightNavHolder', { getContext });
-          }
-        });
-
-        const assistantBtn = el('button', 'menu_button', '伴侣预设助手');
-        assistantBtn.type = 'button';
-        assistantBtn.addEventListener('click', () => {
-          closeAllNativeDrawers();
-          if (store.get().shellEnabled && store.get().modules.presets && typeof onOpenPresetAssistant === 'function') {
-            onOpenPresetAssistant();
-          } else {
-            openNativeDrawer('ai-config-button', { getContext });
-          }
-        });
-
-        actions.append(openBtn, apiBtn, presetBtn, assistantBtn, charWorldBtn, readerBtn);
-        content.append(status, desc, checkLabel, actions);
-        drawer.append(header, content);
-        wrap.append(drawer);
-        extHost.prepend(wrap);
-      }
-
-      const s = store.get();
-      const statusNode = wrap.querySelector('.stm-ext-status');
-      if (statusNode) {
-        statusNode.textContent = `${s.shellEnabled ? '已启用' : '已挂起（原生酒馆态）'} · v0.7.7 · ${
-          s.modules.turbo ? '流畅渲染加速运行中' : '流畅渲染加速已关闭'
-        }`;
-      }
-      const checkNode = wrap.querySelector('.stm-ext-check input[type="checkbox"]');
-      if (checkNode && checkNode.checked !== Boolean(s.shellEnabled)) {
-        checkNode.checked = Boolean(s.shellEnabled);
-      }
-    }
+    // 扩展面板顶部的专属大横幅卡片统一由 extensions-tidy.js (#stm-ext-hero-card) 接管，清理旧折叠条防重复
+    doc.getElementById('stm-ext-inline-drawer')?.remove();
   }
 
   function destroy() {

@@ -7,7 +7,7 @@
 export const STM_NAMESPACE = 'st_mate';
 export const STM_SCHEMA_VERSION = 5;
 
-export const TOPBAR_MODES = Object.freeze(['rp']);
+export const TOPBAR_MODES = Object.freeze(['rp', 'native']);
 export const TAP_SCOPES = Object.freeze(['all']);
 export const HOME_ENTRY_MODES = Object.freeze(['bookshelf-bar', 'floating']);
 export const DRAWER_BRIDGE_MODES = Object.freeze(['inline-switch', 'popover']);
@@ -98,6 +98,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: STM_SCHEMA_VERSION,
   shellEnabled: true,
   topbarMode: 'rp',
+  chatImageButton: true,
   tapPureReading: true,
   tapPureReadingScope: 'all',
   homeEntryMode: 'bookshelf-bar',
@@ -133,6 +134,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   }),
   tidy: Object.freeze({
     foldOptionsMenu: true,
+    tidyExtensionsPanel: true,
     pinnedExtensions: Object.freeze([]),
   }),
   apiStudio: Object.freeze({
@@ -411,8 +413,8 @@ export function normalizeSettings(raw = {}) {
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
-    // v0.4.0 彻底取消顶栏双态切换：恒定归一化为 rp 态与全局轻触纯享阅读
-    topbarMode: 'rp',
+    topbarMode: pickEnum(src.topbarMode, TOPBAR_MODES, DEFAULT_SETTINGS.topbarMode),
+    chatImageButton: pickBool(src.chatImageButton, DEFAULT_SETTINGS.chatImageButton),
     tapPureReading: pickBool(src.tapPureReading, DEFAULT_SETTINGS.tapPureReading),
     tapPureReadingScope: 'all',
     homeEntryMode: pickEnum(src.homeEntryMode, HOME_ENTRY_MODES, DEFAULT_SETTINGS.homeEntryMode),
@@ -451,6 +453,7 @@ export function normalizeSettings(raw = {}) {
     },
     tidy: {
       foldOptionsMenu: pickBool(rawTidy.foldOptionsMenu, DEFAULT_SETTINGS.tidy.foldOptionsMenu),
+      tidyExtensionsPanel: pickBool(rawTidy.tidyExtensionsPanel, DEFAULT_SETTINGS.tidy.tidyExtensionsPanel),
       pinnedExtensions,
     },
     apiStudio: {

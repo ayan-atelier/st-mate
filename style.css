@@ -1,5 +1,5 @@
 /**
- * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.7（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.8（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -32,7 +32,7 @@ html body.stm-shell-active:not(.movingUI) {
   overscroll-behavior: none;
 }
 
-body.stm-shell-active {
+body.stm-shell-active:not(.stm-native-topbar) {
   --topBarBlockSize: 0px !important;
 }
 
@@ -45,8 +45,13 @@ body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) {
   --stm-drawer-top: var(--stm-safe-top);
 }
 
-html body.stm-shell-active #top-bar,
-html body.stm-shell-active.no-blur #top-bar {
+body.stm-shell-active.stm-native-topbar:not(.stm-home-cloak) {
+  --stm-active-top-offset: var(--stm-native-bar-offset, calc(var(--topBarBlockSize, 48px) + var(--stm-safe-top)));
+  --stm-drawer-top: var(--stm-native-bar-offset, calc(var(--topBarBlockSize, 48px) + var(--stm-safe-top)));
+}
+
+html body.stm-shell-active:not(.stm-native-topbar) #top-bar,
+html body.stm-shell-active:not(.stm-native-topbar).no-blur #top-bar {
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
@@ -67,8 +72,8 @@ html body.stm-shell-active.no-blur #top-bar {
   pointer-events: none !important;
 }
 
-html body.stm-shell-active #top-settings-holder,
-html body.stm-shell-active #top-settings-holder#top-settings-holder {
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder,
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder#top-settings-holder {
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
@@ -95,20 +100,20 @@ html body.stm-shell-active #top-settings-holder#top-settings-holder {
   overflow: visible !important;
 }
 
-html body.stm-shell-active #top-settings-holder::before,
-html body.stm-shell-active #top-settings-holder::after,
-html body.stm-shell-active #top-bar::before,
-html body.stm-shell-active #top-bar::after {
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder::before,
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder::after,
+html body.stm-shell-active:not(.stm-native-topbar) #top-bar::before,
+html body.stm-shell-active:not(.stm-native-topbar) #top-bar::after {
   display: none !important;
   content: none !important;
 }
 
 /* 只隐藏顶部 9 个原生抽屉的触发图标，保留内部 .drawer-content 面板完好无损 */
-html body.stm-shell-active #top-settings-holder > .drawer > .drawer-toggle {
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > .drawer-toggle {
   display: none !important;
 }
 
-html body.stm-shell-active #top-settings-holder > .drawer {
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer {
   width: auto !important;
   min-width: 0 !important;
   height: 0 !important;
@@ -116,6 +121,36 @@ html body.stm-shell-active #top-settings-holder > .drawer {
   flex: 0 0 0 !important;
   margin: 0 !important;
   padding: 0 !important;
+}
+
+/* 原版顶栏模式 (stm-native-topbar)：100% 保留玩家美化主题的原版胶囊顶栏外观，
+   仅脱离文档流收起冗余的「原生背景」按钮（不删 DOM 保 :nth-child 不错位、零双倍 flex 间距、内部抽屉仍可从伴侣设置呼出） */
+html body.stm-shell-active.stm-native-topbar #top-settings-holder > #backgrounds-button {
+  position: fixed !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  flex: 0 0 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  pointer-events: none !important;
+}
+
+html body.stm-shell-active.stm-native-topbar #top-settings-holder > #backgrounds-button > .drawer-toggle {
+  display: none !important;
+}
+
+html body.stm-shell-active.stm-native-topbar #top-settings-holder > #backgrounds-button > .drawer-content {
+  pointer-events: auto !important;
+}
+
+html body.stm-shell-active.stm-native-topbar #top-settings-holder > .drawer > .drawer-toggle.stm-native-icon-active .drawer-icon {
+  color: var(--stm-accent) !important;
+  opacity: 1 !important;
 }
 
 /* 展开的原生抽屉（含全部 9 个顶栏抽屉双 ID 高权重锁死）统一紧贴新顶栏下方 */
@@ -206,9 +241,9 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
   height: 100% !important;
   max-height: 100% !important;
   flex: 1 1 auto !important;
-  padding-top: calc(var(--stm-bar-core-height) + var(--stm-safe-top) + 6px) !important;
+  padding-top: calc(var(--stm-active-top-offset) + 6px) !important;
   padding-bottom: calc(var(--stm-composer-space, 64px) + var(--stm-safe-bottom) + 10px) !important;
-  scroll-padding-top: calc(var(--stm-bar-core-height) + var(--stm-safe-top) + 10px);
+  scroll-padding-top: calc(var(--stm-active-top-offset) + 10px);
   scroll-padding-bottom: calc(var(--stm-composer-space, 64px) + 12px);
   touch-action: manipulation;
 }
@@ -267,6 +302,15 @@ body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar,
 body.stm-shell-active.stm-pure-reading:not(.stm-native-drawer-open) .stm-topbar {
   opacity: 0 !important;
   transform: translate3d(0, -105%, 0) !important;
+  pointer-events: none !important;
+}
+
+body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) #top-bar,
+body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-open) #top-bar,
+body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) #top-settings-holder,
+body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-open) #top-settings-holder {
+  opacity: 0 !important;
+  transform: translate3d(0, -115%, 0) !important;
   pointer-events: none !important;
 }
 
@@ -1442,34 +1486,300 @@ body.stm-turbo-mobile .popup {
   color: var(--stm-muted);
 }
 
-#stm-ext-inline-drawer .stm-ext-status {
-  display: block;
-  margin: 8px 0 4px;
+/* 设置中心「对话顶栏样式」双态分段胶囊 */
+.stm-mode-bar {
+  cursor: default;
+}
+
+.stm-mode-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border);
+  background: rgba(0, 0, 0, 0.18);
+  flex-shrink: 0;
+}
+
+.stm-mode-seg-btn {
+  appearance: none;
+  border: 0 !important;
+  border-radius: 999px;
+  background: transparent !important;
   color: var(--stm-muted);
   font-size: 12px;
-}
-
-#stm-ext-inline-drawer .stm-ext-help {
-  margin: 4px 0 10px !important;
-  color: var(--stm-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-#stm-ext-inline-drawer .stm-ext-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-#stm-ext-inline-drawer .stm-ext-actions .menu_button {
-  width: auto !important;
-  min-width: 0 !important;
-  flex: 0 0 auto;
+  font-weight: 500;
+  line-height: 1;
+  padding: 6px 11px;
   margin: 0 !important;
-  padding: 6px 12px !important;
-  white-space: nowrap !important;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.stm-mode-seg-btn:hover:not(:disabled) {
+  color: var(--stm-ink);
+}
+
+.stm-mode-seg-btn.is-active {
+  background: color-mix(in srgb, var(--stm-accent) 22%, var(--stm-card-bg)) !important;
+  color: var(--stm-ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stm-accent) 55%, transparent);
+}
+
+.stm-mode-seg-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 拼图「扩展面板」顶部 ST伴侣直达横幅大卡片 & 黄金排序低频收纳夹 */
+.stm-ext-hero-card {
+  box-sizing: border-box;
+  width: 100% !important;
+  flex: 1 1 100% !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin: 6px 0 10px !important;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 44%, var(--stm-border));
+  background: color-mix(in srgb, var(--stm-accent) 8%, var(--stm-card-bg));
+  color: var(--stm-ink);
+}
+
+.stm-ext-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 210px;
+}
+
+.stm-ext-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--stm-accent) 18%, transparent);
+  color: var(--stm-accent);
+  flex-shrink: 0;
+}
+
+.stm-ext-hero-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.stm-ext-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stm-ext-hero-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stm-ext-hero-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--stm-ink);
+}
+
+.stm-ext-hero-sub {
+  font-size: 11.5px;
+  color: var(--stm-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stm-ext-hero-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-left: auto;
+}
+
+.stm-ext-hero-open-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px !important;
+  margin: 0 !important;
+  border-radius: 999px !important;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 62%, var(--stm-border)) !important;
+  background: color-mix(in srgb, var(--stm-accent) 22%, var(--stm-card-bg)) !important;
+  color: var(--stm-ink) !important;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s ease, border-color 0.15s ease;
+}
+
+.stm-ext-hero-open-btn:hover {
+  filter: brightness(1.08);
+  border-color: var(--stm-accent) !important;
+}
+
+.stm-ext-hero-open-btn .stm-inline-svg svg {
+  width: 14px;
+  height: 14px;
+}
+
+.extensions_block.stm-ext-tidied > #extensions_settings {
+  flex: 1 1 100% !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.extensions_block.stm-ext-tidied > #extensions_settings2:empty {
+  display: none !important;
+}
+
+.stm-ext-lowfreq-drawer {
+  box-sizing: border-box;
+  width: 100% !important;
+  flex: 1 1 100% !important;
+  margin-top: 8px;
+  border: 1px dashed var(--stm-border);
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.04);
+  overflow: hidden;
+}
+
+.stm-ext-lowfreq-toggle {
+  appearance: none;
+  width: 100% !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--stm-muted);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stm-ext-lowfreq-toggle:hover {
+  color: var(--stm-ink);
+  background: rgba(128, 128, 128, 0.07) !important;
+}
+
+.stm-ext-lowfreq-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.stm-ext-lowfreq-caret {
+  display: inline-flex;
+  align-items: center;
+  transition: transform 0.18s ease;
+}
+
+.stm-ext-lowfreq-caret svg {
+  width: 14px;
+  height: 14px;
+}
+
+.stm-ext-lowfreq-drawer.is-open .stm-ext-lowfreq-caret {
+  transform: rotate(180deg);
+}
+
+.stm-ext-lowfreq-body {
+  padding: 6px 10px 10px;
+  border-top: 1px dashed var(--stm-border);
+}
+
+.stm-ext-lowfreq-body[hidden] {
+  display: none !important;
+}
+
+/* 底栏聊天输入框旁「一键发图 / 表情包」按钮与缩略图预览条 */
+.stm-send-image-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 !important;
+  margin: 0 2px !important;
+  border: 0 !important;
+  border-radius: 7px;
+  background: transparent !important;
+  color: var(--stm-ink);
+  opacity: 0.76;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.stm-send-image-btn:hover {
+  opacity: 1;
+  color: var(--stm-accent);
+  background: rgba(128, 128, 128, 0.12) !important;
+}
+
+.stm-send-image-btn.is-busy {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.stm-send-image-btn svg {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+}
+
+.stm-attached-thumbs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.stm-attached-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--stm-border);
+}
+
+.stm-cw-home-btn {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px !important;
+  font-size: 12px;
+}
+
+.stm-cw-home-btn .stm-inline-svg svg {
+  width: 13px;
+  height: 13px;
 }
 
 /* ==========================================================================

@@ -7,20 +7,21 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.7.8';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.8';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
+  returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.7.7';
+} from '../shell/host-actions.js?v=0.7.8';
 import {
   getBoundPresetForEntity,
   getHostPresetState,
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.7.7';
+} from './preset-backend.js?v=0.7.8';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -54,7 +55,7 @@ import {
   setGlobalWorldBookEnabled,
   toggleWorldInfoEntryEnabled,
   updateWorldInfoBookEntry,
-} from './char-world-backend.js?v=0.7.7';
+} from './char-world-backend.js?v=0.7.8';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -514,7 +515,22 @@ export function createCharWorldDock({
     closeBtn.innerHTML = svgMarkup('close');
     closeBtn.addEventListener('click', () => close());
 
-    rightWrap.append(saveBadge, closeBtn);
+    rightWrap.append(saveBadge);
+
+    if (store.get().topbarMode === 'native' && hasActiveChatSelection(ctx)) {
+      const homeBtn = el('button', 'stm-pill-btn stm-cw-home-btn');
+      homeBtn.type = 'button';
+      homeBtn.title = '关闭当前聊天并退回角色书架首页';
+      homeBtn.innerHTML = `<span class="stm-inline-svg" aria-hidden="true">${svgMarkup('shelf')}</span><span>回书架</span>`;
+      homeBtn.addEventListener('click', async () => {
+        await flushAllPendingSaves();
+        close();
+        await returnToHomeScreen(getContext);
+      });
+      rightWrap.append(homeBtn);
+    }
+
+    rightWrap.append(closeBtn);
     headerEl.append(tabsWrap, rightWrap);
   }
 
@@ -2389,7 +2405,9 @@ export function createCharWorldDock({
         if (!elTarget || typeof elTarget.closest !== 'function') return;
         if (
           dockEl.contains(elTarget) ||
-          elTarget.closest('.stm-topbar-identity') ||
+          elTarget.closest(
+            '.stm-topbar-identity, #rightNavHolder > .drawer-toggle, #WI-SP-button > .drawer-toggle',
+          ) ||
           elTarget.closest('.stm-portrait-lightbox')
         ) {
           return;

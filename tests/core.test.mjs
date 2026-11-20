@@ -187,6 +187,14 @@ import { createCharWorldDock } from '../src/modules/char-world-dock.js';
 import { createReaderDock } from '../src/shell/reader-dock.js';
 import { createTopbar } from '../src/shell/topbar.js';
 import { createSettingsDialog } from '../src/shell/settings-dialog.js';
+import { classifyExtensionEntry, createExtensionsTidy } from '../src/shell/extensions-tidy.js';
+import {
+  attachFilesToHostInput,
+  compressChatImageIfNeeded,
+  createChatVision,
+  ensureHostMediaInliningEnabled,
+  shouldCompressImageFile,
+} from '../src/shell/chat-vision.js';
 
 test('schema: 默认设置严格符合产品约定，且顶栏恒定收敛为 rp 态与全局轻触纯享', () => {
   const normalized = normalizeSettings(undefined);
@@ -4439,27 +4447,83 @@ function createMiniDomHarness() {
       return this.findAll(node => node.matchesSimple(s));
     }
 
-    addEventListener(type, fn) {
+    addEventListener(type, fn, opts = false) {
       if (!this.listeners.has(type)) this.listeners.set(type, []);
-      this.listeners.get(type).push(fn);
+      const capture = typeof opts === 'boolean' ? opts : Boolean(opts?.capture);
+      this.listeners.get(type).push({ fn, capture });
     }
 
-    removeEventListener(type, fn) {
+    removeEventListener(type, fn, opts = false) {
       const arr = this.listeners.get(type);
       if (!arr) return;
-      const idx = arr.indexOf(fn);
+      const capture = typeof opts === 'boolean' ? opts : Boolean(opts?.capture);
+      const idx = arr.findIndex(item => item.fn === fn && item.capture === capture);
       if (idx >= 0) arr.splice(idx, 1);
     }
 
     dispatchEvent(evt) {
       const e = evt || { type: 'unknown' };
-      e.target ||= this;
-      e.preventDefault ||= () => {};
-      e.stopPropagation ||= () => {};
-      const arr = [...(this.listeners.get(e.type) || [])];
-      for (const fn of arr) {
-        fn(e);
+      if (!e.target) {
+        try {
+          Object.defineProperty(e, 'target', { value: this, configurable: true });
+        } catch {
+          // ignore
+        }
       }
+      let stopped = false;
+      let immediateStopped = false;
+      const origStop = e.stopPropagation;
+      const origImmediate = e.stopImmediatePropagation;
+      e.preventDefault ||= () => {};
+      e.stopPropagation = () => {
+        stopped = true;
+        origStop?.call(e);
+      };
+      e.stopImmediatePropagation = () => {
+        stopped = true;
+        immediateStopped = true;
+        origImmediate?.call(e);
+      };
+
+      const ancestors = [];
+      let p = this.parentNode;
+      while (p && typeof p.listeners?.get === 'function') {
+        ancestors.unshift(p);
+        p = p.parentNode;
+      }
+
+      // 1. Capture phase (root -> parent)
+      for (const anc of ancestors) {
+        if (stopped) break;
+        const list = [...(anc.listeners.get(e.type) || [])].filter(item => item.capture);
+        for (const item of list) {
+          item.fn(e);
+          if (immediateStopped) break;
+        }
+      }
+
+      // 2. Target phase
+      if (!stopped) {
+        const targetList = [...(this.listeners.get(e.type) || [])];
+        for (const item of targetList) {
+          item.fn(e);
+          if (immediateStopped) break;
+        }
+      }
+
+      // 3. Bubble phase (parent -> root, only for standard bubbling UI events)
+      if (!stopped && (e.bubbles || e.type === 'click')) {
+        for (let i = ancestors.length - 1; i >= 0; i -= 1) {
+          if (stopped) break;
+          const anc = ancestors[i];
+          const list = [...(anc.listeners.get(e.type) || [])].filter(item => !item.capture);
+          for (const item of list) {
+            item.fn(e);
+            if (immediateStopped) break;
+          }
+        }
+      }
+
       return true;
     }
 
@@ -4951,6 +5015,7 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     assert.equal(content.includes('0.7.4'), false, `文件 ${rel} 不得残留旧版 0.7.4 字符串`);
     assert.equal(content.includes('0.7.5'), false, `文件 ${rel} 不得残留旧版 0.7.5 字符串`);
     assert.equal(content.includes('0.7.6'), false, `文件 ${rel} 不得残留旧版 0.7.6 字符串`);
+    assert.equal(content.includes('0.7.7'), false, `文件 ${rel} 不得残留旧版 0.7.7 字符串`);
   }
   assert.ok(
     cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar') &&
@@ -6220,6 +6285,342 @@ test('v0.7.7 suite-guard: 新用户零基础一键配齐四件套（预写待命
     assert.equal(diagRes.report.includes('sec_super_secret_id_999'), false, '体检单严禁包含密钥保险箱 ID');
     assert.equal(mockRoot.navigator.clipboard.copiedText, diagRes.report);
 
+    settingsDialog.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) + 扩展面板置顶横幅与黄金排序 + 底栏一键发图自动开识图与大图瘦身', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    // 1. 构造酒馆原生顶栏 9 大抽屉槽位
+    const topBar = doc.createElement('div');
+    topBar.id = 'top-bar';
+    doc.body.append(topBar);
+
+    const holder = doc.createElement('div');
+    holder.id = 'top-settings-holder';
+    holder.getBoundingClientRect = () => ({ top: 6, bottom: 54, left: 0, right: 390, width: 390, height: 48 });
+    doc.body.append(holder);
+
+    function addNativeDrawer(drawerId, contentId, origTitle = drawerId) {
+      const d = doc.createElement('div');
+      d.id = drawerId;
+      d.className = 'drawer';
+      const toggle = doc.createElement('div');
+      toggle.className = 'drawer-toggle';
+      const icon = doc.createElement('div');
+      icon.className = 'drawer-icon closedIcon';
+      icon.title = origTitle;
+      icon.setAttribute('title', origTitle);
+      toggle.append(icon);
+      const content = doc.createElement('div');
+      content.id = contentId;
+      content.className = 'drawer-content closedDrawer';
+      toggle.addEventListener('click', () => {
+        const opening = !content.classList.contains('openDrawer');
+        content.classList.toggle('openDrawer', opening);
+        content.classList.toggle('closedDrawer', !opening);
+      });
+      d.append(toggle, content);
+      holder.append(d);
+      return { drawer: d, toggle, icon, content };
+    }
+
+    addNativeDrawer('ai-config-button', 'left-nav-panel', 'AI Configuration');
+    const apiDr = addNativeDrawer('sys-settings-button', 'rm_api_block', 'API Connections');
+    const fmtDr = addNativeDrawer('advanced-formatting-button', 'AdvancedFormatting', 'Advanced Formatting');
+    const wiDr = addNativeDrawer('WI-SP-button', 'WorldInfo', 'World Info');
+    const usrDr = addNativeDrawer('user-settings-button', 'user-settings-block', 'User Settings');
+    addNativeDrawer('backgrounds-button', 'Backgrounds', 'Backgrounds');
+    const extDr = addNativeDrawer('extensions-settings-button', 'rm_extensions_block', 'Extensions');
+    addNativeDrawer('persona-management-button', 'PersonaManagement', 'Persona Management');
+    const chrDr = addNativeDrawer('rightNavHolder', 'right-nav-panel', 'Character Management');
+
+    // 2. 在 #rm_extensions_block 内模拟杂乱的原生模块与第三方插件
+    const extBlock = doc.createElement('div');
+    extBlock.className = 'extensions_block flex-container';
+    const extHeader = doc.createElement('div');
+    extHeader.className = 'alignitemscenter flex-container wide100p';
+    const col1 = doc.createElement('div');
+    col1.id = 'extensions_settings';
+    const col2 = doc.createElement('div');
+    col2.id = 'extensions_settings2';
+
+    const makeExtItem = (id, titleText) => {
+      const wrap = doc.createElement('div');
+      if (id) wrap.id = id;
+      const b = doc.createElement('b');
+      b.textContent = titleText;
+      wrap.append(b);
+      return wrap;
+    };
+
+    const weatherNode = makeExtItem('accuweather_container', 'AccuWeather');
+    const ttsNode = makeExtItem('tts_container', 'TTS');
+    const thirdPartyNode = makeExtItem('little_white_box_settings', '小白X');
+    col1.append(weatherNode, ttsNode, thirdPartyNode);
+
+    const qrNode = makeExtItem('qr_container', '快速回复');
+    const regexNode = makeExtItem('regex_container', '正则');
+    const helperNode = makeExtItem('TH-settings', '酒馆助手');
+    const vectorsNode = makeExtItem('vectors_container', '向量存储');
+    col2.append(qrNode, regexNode, helperNode, vectorsNode);
+
+    const extrasHr = doc.createElement('hr');
+    const extrasRow = makeExtItem('', '(DEPRECATED) Extras API');
+    extBlock.append(extHeader, col1, col2, extrasHr, extrasRow);
+    extDr.content.append(extBlock);
+
+    // 3. 构造底栏输入框与附件表单 DOM
+    const sendForm = doc.createElement('div');
+    sendForm.id = 'send_form';
+    const fileForm = doc.createElement('form');
+    fileForm.id = 'file_form';
+    fileForm.className = 'wide100p displayNone';
+    const fileAttached = doc.createElement('div');
+    fileAttached.className = 'file_attached';
+    const fileInput = doc.createElement('input');
+    fileInput.id = 'file_form_input';
+    fileInput.type = 'file';
+    const fileNameSpan = doc.createElement('span');
+    fileNameSpan.className = 'file_name';
+    const fileSizeSpan = doc.createElement('span');
+    fileSizeSpan.className = 'file_size';
+    fileAttached.append(fileInput, fileNameSpan, fileSizeSpan);
+    fileForm.append(fileAttached);
+    const leftSendForm = doc.createElement('div');
+    leftSendForm.id = 'leftSendForm';
+    const sendTextarea = doc.createElement('textarea');
+    sendTextarea.id = 'send_textarea';
+    sendForm.append(fileForm, leftSendForm, sendTextarea);
+    doc.body.append(sendForm);
+
+    const inliningCheckbox = doc.createElement('input');
+    inliningCheckbox.id = 'openai_media_inlining';
+    inliningCheckbox.type = 'checkbox';
+    inliningCheckbox.checked = false;
+    doc.body.append(inliningCheckbox);
+
+    const ctx = {
+      extensionSettings: {},
+      chatCompletionSettings: { media_inlining: false },
+      mainApi: 'openai',
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'campus_hero.png', name: '陆星河', description: '学长' }],
+      chat: [{ name: '陆星河', is_user: false, is_system: false, mes: '发什么表情包呢？' }],
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const moduleBridge = createModuleBridge({ root: win, getContext: () => ctx, store });
+
+    const readerDock = createReaderDock({ getContext: () => ctx, store });
+    const apiDock = createApiDock({ getContext: () => ctx, store });
+    const presetDock = createPresetDock({ getContext: () => ctx, store });
+    const charWorldDock = createCharWorldDock({ getContext: () => ctx, store });
+    const settingsDialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      onToggleShell: () => {},
+    });
+
+    const extTidy = createExtensionsTidy({
+      root: { document: doc },
+      store,
+      stmVersion: '0.7.8',
+      onOpenSettings: () => settingsDialog.open(),
+      onSwitchTopbarMode: nextMode => store.update({ topbarMode: nextMode }),
+    });
+
+    const chatVision = createChatVision({
+      root: { document: doc },
+      getContext: () => ctx,
+      store,
+    });
+
+    const topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      onOpenSettings: () => settingsDialog.open(),
+      onToggleCharWorldDock: () => charWorldDock.toggle(),
+      onOpenCharWorldTab: tab => {
+        readerDock.close();
+        apiDock.close();
+        presetDock.close();
+        charWorldDock.open(tab);
+      },
+      onCloseCharWorldDock: () => charWorldDock.close(),
+      getCharWorldActiveTab: () => charWorldDock.getActiveTab(),
+      isCharWorldDockOpen: () => charWorldDock.isOpen(),
+      onTogglePresetDock: () => {
+        readerDock.close();
+        apiDock.close();
+        charWorldDock.close();
+        presetDock.toggle();
+      },
+      isPresetDockOpen: () => presetDock.isOpen(),
+      onToggleApiDock: () => {
+        readerDock.close();
+        presetDock.close();
+        charWorldDock.close();
+        apiDock.toggle();
+      },
+      isApiDockOpen: () => apiDock.isOpen(),
+      onToggleReaderDock: () => {
+        apiDock.close();
+        presetDock.close();
+        charWorldDock.close();
+        readerDock.toggle();
+      },
+      isReaderDockOpen: () => readerDock.isOpen(),
+      onNativeDrawerOpened: () => {
+        readerDock.close();
+        apiDock.close();
+        presetDock.close();
+        charWorldDock.close();
+      },
+    });
+
+    // === 验证 A：扩展面板置顶横幅大卡片 + 黄金顺序排列 + 低频模块收纳 + 无损还原 ===
+    assert.equal(classifyExtensionEntry(regexNode).kind, 'regex');
+    assert.equal(classifyExtensionEntry(helperNode).kind, 'helper');
+    assert.equal(classifyExtensionEntry(qrNode).kind, 'qr');
+    assert.equal(classifyExtensionEntry(thirdPartyNode).kind, 'third_party');
+    assert.equal(classifyExtensionEntry(weatherNode).kind, 'low_freq_builtin');
+
+    extTidy.sync();
+    const heroCard = doc.getElementById('stm-ext-hero-card');
+    assert.ok(heroCard, '扩展面板顶部必须挂载 #stm-ext-hero-card 大横幅');
+    assert.equal(extBlock.children[1], heroCard, '横幅必须紧随扩展标题行排在最顶部');
+    assert.deepEqual(
+      col1.children.map(n => n.id),
+      ['regex_container', 'TH-settings', 'qr_container', 'little_white_box_settings'],
+      '明面扩展严格按「正则 -> 酒馆助手 -> 快速回复 -> 第三方插件」黄金顺序排列',
+    );
+    assert.equal(col1.style.getPropertyValue('display'), '', '严禁对 #extensions_settings 设 display:contents');
+
+    const lowFreqDrawer = doc.getElementById('stm-ext-lowfreq-drawer');
+    assert.ok(lowFreqDrawer, '低频原生模块统一收进底部折叠夹');
+    const lowFreqBody = lowFreqDrawer.querySelector('.stm-ext-lowfreq-body');
+    assert.equal(lowFreqBody.hidden, true, '低频收纳夹默认折叠不占首屏高度');
+    assert.ok(lowFreqBody.contains(weatherNode) && lowFreqBody.contains(vectorsNode) && lowFreqBody.contains(ttsNode));
+
+    // 点击横幅上的「切原版顶栏」快捷钮 -> 直接切入 native 原版顶栏模式！
+    const heroModeBtn = heroCard.querySelector('.stm-ext-hero-mode-btn');
+    heroModeBtn.click();
+    assert.equal(store.get().topbarMode, 'native', '横幅快捷钮可一键切为原版顶栏模式');
+
+    // === 验证 B：原版顶栏模式 (topbarMode === 'native') 图标接管映射 ===
+    topbar.refresh();
+    readerDock.refresh();
+    assert.equal(doc.body.classList.contains('stm-native-topbar'), true, 'body 挂载 stm-native-topbar');
+    assert.equal(doc.getElementById('stm-topbar').hidden, true, '原版顶栏模式下隐藏 .stm-topbar');
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--stm-native-bar-offset'),
+      '54px',
+      '精准测量原版胶囊顶栏底边坐标供四大下拉面板贴边展开',
+    );
+    assert.equal(fmtDr.icon.title, '页面排版与背景 (Aa)', '原版 T 图标提示升级为 Aa 页面排版');
+
+    // 点击原版第 3 个 T 键 (#advanced-formatting-button) -> 打开伴侣 Aa 页面排版抽屉而非原生高级格式！
+    fmtDr.toggle.click();
+    assert.equal(readerDock.isOpen(), true, '点击原版 T 键直接呼出 Aa 页面排版面板');
+    assert.equal(fmtDr.content.classList.contains('openDrawer'), false, '不误开灰置的原生高级格式面板');
+    assert.equal(fmtDr.toggle.classList.contains('stm-native-icon-active'), true);
+
+    // 点击原版插头 (#sys-settings-button) -> 收起 Aa 并打开伴侣 API 工作台
+    apiDr.toggle.click();
+    assert.equal(readerDock.isOpen(), false);
+    assert.equal(apiDock.isOpen(), true, '点击原版插头呼出 API 与模型工作台');
+
+    // 点击原版书本 (#WI-SP-button) -> 打开清爽世界书页签；点击最右角色 (#rightNavHolder) -> 切到角色档案页签且带「回书架」按钮！
+    wiDr.toggle.click();
+    assert.equal(apiDock.isOpen(), false);
+    assert.equal(charWorldDock.isOpen(), true);
+    assert.equal(charWorldDock.getActiveTab(), 'world', '点击书本直达清爽世界书页签');
+
+    chrDr.toggle.click();
+    assert.equal(charWorldDock.isOpen(), true);
+    assert.equal(charWorldDock.getActiveTab(), 'char', '点击双人角色切至角色档案页签');
+    assert.ok(
+      doc.getElementById('stm-char-world-dock').querySelector('.stm-cw-home-btn'),
+      '原版顶栏模式下角色档案页头部自动补齐「回书架」快捷钮',
+    );
+
+    // 点击原版齿轮 (#user-settings-button) -> 自动收起伴侣面板并保持原生美化主题面板正常展开！
+    usrDr.toggle.click();
+    assert.equal(charWorldDock.isOpen(), false, '点齿轮前自动收起伴侣下拉面板防叠层');
+    assert.equal(usrDr.content.classList.contains('openDrawer'), true, '齿轮完整保留原版用户设置/美化主题功能');
+    usrDr.toggle.click();
+
+    // 关闭扩展面板净化开关时 100% 归位原始 DOM
+    store.update({ tidy: { tidyExtensionsPanel: false } });
+    extTidy.sync();
+    assert.equal(doc.getElementById('stm-ext-lowfreq-drawer'), null, '关闭净化后移除低频收纳夹');
+    assert.deepEqual(
+      col2.children.map(n => n.id),
+      ['qr_container', 'regex_container', 'TH-settings', 'vectors_container'],
+      '关闭净化后 col2 所有条目按原始顺序 100% 归位',
+    );
+
+    // === 验证 C：底栏聊天窗一键发图 / 表情包识图 + 自动开启 media_inlining + 大图压缩判断 ===
+    chatVision.refresh();
+    const imgBtn = doc.getElementById('stm-send-image-btn');
+    assert.ok(imgBtn && !imgBtn.hidden, '活跃对话中在 #leftSendForm 挂载一键发图按钮');
+
+    assert.equal(
+      shouldCompressImageFile({ name: 'meme.gif', type: 'image/gif', size: 1024 * 1024 }),
+      false,
+      'GIF 动图表情包严格跳过静态重编码以保留动画',
+    );
+    assert.equal(
+      shouldCompressImageFile({ name: 'small_sticker.png', type: 'image/png', size: 80 * 1024 }),
+      false,
+      '小体积表情包保持原图零损画质',
+    );
+    assert.equal(
+      shouldCompressImageFile({ name: 'camera_photo.jpg', type: 'image/jpeg', size: 4 * 1024 * 1024 }),
+      true,
+      '手机超大原图触发瘦身防反代 413 报错',
+    );
+
+    // 模拟玩家选择/粘贴一张表情包图片
+    const stickerFile = new File([new Uint8Array([137, 80, 78, 71])], 'cat_hug.png', {
+      type: 'image/png',
+      lastModified: 1700000000000,
+    });
+    const attached = await chatVision.processAndAttachImages([stickerFile]);
+    assert.equal(attached.length, 1);
+    assert.equal(ctx.chatCompletionSettings.media_inlining, true, '发图时自动帮玩家开启 oai_settings.media_inlining');
+    assert.equal(inliningCheckbox.checked, true, '同步勾选 #openai_media_inlining 复选框');
+    assert.equal(fileForm.classList.contains('displayNone'), false, '自动点亮输入框上方的附件预览条');
+    assert.equal(fileNameSpan.textContent, 'cat_hug.png');
+    assert.equal(Array.from(fileInput.files).length, 1);
+
+    // 纯文字 RP 玩家关闭发图开关后，底栏按钮立即彻底移除零残留
+    store.update({ chatImageButton: false });
+    chatVision.refresh();
+    assert.equal(doc.getElementById('stm-send-image-btn'), null, '关闭发图开关后彻底移除底栏图片按钮');
+
+    chatVision.destroy();
+    extTidy.destroy();
+    topbar.destroy();
+    charWorldDock.destroy();
+    presetDock.destroy();
+    apiDock.destroy();
+    readerDock.destroy();
     settingsDialog.destroy();
   } finally {
     globalThis.document = prevDoc;
