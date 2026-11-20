@@ -1,5 +1,5 @@
 /**
- * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.9（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · ST伴侣 (st-mate) · 全栈样式表 v0.7.10（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -45,7 +45,8 @@ body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) {
   --stm-drawer-top: var(--stm-safe-top);
 }
 
-body.stm-shell-active.stm-native-topbar:not(.stm-home-cloak) {
+body.stm-shell-active.stm-native-topbar,
+body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) {
   --stm-active-top-offset: var(--stm-native-bar-offset, calc(var(--topBarBlockSize, 48px) + var(--stm-safe-top)));
   --stm-drawer-top: var(--stm-native-bar-offset, calc(var(--topBarBlockSize, 48px) + var(--stm-safe-top)));
 }
@@ -261,12 +262,12 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
   transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.14s ease;
 }
 
-/* 首页书架净空态：无过渡秒切，杜绝进出聊天时的连续重排 */
+/* 首页书架态：伴侣顶栏下全视口净空，原版顶栏下自动让出原版顶栏高度零遮挡 */
 html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
-  top: var(--stm-safe-top) !important;
-  height: calc(100vh - var(--stm-safe-top)) !important;
-  height: calc(100dvh - var(--stm-safe-top)) !important;
-  max-height: calc(100dvh - var(--stm-safe-top)) !important;
+  top: var(--stm-active-top-offset) !important;
+  height: calc(100vh - var(--stm-active-top-offset)) !important;
+  height: calc(100dvh - var(--stm-active-top-offset)) !important;
+  max-height: calc(100dvh - var(--stm-active-top-offset)) !important;
   transition: none !important;
 }
 
@@ -279,9 +280,9 @@ html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
   }
 
   body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
-    top: var(--stm-safe-top) !important;
-    height: calc(100dvh - var(--stm-safe-top)) !important;
-    max-height: calc(100dvh - var(--stm-safe-top)) !important;
+    top: var(--stm-active-top-offset) !important;
+    height: calc(100dvh - var(--stm-active-top-offset)) !important;
+    max-height: calc(100dvh - var(--stm-active-top-offset)) !important;
   }
 
   html body.stm-shell-active #top-settings-holder#top-settings-holder .drawer-content,
@@ -305,9 +306,8 @@ body.stm-shell-active.stm-pure-reading:not(.stm-native-drawer-open) .stm-topbar 
   pointer-events: none !important;
 }
 
-body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) #top-bar,
+/* 原版顶栏模式下：书架首页常驻展示原版顶栏方便操作，仅在对话内轻触「全屏纯享阅读」时丝滑收起 */
 body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-open) #top-bar,
-body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) #top-settings-holder,
 body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-open) #top-settings-holder {
   opacity: 0 !important;
   transform: translate3d(0, -115%, 0) !important;
@@ -7262,5 +7262,195 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
 @media screen and (max-width: 768px) {
   .stm-export-json-preview {
     font-size: 16px;
+  }
+}
+
+/* ==========================================================================
+   8. 手机窄屏正则面板防挤压 & 柏宝箱 (ST-BaiBai-Tools) / 酒馆盒子兼容层（承袭界面整理 v0.2.12）
+   ========================================================================== */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1200px) {
+  body.stm-shell-active #rm_extensions_block #regex_container,
+  body.stm-shell-active #rm_extensions_block #regex_container .inline-drawer-content,
+  body.stm-shell-active #rm_extensions_block #regex_container .flex-container:where(:not(.checkbox):not(.bai-bai-regex-group-title):not(.regex_script_buttons):not(.flexnowrap)) {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .checkbox.flex-container {
+    width: auto !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container {
+    display: block !important;
+    overflow-x: hidden !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .flex-container:not(.regex-script-label):not(.regex_script_buttons):not(.flexnowrap):not(.regex-script-container):where(:not(.flexFlowColumn):not(.bai-bai-regex-group-body):not(.bai-bai-regex-group-title):not(.regex_bulk_operations):not(.checkbox):not([hidden]):not(.displayNone)) {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: stretch !important;
+    gap: 6px !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-container {
+    display: flex !important;
+    flex-flow: column nowrap !important;
+    align-items: stretch !important;
+    align-content: flex-start !important;
+    gap: 6px !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-vue-list,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-groups,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-list {
+    flex-flow: column nowrap !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group {
+    flex: 0 0 auto !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-header {
+    display: flex !important;
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-title.flex-container,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-title {
+    width: auto !important;
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+    flex-wrap: nowrap !important;
+    align-items: baseline !important;
+    overflow: hidden !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-name {
+    min-width: 0 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-header > .menu_button,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-toggle {
+    flex: 0 0 auto !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-framed > .bai-bai-regex-group-body {
+    display: grid !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-collapsed > .bai-bai-regex-group-body {
+    display: grid !important;
+    grid-template-rows: 0fr !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-collapsed .bai-bai-regex-group-body-inner,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-group-collapsed .bai-bai-regex-group-list {
+    min-height: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label:where(:not(.pcm-ng-hidden):not([hidden])) {
+    display: flex !important;
+    width: 100% !important;
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 4px !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .drag-handle,
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .menu-handle {
+    flex: 0 0 auto !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .regex_script_name,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-item-name,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-script-name {
+    flex: 1 1 0% !important;
+    width: auto !important;
+    min-width: 48px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container :is(.regex-script-label, .bai-bai-regex-item) > .flex-container:last-child,
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label .regex_script_buttons {
+    width: auto !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 4px !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .flex-container:last-child > .regex_script_buttons {
+    flex: 0 0 max-content !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: none !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .flex-container:last-child > .menu_button,
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label .regex_script_buttons > .menu_button {
+    flex: 0 0 auto !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label select,
+  body.stm-shell-active #rm_extensions_block #regex_container .bai-bai-regex-vue-list select {
+    width: auto !important;
+    max-width: 72px !important;
+    flex: 0 1 auto !important;
+    padding-inline: 4px !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container .flex-container > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block #regex_container input,
+  body.stm-shell-active #rm_extensions_block #regex_container select,
+  body.stm-shell-active #rm_extensions_block #regex_container textarea {
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block .inline-drawer-header {
+    min-width: 0 !important;
+    overflow-wrap: anywhere;
+    min-height: 40px !important;
+    padding: 8px 10px !important;
+  }
+
+  body.stm-shell-active #rm_extensions_block .inline-drawer-content {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden;
+    padding-inline: 10px !important;
   }
 }

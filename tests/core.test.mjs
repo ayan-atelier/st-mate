@@ -5008,20 +5008,26 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
   for (const file of collectFiles(suiteRoot)) {
     const content = fs.readFileSync(file, 'utf8');
     const rel = path.relative(suiteRoot, file);
-    assert.equal(content.includes('0.7.0'), false, `文件 ${rel} 不得残留旧版 0.7.0 字符串`);
-    assert.equal(content.includes('0.7.1'), false, `文件 ${rel} 不得残留旧版 0.7.1 字符串`);
-    assert.equal(content.includes('0.7.2'), false, `文件 ${rel} 不得残留旧版 0.7.2 字符串`);
-    assert.equal(content.includes('0.7.3'), false, `文件 ${rel} 不得残留旧版 0.7.3 字符串`);
-    assert.equal(content.includes('0.7.4'), false, `文件 ${rel} 不得残留旧版 0.7.4 字符串`);
-    assert.equal(content.includes('0.7.5'), false, `文件 ${rel} 不得残留旧版 0.7.5 字符串`);
-    assert.equal(content.includes('0.7.6'), false, `文件 ${rel} 不得残留旧版 0.7.6 字符串`);
-    assert.equal(content.includes('0.7.7'), false, `文件 ${rel} 不得残留旧版 0.7.7 字符串`);
-    assert.equal(content.includes('0.7.8'), false, `文件 ${rel} 不得残留旧版 0.7.8 字符串`);
+    for (let patch = 0; patch <= 9; patch += 1) {
+      const staleRe = new RegExp(`0\\.7\\.${patch}(?!\\d)`);
+      assert.equal(staleRe.test(content), false, `文件 ${rel} 不得残留旧版 0.7.${patch} 字符串`);
+    }
   }
   assert.ok(
     cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) .stm-topbar') &&
       cssNoComments.includes('body.stm-shell-active.stm-home-cloak:not(.stm-native-drawer-open) {'),
     '首页净空态在原生抽屉展开 (.stm-native-drawer-open) 时必须自动显露顶栏并让出 44px 抽屉顶边防卡死',
+  );
+  assert.equal(
+    cssNoComments.includes('stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-open) #top-settings-holder'),
+    false,
+    '原版顶栏模式在书架首页必须常驻放开原版顶栏，不得在首页隐藏 #top-settings-holder',
+  );
+  assert.ok(
+    cssNoComments.includes('body.stm-shell-active #rm_extensions_block #regex_container .regex-script-label > .regex_script_name') &&
+      cssNoComments.includes('.bai-bai-regex-group-collapsed > .bai-bai-regex-group-body') &&
+      cssNoComments.includes(':where(:not(.pcm-ng-hidden):not([hidden]))'),
+    'style.css 必须完整包含手机端 #regex_container 标题防 0px 挤压与柏宝箱/酒馆盒子分组兼容规则',
   );
 });
 
@@ -6446,7 +6452,7 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     const extTidy = createExtensionsTidy({
       root: { document: doc },
       store,
-      stmVersion: '0.7.9',
+      stmVersion: '0.7.10',
       onOpenSettings: () => settingsDialog.open(),
       onSwitchTopbarMode: nextMode => store.update({ topbarMode: nextMode }),
     });
@@ -6523,7 +6529,35 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     assert.ok(lowFreqDrawer, '低频原生模块统一收进底部折叠夹');
     const lowFreqBody = lowFreqDrawer.querySelector('.stm-ext-lowfreq-body');
     assert.equal(lowFreqBody.hidden, true, '低频收纳夹默认折叠不占首屏高度');
-    assert.ok(lowFreqBody.contains(weatherNode) && lowFreqBody.contains(vectorsNode) && lowFreqBody.contains(ttsNode));
+    assert.ok(
+      lowFreqBody.contains(weatherNode) &&
+        lowFreqBody.contains(vectorsNode) &&
+        lowFreqBody.contains(ttsNode) &&
+        lowFreqBody.contains(extrasHr) &&
+        lowFreqBody.contains(extrasRow),
+    );
+
+    // 二次及多次触发 sync() / refreshHeroStatus() 必须 100% 幂等：deprecatedExtras 绝不回流 col1，且 col1 零 DOM 插拔（彻底根治点正则开关 500ms 后列表刷新跳动！）
+    let col1Mutations = 0;
+    const origInsertBefore = col1.insertBefore.bind(col1);
+    const origAppendChild = col1.appendChild.bind(col1);
+    col1.insertBefore = (...args) => {
+      col1Mutations += 1;
+      return origInsertBefore(...args);
+    };
+    col1.appendChild = (...args) => {
+      col1Mutations += 1;
+      return origAppendChild(...args);
+    };
+    extTidy.sync();
+    extTidy.sync();
+    extTidy.refreshHeroStatus();
+    assert.equal(col1Mutations, 0, '连续多次同步时 col1 必须保持 0 次 DOM 节点移动，绝不触发柏宝箱/正则列表重绘');
+    assert.deepEqual(
+      col1.children.map(n => n.id),
+      ['regex_container', 'TH-settings', 'qr_container', 'little_white_box_settings'],
+    );
+    assert.equal(lowFreqBody.contains(extrasRow), true, 'Extras API 持久留在低频收纳夹内绝不回流');
 
     // 点击横幅上的「切原版顶栏」快捷钮 -> 直接切入 native 原版顶栏模式！
     const heroModeBtn = heroCard.querySelector('.stm-ext-hero-mode-btn');

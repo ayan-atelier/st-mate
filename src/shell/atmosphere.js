@@ -6,8 +6,8 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.7.9';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.7.9';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.7.10';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.7.10';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',

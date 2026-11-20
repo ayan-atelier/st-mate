@@ -6,8 +6,8 @@
  * 3. 严禁使用 display:contents 与 subtree:true 深度监听（彻底杜绝 iOS TauriTavern 多插件重排闪退），关闭开关时 100% 归位原始 DOM。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.9';
-import { closeAllNativeDrawers } from './host-actions.js?v=0.7.9';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
+import { closeAllNativeDrawers } from './host-actions.js?v=0.7.10';
 
 export const LOW_FREQ_BUILTIN_CONTAINER_IDS = Object.freeze([
   'vectors_container',
@@ -63,9 +63,16 @@ function readEntryHeaderLabel(node) {
  * 识别扩展面板顶层子项类别与排序权重（纯函数，支持单测独立验证）。
  */
 export function classifyExtensionEntry(node) {
+  const tag = String(node?.tagName || '').toUpperCase();
+  if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK' || tag === 'TEMPLATE') {
+    return { kind: 'ignore', tier: 99 };
+  }
   const id = String(node?.id || '').trim();
   if (id === 'stm-ext-hero-card' || id === 'stm-ext-inline-drawer' || id === 'stm-ext-lowfreq-drawer') {
     return { kind: 'internal', tier: 0 };
+  }
+  if (tag === 'HR' || node?.dataset?.stmDeprecatedExtra === '1') {
+    return { kind: 'deprecated_extra', tier: 7 };
   }
   if (id === 'regex_container') {
     return { kind: 'regex', tier: 1 };
@@ -97,7 +104,7 @@ export function classifyExtensionEntry(node) {
 export function createExtensionsTidy({
   root = globalThis,
   store,
-  stmVersion = '0.7.9',
+  stmVersion = '0.7.10',
   onOpenSettings,
   onToggleShell,
   onSwitchTopbarMode,
@@ -141,7 +148,13 @@ export function createExtensionsTidy({
 
   function appendOrderedChildren(container, desiredNodes) {
     if (!container) return;
-    const currentKids = container.children ? [...container.children] : [];
+    const isIgnoredTag = n => {
+      const t = String(n?.tagName || '').toUpperCase();
+      return t === 'SCRIPT' || t === 'STYLE' || t === 'LINK' || t === 'TEMPLATE';
+    };
+    const currentKids = (container.children ? [...container.children] : []).filter(
+      n => n !== heroCardEl && n !== lowFreqDrawerEl && !isIgnoredTag(n),
+    );
     let needsMove = currentKids.length !== desiredNodes.length;
     if (!needsMove) {
       for (let i = 0; i < desiredNodes.length; i += 1) {
@@ -153,18 +166,52 @@ export function createExtensionsTidy({
     }
     if (!needsMove) return;
 
-    for (const item of desiredNodes) {
-      if (item && item.parentNode !== container) {
-        container.appendChild(item);
-      }
-    }
-    // 对已在同一容器但顺序不同的节点按目标顺序重排
-    for (let i = 0; i < desiredNodes.length; i += 1) {
+    // 从后往前采用最小位移 insertBefore，绝不重复拔插已就位的 #regex_container / 酒馆助手节点（防止打断内部滚动或触发外部观察器刷新）
+    let nextRef = null;
+    for (let i = desiredNodes.length - 1; i >= 0; i -= 1) {
       const target = desiredNodes[i];
       if (!target) continue;
-      if (container.children[i] !== target) {
-        container.appendChild(target);
+      const kids = container.children ? [...container.children] : [];
+      const targetIdx = kids.indexOf(target);
+      const refIdx = nextRef ? kids.indexOf(nextRef) : kids.length;
+      if (target.parentNode !== container || targetIdx !== refIdx - 1) {
+        if (typeof container.insertBefore === 'function') {
+          container.insertBefore(target, nextRef);
+        } else {
+          container.appendChild(target);
+        }
       }
+      nextRef = target;
+    }
+  }
+
+  function updateHeroCardCopy() {
+    if (!heroCardEl) return;
+    const s = store.get();
+    const chipEl = heroCardEl._statusChip || heroCardEl.querySelector?.('.stm-ext-hero-chip');
+    const modeBtn = heroCardEl._subActionBtn || heroCardEl.querySelector?.('.stm-ext-hero-mode-btn');
+    if (chipEl) {
+      const modeText = !s.shellEnabled
+        ? '已挂起（原生态）'
+        : s.topbarMode === 'native'
+          ? '原版顶栏运行中'
+          : '伴侣顶栏运行中';
+      if (chipEl.textContent !== `v${stmVersion} · ${modeText}`) {
+        chipEl.textContent = `v${stmVersion} · ${modeText}`;
+      }
+    }
+    if (modeBtn) {
+      let nextText = '切原版顶栏';
+      let nextTitle = '保留酒馆美化主题的原版胶囊顶栏，同时继续使用伴侣各大工作台';
+      if (!s.shellEnabled) {
+        nextText = '恢复伴侣界面';
+        nextTitle = '一键恢复 ST伴侣全部勾选模块';
+      } else if (s.topbarMode === 'native') {
+        nextText = '切伴侣顶栏';
+        nextTitle = '切换为 ST伴侣极简沉浸顶栏';
+      }
+      if (modeBtn.textContent !== nextText) modeBtn.textContent = nextText;
+      if (modeBtn.title !== nextTitle) modeBtn.title = nextTitle;
     }
   }
 
@@ -232,7 +279,10 @@ export function createExtensionsTidy({
     }
 
     if (extBlock && col1 && col1.parentNode === extBlock) {
-      if (heroCardEl.parentNode !== extBlock || heroCardEl.nextElementSibling !== col1) {
+      const extKids = extBlock.children ? [...extBlock.children] : [];
+      const heroIdx = extKids.indexOf(heroCardEl);
+      const col1Idx = extKids.indexOf(col1);
+      if (heroCardEl.parentNode !== extBlock || heroIdx !== col1Idx - 1) {
         if (typeof col1.before === 'function') {
           col1.before(heroCardEl);
         } else if (typeof extBlock.insertBefore === 'function') {
@@ -245,29 +295,7 @@ export function createExtensionsTidy({
       col1.prepend?.(heroCardEl);
     }
 
-    const s = store.get();
-    const chipEl = heroCardEl._statusChip || heroCardEl.querySelector?.('.stm-ext-hero-chip');
-    const modeBtn = heroCardEl._subActionBtn || heroCardEl.querySelector?.('.stm-ext-hero-mode-btn');
-    if (chipEl) {
-      const modeText = !s.shellEnabled
-        ? '已挂起（原生态）'
-        : s.topbarMode === 'native'
-          ? '原版顶栏运行中'
-          : '伴侣顶栏运行中';
-      chipEl.textContent = `v${stmVersion} · ${modeText}`;
-    }
-    if (modeBtn) {
-      if (!s.shellEnabled) {
-        modeBtn.textContent = '恢复伴侣界面';
-        modeBtn.title = '一键恢复 ST伴侣全部勾选模块';
-      } else if (s.topbarMode === 'native') {
-        modeBtn.textContent = '切伴侣顶栏';
-        modeBtn.title = '切换为 ST伴侣极简沉浸顶栏';
-      } else {
-        modeBtn.textContent = '切原版顶栏';
-        modeBtn.title = '保留酒馆美化主题的原版胶囊顶栏，同时继续使用伴侣各大工作台';
-      }
-    }
+    updateHeroCardCopy();
   }
 
   function ensureLowFreqDrawer(doc, extBlock) {
@@ -330,6 +358,9 @@ export function createExtensionsTidy({
           .sort((a, b) => a.initialIndex - b.initialIndex || a.initialOrder - b.initialOrder);
         for (const rec of sorted) {
           if (rec.node === heroCardEl || rec.node === lowFreqDrawerEl) continue;
+          if (rec.node?.dataset) {
+            delete rec.node.dataset.stmDeprecatedExtra;
+          }
           parent.appendChild(rec.node);
         }
       }
@@ -391,8 +422,8 @@ export function createExtensionsTidy({
         collectFrom(lowFreqBodyEl);
       }
 
-      // 收集 .extensions_block 底部的 (DEPRECATED) Extras API 分割线与面板一并归入低频收纳夹
-      const deprecatedExtrasNodes = [];
+      // 收集 .extensions_block 底部的 (DEPRECATED) Extras API 分割线与面板一并归入低频收纳夹，并打上持久标记杜绝二次同步误迁回明面
+      const deprecatedExtrasFromRoot = [];
       if (extBlock?.children) {
         let afterCols = false;
         for (const child of [...extBlock.children]) {
@@ -402,33 +433,39 @@ export function createExtensionsTidy({
           }
           if (!afterCols || child === heroCardEl || child === lowFreqDrawerEl) continue;
           rememberOrigin(child);
-          deprecatedExtrasNodes.push(child);
+          if (child?.dataset) {
+            child.dataset.stmDeprecatedExtra = '1';
+          }
+          deprecatedExtrasFromRoot.push(child);
         }
       }
 
       const mainItems = [];
       const lowFreqItems = [];
+      const deprecatedExtraItems = [];
       candidatePool.forEach((node, idx) => {
         const info = classifyExtensionEntry(node);
-        if (info.kind === 'internal') return;
-        if (info.kind === 'low_freq_builtin') {
+        if (info.kind === 'internal' || info.kind === 'ignore') return;
+        if (info.kind === 'deprecated_extra') {
+          deprecatedExtraItems.push(node);
+        } else if (info.kind === 'low_freq_builtin') {
           lowFreqItems.push({ node, info, idx });
         } else {
           mainItems.push({ node, info, idx });
         }
       });
+      for (const extraNode of deprecatedExtrasFromRoot) {
+        if (!deprecatedExtraItems.includes(extraNode)) {
+          deprecatedExtraItems.push(extraNode);
+        }
+      }
 
       mainItems.sort((a, b) => a.info.tier - b.info.tier || a.idx - b.idx);
       lowFreqItems.sort((a, b) => (a.info.subOrder ?? 999) - (b.info.subOrder ?? 999) || a.idx - b.idx);
 
-      extBlock?.classList?.add?.('stm-ext-tidied');
-      appendOrderedChildren(
-        primaryCol,
-        mainItems.map(entry => entry.node),
-      );
-
+      // 注意：应先把低频项移入底部收纳夹，再对 primaryCol 做最小位移校验，这样已在原位的主力项（如 #regex_container）全程 0 移动！
       const totalLowFreqCount = lowFreqItems.length;
-      if (totalLowFreqCount > 0 || deprecatedExtrasNodes.length > 0) {
+      if (totalLowFreqCount > 0 || deprecatedExtraItems.length > 0) {
         const hostForDrawer = extBlock || primaryCol;
         ensureLowFreqDrawer(doc, hostForDrawer);
         if (lowFreqCountSpan) {
@@ -436,7 +473,7 @@ export function createExtensionsTidy({
         }
         appendOrderedChildren(lowFreqBodyEl, [
           ...lowFreqItems.map(entry => entry.node),
-          ...deprecatedExtrasNodes,
+          ...deprecatedExtraItems,
         ]);
         if (extBlock && lowFreqDrawerEl.parentNode === extBlock && extBlock.lastElementChild !== lowFreqDrawerEl) {
           extBlock.appendChild(lowFreqDrawerEl);
@@ -446,6 +483,12 @@ export function createExtensionsTidy({
         lowFreqDrawerEl = null;
         lowFreqBodyEl = null;
       }
+
+      extBlock?.classList?.add?.('stm-ext-tidied');
+      appendOrderedChildren(
+        primaryCol,
+        mainItems.map(entry => entry.node),
+      );
     } finally {
       isMutating = false;
     }
@@ -516,6 +559,7 @@ export function createExtensionsTidy({
 
   return {
     sync: syncNow,
+    refreshHeroStatus: updateHeroCardCopy,
     schedule: scheduleSync,
     destroy,
   };
