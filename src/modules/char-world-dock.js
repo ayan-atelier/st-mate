@@ -7,21 +7,21 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.4';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.7';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.8.4';
+} from '../shell/host-actions.js?v=0.8.7';
 import {
   getBoundPresetForEntity,
   getHostPresetState,
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.8.4';
+} from './preset-backend.js?v=0.8.7';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -39,12 +39,14 @@ import {
   createWorldInfoBookEntry,
   cycleWorldInfoEntryTriggerMode,
   deleteCharacterGalleryItem,
+  deleteHostWorldBooks,
   deleteWorldInfoBookEntry,
   enablePresetWorldInfoSlots,
   exportActiveCharacterCard,
   filterWorldInfoEntries,
   formatWorldInfoKeywords,
   getCoverCacheRevision,
+  inspectEmbeddedCharacterBook,
   inspectPresetWorldInfoSlots,
   inspectWorldBookActivation,
   loadHostWorldBook,
@@ -52,6 +54,7 @@ import {
   readActiveCharacterProfile,
   readCharacterCoverGallery,
   readWorldInfoEntries,
+  reimportEmbeddedCharacterBook,
   replacePrimaryCharacterAvatarFile,
   resolveGalleryImageHref,
   resolveWorldInfoActivationState,
@@ -62,7 +65,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.8.4';
+} from './char-world-backend.js?v=0.8.7';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -146,12 +149,21 @@ export function createCharWorldDock({
   let loadSeq = 0;
   let libraryOpen = false;
   let libraryQuery = '';
+  let libraryScrollTop = 0;
+  let libraryBatchMode = false;
+  const librarySelectedBooks = new Set();
+  let confirmDeleteBookName = '';
+  let confirmBatchDeleteBooks = false;
+  let deletingBooksBusy = false;
   let creatingBookOpen = false;
   let newBookNameDraft = '';
+  let reimportBookOpen = false;
+  let reimportingBookBusy = false;
   let wiSearchQuery = '';
   let wiFilterMode = 'all'; // 'all' | 'constant' | 'keyword' | 'disabled'
   let expandedEntryUid = null;
   let confirmDeleteEntryUid = null;
+  const swipeSyncTimers = [];
 
   let saveBadgeState = { tone: 'idle', text: '改动自动存盘' };
 
@@ -388,7 +400,35 @@ export function createCharWorldDock({
   // 世界书异步按需加载与切换控制
   // ==========================================================================
 
-  async function ensureWorldBookLoaded(bookName, { forceReload = false } = {}) {
+  function clearSwipeSyncTimers() {
+    while (swipeSyncTimers.length > 0) {
+      clearTimeout(swipeSyncTimers.pop());
+    }
+  }
+
+  function isSelfSavingOrEditingWorld() {
+    if (internalBusy || worldAutoSaver.hasPending() || worldAutoSaver.isSaving()) {
+      return true;
+    }
+    const activeEl = globalThis.document?.activeElement;
+    if (
+      activeEl &&
+      dockEl?.contains(activeEl) &&
+      typeof activeEl.closest === 'function' &&
+      activeEl.closest('.stm-wi-entry-editor') &&
+      (activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.tagName === 'SELECT')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  async function ensureWorldBookLoaded(
+    bookName,
+    { forceReload = false, silentLoading = false } = {},
+  ) {
     const clean = typeof bookName === 'string' ? bookName.trim() : '';
     if (!clean) {
       loadedBookName = '';
@@ -400,9 +440,10 @@ export function createCharWorldDock({
       return loadedBookData;
     }
 
+    const hasExistingSameBook = loadedBookName === clean && Boolean(loadedBookData);
     const seq = ++loadSeq;
     loadingBookName = clean;
-    if (isOpen && activeTab === 'world') {
+    if (isOpen && activeTab === 'world' && !silentLoading && !hasExistingSameBook) {
       renderBodyPreservingScroll();
     }
 
@@ -426,6 +467,108 @@ export function createCharWorldDock({
         renderBodyPreservingScroll();
       }
       return null;
+    }
+  }
+
+  /**
+   * 响应外部脚本（如角色卡开场白 AU 自动开关、TavernHelper.updateWorldbookWith、/setentryfield 或原生世界书面板）
+   * 触发的 `WORLDINFO_UPDATED`：立即失效或热替换内存副本，杜绝清爽世界书锁死旧快照甚至反覆写磁盘！
+   */
+  function handleWorldInfoUpdated(updatedBookName = '', updatedData = null) {
+    if (isSelfSavingOrEditingWorld()) {
+      return;
+    }
+    const cleanUpdated = typeof updatedBookName === 'string' ? updatedBookName.trim() : '';
+    const affectsCurrent =
+      !cleanUpdated ||
+      cleanUpdated === loadedBookName ||
+      cleanUpdated === selectedWorldBook;
+
+    if (!affectsCurrent) {
+      if (isOpen) {
+        renderHeader();
+        if (activeTab === 'world' && libraryOpen) {
+          renderBodyPreservingScroll();
+        }
+      }
+      return;
+    }
+
+    if (!isOpen || activeTab !== 'world') {
+      if (
+        cleanUpdated &&
+        cleanUpdated === loadedBookName &&
+        updatedData &&
+        typeof updatedData === 'object' &&
+        updatedData.entries &&
+        typeof updatedData.entries === 'object'
+      ) {
+        loadedBookData = structuredClone(updatedData);
+      } else {
+        loadedBookName = '';
+        loadedBookData = null;
+        loadingBookName = '';
+      }
+      if (isOpen) {
+        renderHeader();
+      }
+      return;
+    }
+
+    if (
+      cleanUpdated &&
+      cleanUpdated === selectedWorldBook &&
+      updatedData &&
+      typeof updatedData === 'object' &&
+      updatedData.entries &&
+      typeof updatedData.entries === 'object'
+    ) {
+      loadedBookName = selectedWorldBook;
+      loadedBookData = structuredClone(updatedData);
+      loadingBookName = '';
+      renderHeader();
+      renderBodyPreservingScroll();
+      return;
+    }
+
+    renderHeader();
+    if (selectedWorldBook) {
+      void ensureWorldBookLoaded(selectedWorldBook, {
+        forceReload: true,
+        silentLoading: true,
+      });
+    } else {
+      renderBodyPreservingScroll();
+    }
+  }
+
+  /**
+   * 响应消息左右切换 / 开场白跳转 (`MESSAGE_SWIPED`)：
+   * 部分角色卡脚本通过 `TavernHelper.updateWorldbookWith` 改写 `worldInfoCache` 时采用防抖落盘（`WORLDINFO_UPDATED` 延后约 2 秒触发），
+   * 此处立即失效后台旧缓存并在面板开启态分两拍从 `worldInfoCache` 静默重读，实现切开场白即刻同步开关状态。
+   */
+  function handleExternalSwipeSync() {
+    clearSwipeSyncTimers();
+    if (isSelfSavingOrEditingWorld()) return;
+
+    if (!isOpen || activeTab !== 'world') {
+      loadedBookName = '';
+      loadedBookData = null;
+      loadingBookName = '';
+      return;
+    }
+
+    for (const delayMs of [90, 480]) {
+      const tid = setTimeout(() => {
+        if (!isOpen || activeTab !== 'world' || isSelfSavingOrEditingWorld()) return;
+        if (selectedWorldBook) {
+          void ensureWorldBookLoaded(selectedWorldBook, {
+            forceReload: true,
+            silentLoading: true,
+          });
+        }
+      }, delayMs);
+      swipeSyncTimers.push(tid);
     }
   }
 
@@ -527,7 +670,10 @@ export function createCharWorldDock({
       renderHeader();
       renderBody();
       if (selectedWorldBook) {
-        void ensureWorldBookLoaded(selectedWorldBook);
+        void ensureWorldBookLoaded(selectedWorldBook, {
+          forceReload: !worldAutoSaver.hasPending() && !worldAutoSaver.isSaving(),
+          silentLoading: true,
+        });
       }
     });
 
@@ -2214,6 +2360,98 @@ export function createCharWorldDock({
     );
 
     const headRight = el('div', 'stm-cw-inline-actions');
+    const embeddedInfo = inspectEmbeddedCharacterBook(ctx);
+
+    const runEmbeddedReimport = async () => {
+      if (reimportingBookBusy) return;
+      reimportingBookBusy = true;
+      try {
+        if (
+          embeddedInfo.bookName &&
+          worldAutoSaver.getPendingBookName() === embeddedInfo.bookName
+        ) {
+          worldAutoSaver.cancel();
+        }
+        await flushAllPendingSaves();
+        const res = await reimportEmbeddedCharacterBook({ getContext });
+        reimportBookOpen = false;
+        creatingBookOpen = false;
+        selectedWorldBook = res.bookName;
+        setSaveBadge('ok', `已覆盖重导：${res.bookName}`);
+        toastMessage(
+          `已从角色卡强制重导「${res.bookName}」（共 ${res.entryCount} 条设定）并绑为主书`,
+          'success',
+        );
+        renderHeader();
+        await ensureWorldBookLoaded(res.bookName, { forceReload: true });
+        renderBodyPreservingScroll();
+      } catch (err) {
+        toastMessage(err?.message || '重导角色卡内嵌世界书失败', 'error');
+      } finally {
+        reimportingBookBusy = false;
+      }
+    };
+
+    const runDeleteWorldBooks = async targetNames => {
+      const list = (Array.isArray(targetNames) ? targetNames : [targetNames])
+        .map(n => String(n || '').trim())
+        .filter(Boolean);
+      if (list.length === 0 || deletingBooksBusy) return;
+
+      deletingBooksBusy = true;
+      try {
+        const pendingBook = worldAutoSaver.getPendingBookName();
+        if (pendingBook && list.includes(pendingBook)) {
+          worldAutoSaver.cancel();
+        }
+        await flushAllPendingSaves();
+
+        const res = await deleteHostWorldBooks(list, { getContext });
+        confirmDeleteBookName = '';
+        confirmBatchDeleteBooks = false;
+        for (const name of res.deleted) {
+          librarySelectedBooks.delete(name);
+        }
+
+        if (res.deleted.includes(loadedBookName)) {
+          loadedBookName = '';
+          loadedBookData = null;
+          loadingBookName = '';
+        }
+
+        const refreshedAct = resolveWorldInfoActivationState({ getContext });
+        if (selectedWorldBook && !refreshedAct.worldNames.includes(selectedWorldBook)) {
+          selectedWorldBook = refreshedAct.defaultBookName || '';
+          expandedEntryUid = null;
+          confirmDeleteEntryUid = null;
+        }
+        if (refreshedAct.worldNames.length === 0) {
+          libraryBatchMode = false;
+        }
+
+        if (res.deleted.length === 1) {
+          setSaveBadge('ok', `已删除：${res.deleted[0]}`);
+          toastMessage(`已从酒馆书库删除世界书「${res.deleted[0]}」`, 'success');
+        } else if (res.deleted.length > 1) {
+          setSaveBadge('ok', `已删除 ${res.deleted.length} 本世界书`);
+          toastMessage(`已批量清理 ${res.deleted.length} 本世界书`, 'success');
+        }
+        if (res.failed.length > 0) {
+          toastMessage(`部分世界书删除失败：${res.failed.join('、')}`, 'warning');
+        }
+
+        renderHeader();
+        renderBodyPreservingScroll();
+        if (selectedWorldBook && loadedBookName !== selectedWorldBook) {
+          await ensureWorldBookLoaded(selectedWorldBook, { forceReload: true });
+        }
+      } catch (err) {
+        toastMessage(err?.message || '删除世界书失败', 'error');
+      } finally {
+        deletingBooksBusy = false;
+      }
+    };
+
     const libBtn = el(
       'button',
       `stm-cw-mini-btn${libraryOpen ? ' is-accent' : ''}`,
@@ -2226,6 +2464,9 @@ export function createCharWorldDock({
     libBtn.addEventListener('click', () => {
       libraryOpen = !libraryOpen;
       creatingBookOpen = false;
+      reimportBookOpen = false;
+      confirmDeleteBookName = '';
+      confirmBatchDeleteBooks = false;
       renderBodyPreservingScroll();
     });
 
@@ -2241,12 +2482,35 @@ export function createCharWorldDock({
     newBookBtn.addEventListener('click', () => {
       creatingBookOpen = !creatingBookOpen;
       libraryOpen = false;
+      reimportBookOpen = false;
       if (creatingBookOpen && !newBookNameDraft) {
         newBookNameDraft =
           profile.kind === 'char' && profile.name ? `${profile.name}设定集` : '新建世界书';
       }
       renderBodyPreservingScroll();
     });
+
+    headRight.append(libBtn, newBookBtn);
+
+    if (embeddedInfo.hasEmbedded) {
+      const reimportBtn = el(
+        'button',
+        `stm-cw-mini-btn stm-cw-reimport-btn${reimportBookOpen ? ' is-accent' : ''}`,
+      );
+      reimportBtn.type = 'button';
+      reimportBtn.title = `从角色卡内嵌数据强制重导覆盖「${embeddedInfo.bookName}」（解决酒馆同名世界书跳过导入导致新条目丢失）`;
+      reimportBtn.append(
+        createIconNode(doc, 'refresh', 'stm-inline-svg'),
+        el('span', '', '重导卡内书'),
+      );
+      reimportBtn.addEventListener('click', () => {
+        reimportBookOpen = !reimportBookOpen;
+        libraryOpen = false;
+        creatingBookOpen = false;
+        renderBodyPreservingScroll();
+      });
+      headRight.append(reimportBtn);
+    }
 
     const nativeWiBtn = el('button', 'stm-ghost-link', '原生面板 ›');
     nativeWiBtn.type = 'button';
@@ -2257,7 +2521,7 @@ export function createCharWorldDock({
       openNativeDrawer('WI-SP-button', { getContext });
     });
 
-    headRight.append(libBtn, newBookBtn, nativeWiBtn);
+    headRight.append(nativeWiBtn);
     barHead.append(headLeft, headRight);
     topCard.append(barHead);
 
@@ -2307,6 +2571,44 @@ export function createCharWorldDock({
 
     if (capsuleRow.childNodes.length > 0) {
       topCard.append(capsuleRow);
+    }
+
+    // 内联「从角色卡强制重导内嵌世界书」面板（专治同名世界书在酒馆无法覆盖更新的痛点）
+    if (reimportBookOpen && embeddedInfo.hasEmbedded) {
+      const reimportBar = el('div', 'stm-cw-subdrawer stm-cw-reimport-drawer');
+      reimportBar.append(
+        el(
+          'strong',
+          'stm-cw-sublabel',
+          `从角色卡「${embeddedInfo.charName}」强制重导内嵌世界书`,
+        ),
+        el(
+          'small',
+          'stm-cw-muted-note',
+          `检测到该角色卡自带内嵌世界书「${embeddedInfo.bookName}」（共 ${embeddedInfo.entryCount} 条设定）。酒馆导入角色卡遇到同名旧书时默认静默跳过，点击下方按钮即可直接用卡内最新数据覆盖书库并绑为主书：`,
+        ),
+      );
+      const rActions = el('div', 'stm-cw-inline-actions');
+      const confirmReimportBtn = el(
+        'button',
+        'stm-cw-primary-btn',
+        reimportingBookBusy ? '正在覆盖导入…' : `覆盖导入「${embeddedInfo.bookName}」并绑为主书`,
+      );
+      confirmReimportBtn.type = 'button';
+      confirmReimportBtn.disabled = reimportingBookBusy;
+      confirmReimportBtn.addEventListener('click', () => {
+        void runEmbeddedReimport();
+      });
+
+      const cancelReimportBtn = el('button', 'stm-cw-secondary-btn', '取消');
+      cancelReimportBtn.type = 'button';
+      cancelReimportBtn.addEventListener('click', () => {
+        reimportBookOpen = false;
+        renderBodyPreservingScroll();
+      });
+      rActions.append(confirmReimportBtn, cancelReimportBtn);
+      reimportBar.append(rActions);
+      topCard.append(reimportBar);
     }
 
     // 内联「新建世界书」面板
@@ -2364,45 +2666,221 @@ export function createCharWorldDock({
       topCard.append(createBar);
     }
 
-    // 内联「全部世界书库 / 全局开关管理」面板
+    // 内联「全部世界书库 / 全局开关 / 单删与批量清理管理」面板
     if (libraryOpen) {
       const libBox = el('div', 'stm-cw-subdrawer');
       const libHead = el('div', 'stm-cw-bind-head');
       libHead.append(
-        el('strong', 'stm-cw-sublabel', '全部世界书库（点书名切换查看，右侧勾选「全局开启」对所有聊天生效）'),
+        el(
+          'strong',
+          'stm-cw-sublabel',
+          libraryBatchMode
+            ? '批量清理世界书（勾选要移除的旧世界书，可先搜索书名再一键全选当前筛选结果）'
+            : '全部世界书库（点书名查看，右侧可开关「全局启用」或删除旧书）',
+        ),
       );
-      if (activation.worldNames.length > 5) {
+
+      const libHeadActions = el('div', 'stm-cw-lib-head-actions');
+      if (activation.worldNames.length > 1 || libraryQuery) {
         const libSearch = el('input', 'stm-cw-input stm-cw-lib-search');
         libSearch.type = 'search';
         libSearch.placeholder = '搜索书名…';
         libSearch.value = libraryQuery;
         libSearch.addEventListener('input', () => {
           libraryQuery = libSearch.value;
+          confirmDeleteBookName = '';
+          confirmBatchDeleteBooks = false;
           renderLibRows();
         });
-        libHead.append(libSearch);
+        libHeadActions.append(libSearch);
+      }
+
+      if (activation.worldNames.length > 0) {
+        const batchToggleBtn = el(
+          'button',
+          `stm-cw-mini-btn stm-cw-lib-batch-toggle${libraryBatchMode ? ' is-accent' : ''}`,
+        );
+        batchToggleBtn.type = 'button';
+        batchToggleBtn.append(
+          createIconNode(doc, libraryBatchMode ? 'check' : 'trash', 'stm-inline-svg'),
+          el('span', '', libraryBatchMode ? '退出批量' : '批量删除'),
+        );
+        batchToggleBtn.addEventListener('click', () => {
+          libraryBatchMode = !libraryBatchMode;
+          confirmDeleteBookName = '';
+          confirmBatchDeleteBooks = false;
+          if (!libraryBatchMode) {
+            librarySelectedBooks.clear();
+          }
+          renderBodyPreservingScroll();
+        });
+        libHeadActions.append(batchToggleBtn);
+      }
+
+      if (libHeadActions.childNodes.length > 0) {
+        libHead.append(libHeadActions);
       }
       libBox.append(libHead);
 
+      const batchBarSlot = el('div', 'stm-cw-lib-batch-slot');
       const libList = el('div', 'stm-cw-lib-list');
+      libList.addEventListener(
+        'scroll',
+        () => {
+          libraryScrollTop = libList.scrollTop || 0;
+        },
+        { passive: true },
+      );
+
       const renderLibRows = () => {
+        const savedScroll = libList.isConnected ? libList.scrollTop : libraryScrollTop;
+        batchBarSlot.replaceChildren();
         libList.replaceChildren();
         const freshAct = resolveWorldInfoActivationState({ getContext });
+
+        // 自动剔除已不存在的勾选项
+        const validSet = new Set(freshAct.worldNames);
+        for (const picked of [...librarySelectedBooks]) {
+          if (!validSet.has(picked)) {
+            librarySelectedBooks.delete(picked);
+          }
+        }
+
         const q = libraryQuery.trim().toLowerCase();
         const filteredNames = freshAct.worldNames.filter(n => !q || n.toLowerCase().includes(q));
+
+        if (libraryBatchMode && freshAct.worldNames.length > 0) {
+          const batchBar = el('div', 'stm-cw-lib-batch-bar');
+          const batchLeft = el('div', 'stm-cw-inline-actions');
+
+          const allFilteredSelected =
+            filteredNames.length > 0 && filteredNames.every(n => librarySelectedBooks.has(n));
+          const selectFilteredBtn = el(
+            'button',
+            'stm-cw-mini-btn',
+            allFilteredSelected
+              ? `取消全选当前 (${filteredNames.length})`
+              : q
+                ? `全选筛选结果 (${filteredNames.length})`
+                : `全选全部 (${filteredNames.length})`,
+          );
+          selectFilteredBtn.type = 'button';
+          selectFilteredBtn.disabled = filteredNames.length === 0;
+          selectFilteredBtn.addEventListener('click', () => {
+            confirmBatchDeleteBooks = false;
+            if (allFilteredSelected) {
+              for (const n of filteredNames) librarySelectedBooks.delete(n);
+            } else {
+              for (const n of filteredNames) librarySelectedBooks.add(n);
+            }
+            renderLibRows();
+          });
+          batchLeft.append(selectFilteredBtn);
+
+          const selCount = librarySelectedBooks.size;
+          if (selCount > 0) {
+            batchLeft.append(el('span', 'stm-cw-muted-note', `已选 ${selCount} 本`));
+            const clearSelBtn = el('button', 'stm-ghost-link', '清空已选');
+            clearSelBtn.type = 'button';
+            clearSelBtn.addEventListener('click', () => {
+              librarySelectedBooks.clear();
+              confirmBatchDeleteBooks = false;
+              renderLibRows();
+            });
+            batchLeft.append(clearSelBtn);
+          }
+
+          const batchRight = el('div', 'stm-cw-inline-actions');
+          if (confirmBatchDeleteBooks && selCount > 0) {
+            const confirmBatchBtn = el(
+              'button',
+              'stm-cw-mini-btn is-danger stm-cw-lib-batch-confirm',
+              deletingBooksBusy ? '正在删除…' : `确认永久删除 ${selCount} 本?`,
+            );
+            confirmBatchBtn.type = 'button';
+            confirmBatchBtn.disabled = deletingBooksBusy;
+            confirmBatchBtn.addEventListener('click', () => {
+              void runDeleteWorldBooks([...librarySelectedBooks]);
+            });
+            const cancelBatchBtn = el('button', 'stm-cw-mini-btn', '取消');
+            cancelBatchBtn.type = 'button';
+            cancelBatchBtn.addEventListener('click', () => {
+              confirmBatchDeleteBooks = false;
+              renderLibRows();
+            });
+            batchRight.append(confirmBatchBtn, cancelBatchBtn);
+          } else {
+            const triggerBatchDelBtn = el(
+              'button',
+              'stm-cw-mini-btn is-danger stm-cw-lib-batch-del',
+            );
+            triggerBatchDelBtn.type = 'button';
+            triggerBatchDelBtn.disabled = selCount === 0 || deletingBooksBusy;
+            triggerBatchDelBtn.append(
+              createIconNode(doc, 'trash', 'stm-inline-svg'),
+              el('span', '', selCount > 0 ? `删除已选 (${selCount})` : '请先勾选书目'),
+            );
+            triggerBatchDelBtn.addEventListener('click', () => {
+              if (librarySelectedBooks.size === 0) return;
+              confirmBatchDeleteBooks = true;
+              renderLibRows();
+            });
+            batchRight.append(triggerBatchDelBtn);
+          }
+
+          batchBar.append(batchLeft, batchRight);
+          batchBarSlot.append(batchBar);
+        }
+
         if (filteredNames.length === 0) {
-          libList.append(el('div', 'stm-cw-empty-inline', '没有匹配的世界书'));
+          libList.append(
+            el(
+              'div',
+              'stm-cw-empty-inline',
+              freshAct.worldNames.length === 0 ? '酒馆书库目前没有任何世界书' : '没有匹配的世界书',
+            ),
+          );
           return;
         }
+
         for (const wName of filteredNames) {
+          const isBatchChecked = librarySelectedBooks.has(wName);
           const row = el(
             'div',
-            `stm-cw-lib-row${selectedWorldBook === wName ? ' is-current' : ''}`,
+            `stm-cw-lib-row${selectedWorldBook === wName ? ' is-current' : ''}${
+              libraryBatchMode && isBatchChecked ? ' is-batch-selected' : ''
+            }`,
           );
+          const activeHit = freshAct.activeBooks.find(b => b.name === wName);
+
+          if (libraryBatchMode) {
+            const batchPickLabel = el('label', 'stm-cw-lib-batch-item');
+            const checkInput = el('input', 'stm-cw-lib-check');
+            checkInput.type = 'checkbox';
+            checkInput.checked = isBatchChecked;
+            checkInput.addEventListener('change', () => {
+              confirmBatchDeleteBooks = false;
+              if (checkInput.checked) {
+                librarySelectedBooks.add(wName);
+              } else {
+                librarySelectedBooks.delete(wName);
+              }
+              renderLibRows();
+            });
+            batchPickLabel.append(checkInput, el('span', 'stm-cw-lib-name', wName));
+            if (activeHit) {
+              batchPickLabel.append(
+                el('span', 'stm-cw-mini-badge is-live', activeHit.sourceLabels.join(' · ')),
+              );
+            }
+            row.append(batchPickLabel);
+            libList.append(row);
+            continue;
+          }
+
           const pickBtn = el('button', 'stm-cw-lib-pick');
           pickBtn.type = 'button';
           pickBtn.append(el('span', 'stm-cw-lib-name', wName));
-          const activeHit = freshAct.activeBooks.find(b => b.name === wName);
           if (activeHit) {
             pickBtn.append(
               el('span', 'stm-cw-mini-badge is-live', activeHit.sourceLabels.join(' · ')),
@@ -2410,29 +2888,75 @@ export function createCharWorldDock({
           }
           pickBtn.addEventListener('click', () => {
             libraryOpen = false;
+            confirmDeleteBookName = '';
             void selectWorldBookAndLoad(wName);
           });
 
-          const isGlobOn = freshAct.globalBooks.includes(wName);
-          const globToggle = el('label', 'stm-cw-glob-toggle');
-          const globCheck = el('input', 'stm-wi-switch-input');
-          globCheck.type = 'checkbox';
-          globCheck.checked = isGlobOn;
-          const globTrack = el('span', 'stm-wi-switch-track');
-          globToggle.append(el('span', 'stm-cw-glob-label', '全局启用'), globCheck, globTrack);
-          globCheck.addEventListener('change', () => {
-            setGlobalWorldBookEnabled(wName, globCheck.checked, { getContext });
-            renderHeader();
-            renderBodyPreservingScroll();
-          });
+          const rowActions = el('div', 'stm-cw-lib-row-actions');
+          if (confirmDeleteBookName === wName) {
+            const confirmDelBtn = el(
+              'button',
+              'stm-cw-mini-btn is-danger stm-cw-lib-confirm-del',
+              deletingBooksBusy ? '删除中…' : '确认删除?',
+            );
+            confirmDelBtn.type = 'button';
+            confirmDelBtn.disabled = deletingBooksBusy;
+            confirmDelBtn.addEventListener('click', evt => {
+              evt.stopPropagation();
+              void runDeleteWorldBooks([wName]);
+            });
 
-          row.append(pickBtn, globToggle);
+            const cancelDelBtn = el('button', 'stm-cw-mini-btn', '取消');
+            cancelDelBtn.type = 'button';
+            cancelDelBtn.addEventListener('click', evt => {
+              evt.stopPropagation();
+              confirmDeleteBookName = '';
+              renderLibRows();
+            });
+            rowActions.append(confirmDelBtn, cancelDelBtn);
+          } else {
+            const isGlobOn = freshAct.globalBooks.includes(wName);
+            const globToggle = el('label', 'stm-cw-glob-toggle');
+            const globCheck = el('input', 'stm-wi-switch-input');
+            globCheck.type = 'checkbox';
+            globCheck.checked = isGlobOn;
+            const globTrack = el('span', 'stm-wi-switch-track');
+            globToggle.append(el('span', 'stm-cw-glob-label', '全局启用'), globCheck, globTrack);
+            globCheck.addEventListener('change', () => {
+              setGlobalWorldBookEnabled(wName, globCheck.checked, { getContext });
+              renderHeader();
+              renderBodyPreservingScroll();
+            });
+
+            const singleDelBtn = el('button', 'stm-cw-lib-del-btn');
+            singleDelBtn.type = 'button';
+            singleDelBtn.title = `从酒馆书库删除「${wName}」`;
+            singleDelBtn.setAttribute('aria-label', `删除世界书 ${wName}`);
+            singleDelBtn.append(createIconNode(doc, 'trash', 'stm-inline-svg'));
+            singleDelBtn.addEventListener('click', evt => {
+              evt.stopPropagation();
+              confirmDeleteBookName = wName;
+              renderLibRows();
+            });
+
+            rowActions.append(globToggle, singleDelBtn);
+          }
+
+          row.append(pickBtn, rowActions);
           libList.append(row);
         }
+        libList.scrollTop = savedScroll;
       };
       renderLibRows();
-      libBox.append(libList);
+      libBox.append(batchBarSlot, libList);
       topCard.append(libBox);
+      if (libraryScrollTop > 0) {
+        queueMicrotask(() => {
+          if (libList.isConnected) {
+            libList.scrollTop = libraryScrollTop;
+          }
+        });
+      }
     }
 
     container.append(topCard);
@@ -2445,14 +2969,32 @@ export function createCharWorldDock({
         el(
           'p',
           'stm-cw-empty-desc',
-          '世界书只有在「绑为角色主书」或「开启为全局世界书」后才会真正发给 AI。你可以一键新建专属世界书，或从下方已有书库中直接启用：',
+          embeddedInfo.hasEmbedded
+            ? `检测到当前角色卡内嵌了世界书「${embeddedInfo.bookName}」（共 ${embeddedInfo.entryCount} 条设定），可直接一键提取并绑为主书，或新建专属世界书：`
+            : '世界书只有在「绑为角色主书」或「开启为全局世界书」后才会真正发给 AI。你可以一键新建专属世界书，或从下方已有书库中直接启用：',
         ),
       );
 
       const ctaRow = el('div', 'stm-cw-inline-actions');
+      if (embeddedInfo.hasEmbedded) {
+        const quickImportEmbedBtn = el(
+          'button',
+          'stm-cw-primary-btn',
+          reimportingBookBusy
+            ? '正在导入…'
+            : `从角色卡导入「${embeddedInfo.bookName}」(${embeddedInfo.entryCount} 条)`,
+        );
+        quickImportEmbedBtn.type = 'button';
+        quickImportEmbedBtn.disabled = reimportingBookBusy;
+        quickImportEmbedBtn.addEventListener('click', () => {
+          void runEmbeddedReimport();
+        });
+        ctaRow.append(quickImportEmbedBtn);
+      }
+
       const quickNewBtn = el(
         'button',
-        'stm-cw-primary-btn',
+        embeddedInfo.hasEmbedded ? 'stm-cw-secondary-btn' : 'stm-cw-primary-btn',
         activation.isSingleChar
           ? '+ 为当前角色新建并绑定专属世界书'
           : '+ 新建并全局启用世界书',
@@ -2696,11 +3238,16 @@ export function createCharWorldDock({
           return;
         }
         if (!isOpen) return;
-        if (renamingCharName || creatingBookOpen || libraryOpen) {
+        if (renamingCharName || creatingBookOpen || reimportBookOpen || libraryOpen) {
           evt.stopPropagation();
           renamingCharName = false;
           creatingBookOpen = false;
+          reimportBookOpen = false;
           libraryOpen = false;
+          libraryBatchMode = false;
+          librarySelectedBooks.clear();
+          confirmDeleteBookName = '';
+          confirmBatchDeleteBooks = false;
           renderBodyPreservingScroll();
           return;
         }
@@ -2758,6 +3305,7 @@ export function createCharWorldDock({
     }
 
     // 异步预热官方模块（读取完整缓存或补齐槽位状态）
+    const shouldForceFreshWorld = !worldAutoSaver.hasPending() && !worldAutoSaver.isSaving();
     void Promise.all([primeHostWorldInfoModule(), primeHostOpenAiModule()]).then(() => {
       if (!isOpen) return;
       renderHeader();
@@ -2767,7 +3315,10 @@ export function createCharWorldDock({
           selectedWorldBook = refreshed.defaultBookName;
         }
         if (selectedWorldBook) {
-          void ensureWorldBookLoaded(selectedWorldBook);
+          void ensureWorldBookLoaded(selectedWorldBook, {
+            forceReload: shouldForceFreshWorld,
+            silentLoading: true,
+          });
         } else {
           renderBodyPreservingScroll();
         }
@@ -2781,7 +3332,10 @@ export function createCharWorldDock({
     renderHeader();
     renderBody();
     if (activeTab === 'world' && selectedWorldBook) {
-      void ensureWorldBookLoaded(selectedWorldBook);
+      void ensureWorldBookLoaded(selectedWorldBook, {
+        forceReload: shouldForceFreshWorld,
+        silentLoading: true,
+      });
     }
     onOpenStateChange?.(true);
   }
@@ -2793,7 +3347,12 @@ export function createCharWorldDock({
     isOpen = false;
     renamingCharName = false;
     creatingBookOpen = false;
+    reimportBookOpen = false;
     libraryOpen = false;
+    libraryBatchMode = false;
+    librarySelectedBooks.clear();
+    confirmDeleteBookName = '';
+    confirmBatchDeleteBooks = false;
     confirmDeleteGreeting = false;
     exportMenuOpen = false;
     coverStudioOpen = false;
@@ -2814,13 +3373,21 @@ export function createCharWorldDock({
     closePortraitLightbox();
     renamingCharName = false;
     creatingBookOpen = false;
+    reimportBookOpen = false;
     libraryOpen = false;
+    libraryBatchMode = false;
+    librarySelectedBooks.clear();
+    confirmDeleteBookName = '';
+    confirmBatchDeleteBooks = false;
     confirmDeleteGreeting = false;
     exportMenuOpen = false;
     coverStudioOpen = false;
     confirmDeleteEntryUid = null;
 
     await flushAllPendingSaves();
+    loadedBookName = '';
+    loadedBookData = null;
+    loadingBookName = '';
 
     const ctx = getContext?.();
     if (!hasActiveChatSelection(ctx)) {
@@ -2838,7 +3405,7 @@ export function createCharWorldDock({
     renderHeader();
     renderBody();
     if (activeTab === 'world' && selectedWorldBook) {
-      await ensureWorldBookLoaded(selectedWorldBook);
+      await ensureWorldBookLoaded(selectedWorldBook, { forceReload: true });
     }
   }
 
@@ -2860,7 +3427,10 @@ export function createCharWorldDock({
           renderHeader();
           renderBody();
           if (activeTab === 'world' && selectedWorldBook) {
-            void ensureWorldBookLoaded(selectedWorldBook);
+            void ensureWorldBookLoaded(selectedWorldBook, {
+              forceReload: true,
+              silentLoading: true,
+            });
           }
         });
         return;
@@ -2909,6 +3479,7 @@ export function createCharWorldDock({
   }
 
   function destroy() {
+    clearSwipeSyncTimers();
     closePortraitLightbox();
     if (charAutoSaver.hasPending() || worldAutoSaver.hasPending()) {
       void flushAllPendingSaves();
@@ -2945,6 +3516,8 @@ export function createCharWorldDock({
     toggle,
     refresh,
     handleChatChanged,
+    handleWorldInfoUpdated,
+    handleExternalSwipeSync,
     flushPendingSave: flushAllPendingSaves,
     destroy,
   };

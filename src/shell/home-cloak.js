@@ -6,8 +6,86 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.4';
-import { svgMarkup } from '../core/icons.js?v=0.8.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
+import { svgMarkup } from '../core/icons.js?v=0.8.7';
+
+/**
+ * 识别酒馆删除角色卡、群聊或最后一份存档后塞入的 `SAFETY_CHAT` 安全占位页
+ *（"你删除了一个角色或聊天，出于安全原因返回了这里。选个新角色吧！"），
+ * 严格排除用户主动开启的「临时助手对话」（其 `extra.uses_system_ui === true`）。
+ */
+export function isSafetyPlaceholderChat(ctx) {
+  if (!ctx || hasActiveChatSelection(ctx)) return false;
+  if (!Array.isArray(ctx.chat) || ctx.chat.length !== 1) return false;
+  const m0 = ctx.chat[0];
+  if (!m0 || !m0.is_system || m0.is_user || m0.extra?.uses_system_ui) return false;
+  return (
+    m0.name === 'SillyTavern System' ||
+    String(m0.force_avatar || '').includes('five.png')
+  );
+}
+
+/**
+ * 自动跳过酒馆原生删卡/删档后的 `SAFETY_CHAT` 死胡同页面，直接重建 `.welcomePanel` 令书架首页无缝接回，
+ * 同时清空宿主遗留的 `name2 = 'Assistant'` 假临时聊天态（防下一次删卡误弹临时聊天警告）。
+ */
+export async function recoverHomeFromSafetyChat({
+  getContext,
+  doc = globalThis.document,
+  welcomeModule = null,
+  coreModule = null,
+} = {}) {
+  if (globalThis.__yantaiSafetyRecoverPromise) {
+    await globalThis.__yantaiSafetyRecoverPromise.catch(() => {});
+    return true;
+  }
+
+  const ctx = getContext?.();
+  if (!isSafetyPlaceholderChat(ctx)) {
+    return false;
+  }
+
+  ctx.chat.splice(0, ctx.chat.length);
+  const chatEl = doc?.getElementById?.('chat');
+  if (chatEl?.children) {
+    for (const child of [...chatEl.children]) {
+      if (child?.classList?.contains?.('mes')) {
+        child.remove?.();
+      }
+    }
+  }
+
+  const resolveHostModule = async relPath => {
+    const base = doc?.baseURI || globalThis.location?.href || '';
+    if (!base || !/^https?:\/\//i.test(base)) return null;
+    try {
+      return await import(new URL(relPath, base).href);
+    } catch {
+      return null;
+    }
+  };
+
+  const task = (async () => {
+    const [coreMod, welMod] = await Promise.all([
+      coreModule || resolveHostModule('script.js'),
+      welcomeModule || resolveHostModule('scripts/welcome-screen.js'),
+    ]);
+    coreMod?.setCharacterName?.('');
+    if (typeof welMod?.openWelcomeScreen === 'function' && !hasActiveChatSelection(getContext?.())) {
+      await welMod.openWelcomeScreen({ force: true });
+    }
+    return true;
+  })();
+
+  globalThis.__yantaiSafetyRecoverPromise = task;
+  try {
+    return await task;
+  } finally {
+    if (globalThis.__yantaiSafetyRecoverPromise === task) {
+      delete globalThis.__yantaiSafetyRecoverPromise;
+    }
+  }
+}
 
 export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShell }) {
   let bodyObserver = null;
@@ -220,6 +298,20 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     if (!doc) return;
 
     const settings = store.get();
+    const ctx = getContext?.();
+
+    // 当开启伴侣书架时，若酒馆刚因删角色/删档落入 SAFETY_CHAT 死胡同页，立即无感拉回欢迎页挂载书架
+    if (
+      settings.shellEnabled &&
+      settings.modules?.bookshelf !== false &&
+      !doc.querySelector('#chat .welcomePanel') &&
+      isSafetyPlaceholderChat(ctx)
+    ) {
+      void recoverHomeFromSafetyChat({ getContext, doc }).then(() => {
+        schedule();
+      });
+    }
+
     const shouldCloak = Boolean(settings.shellEnabled && isBookshelfMountedOnHome());
 
     if (cloaked !== shouldCloak) {

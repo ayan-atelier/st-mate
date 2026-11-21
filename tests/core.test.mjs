@@ -157,11 +157,14 @@ import {
   createWorldBookAutoSaver,
   createWorldInfoBookEntry,
   cycleWorldInfoEntryTriggerMode,
+  deleteHostWorldBook,
+  deleteHostWorldBooks,
   deleteWorldInfoBookEntry,
   enablePresetWorldInfoSlots,
   exportActiveCharacterCard,
   filterWorldInfoEntries,
   formatWorldInfoKeywords,
+  inspectEmbeddedCharacterBook,
   inspectPresetWorldInfoSlots,
   inspectWorldBookActivation,
   loadHostWorldBook,
@@ -169,6 +172,7 @@ import {
   primeHostWorldInfoModule,
   readActiveCharacterProfile,
   readWorldInfoEntries,
+  reimportEmbeddedCharacterBook,
   resetCachedHostWorldInfoModule,
   resolveUniqueWorldBookName,
   resolveWorldInfoActivationState,
@@ -6768,7 +6772,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
 
     const diskExtensions = new Map([
       ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
-      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.0', isUpToDate: false }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.1', isUpToDate: false }],
       ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.6', isUpToDate: true }],
       ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
       ['third-party/yantai-memory', { type: 'local', version: '0.4.0', isUpToDate: true }],
@@ -7855,5 +7859,476 @@ test('v0.8.4: 书架首页「万能自动分流导入」（7类资产指纹识�
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.5: 清爽世界书「单本删除 + 搜索筛选批量删除 + 从角色卡强制重导覆盖内嵌世界书」全链路验证', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevFetch = globalThis.fetch;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    resetCachedHostWorldInfoModule();
+
+    // 搭建原生 #world_info / #world_editor_select / #character_world DOM
+    const worldInfoSelect = doc.createElement('select');
+    worldInfoSelect.id = 'world_info';
+    worldInfoSelect.multiple = true;
+    const worldEditorSelect = doc.createElement('select');
+    worldEditorSelect.id = 'world_editor_select';
+    const charWorldInput = doc.createElement('input');
+    charWorldInput.id = 'character_world';
+    charWorldInput.value = '宋仲庭｜全剧目设定集V3';
+
+    const initialBooks = [
+      '宋仲庭｜全剧目设定集',
+      '宋仲庭｜全剧目设定集V3',
+      '宋仲庭｜长线黑泥篇',
+      '宋仲庭｜长线黑泥篇V2.1',
+      '托斯卡',
+    ];
+    initialBooks.forEach((name, idx) => {
+      const o1 = doc.createElement('option');
+      o1.value = String(idx);
+      o1.textContent = name;
+      o1.selected = name === '宋仲庭｜全剧目设定集V3';
+      worldInfoSelect.append(o1);
+
+      const o2 = doc.createElement('option');
+      o2.value = String(idx);
+      o2.textContent = name;
+      worldEditorSelect.append(o2);
+    });
+    doc.body.append(worldInfoSelect, worldEditorSelect, charWorldInput);
+
+    // 模拟酒馆书库磁盘数据：旧版 V3 只有 1 条旧设定，缺新加的 AU 条目
+    const diskWorldStore = new Map([
+      [
+        '宋仲庭｜全剧目设定集V3',
+        {
+          entries: {
+            0: { uid: 0, comment: '旧版基础设定', key: [], constant: true, disable: false, content: 'old' },
+          },
+        },
+      ],
+      ['宋仲庭｜全剧目设定集', { entries: {} }],
+      ['宋仲庭｜长线黑泥篇', { entries: {} }],
+      ['宋仲庭｜长线黑泥篇V2.1', { entries: {} }],
+      ['托斯卡', { entries: {} }],
+    ]);
+
+    const removedAlertKeys = [];
+    const ctx = {
+      extensionSettings: {},
+      characterId: 0,
+      groupId: null,
+      chatId: 'song_chat_1',
+      chat: [{ name: '宋仲庭', is_user: false, mes: '开场' }],
+      worldNames: [...initialBooks],
+      worldInfo: { globalSelect: ['宋仲庭｜全剧目设定集V3'] },
+      accountStorage: {
+        removeItem(k) {
+          removedAlertKeys.push(k);
+        },
+      },
+      characters: [
+        {
+          name: '宋仲庭',
+          avatar: '宋仲庭.png',
+          description: '人物描述',
+          first_mes: '开场',
+          data: {
+            name: '宋仲庭',
+            description: '人物描述',
+            first_mes: '开场',
+            alternate_greetings: [],
+            extensions: {
+              world: '宋仲庭｜全剧目设定集V3',
+            },
+            // 角色卡 PNG 内嵌的最新世界书（含 2 条全新的 AU 分支条目！）
+            character_book: {
+              name: '宋仲庭｜全剧目设定集V3',
+              entries: [
+                {
+                  id: 0,
+                  keys: [],
+                  comment: '核心人物设定',
+                  content: '新版主线内容',
+                  constant: true,
+                  enabled: true,
+                  insertion_order: 10,
+                  position: 'before_char',
+                },
+                {
+                  id: 1,
+                  keys: ['民国AU'],
+                  comment: '【AU】旧公馆烟雨篇',
+                  content: '民国平行世界设定',
+                  constant: false,
+                  enabled: false,
+                  insertion_order: 20,
+                  extensions: { position: 4, depth: 2, role: 0 },
+                },
+                {
+                  id: 2,
+                  keys: ['现代AU'],
+                  comment: '【AU】京港豪门联姻篇',
+                  content: '现代平行世界设定',
+                  constant: false,
+                  enabled: true,
+                  insertion_order: 30,
+                  position: 'after_char',
+                },
+              ],
+            },
+          },
+        },
+      ],
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+      saveSettingsDebounced() {},
+      loadWorldInfo: async name => structuredClone(diskWorldStore.get(name) || null),
+      saveWorldInfo: async (name, payload) => {
+        diskWorldStore.set(name, structuredClone(payload));
+        if (!ctx.worldNames.includes(name)) ctx.worldNames.push(name);
+      },
+    };
+
+    globalThis.fetch = async (url, init = {}) => {
+      const href = String(url);
+      if (href.includes('api/worldinfo/delete')) {
+        const body = JSON.parse(init.body || '{}');
+        diskWorldStore.delete(body.name);
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (href.includes('api/characters/merge-attributes')) {
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+
+    // 1. 验证纯后端 API：检测内嵌书 & 单本删除清理逻辑
+    const embedCheck = inspectEmbeddedCharacterBook(ctx);
+    assert.equal(embedCheck.hasEmbedded, true);
+    assert.equal(embedCheck.bookName, '宋仲庭｜全剧目设定集V3');
+    assert.equal(embedCheck.entryCount, 3);
+
+    const singleDelRes = await deleteHostWorldBook('宋仲庭｜全剧目设定集', {
+      getContext: () => ctx,
+      doc,
+    });
+    assert.equal(singleDelRes.ok, true);
+    assert.equal(ctx.worldNames.includes('宋仲庭｜全剧目设定集'), false);
+    assert.equal(
+      worldEditorSelect.options.find(o => o.textContent === '托斯卡')?.value,
+      String(ctx.worldNames.indexOf('托斯卡')),
+      '删除世界书后 #world_editor_select 下标自动对齐最新 worldNames',
+    );
+
+    // 2. 验证清爽世界书 UI：展开全部书库 -> 单本二次确认删除 -> 搜索「宋仲庭」批量全选删除 -> 一键从角色卡恢复新 AU 条目
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const dock = createCharWorldDock({ getContext: () => ctx, store });
+    dock.open('world');
+    await new Promise(r => setTimeout(r, 20));
+
+    const dockRoot = doc.getElementById('stm-char-world-dock');
+    assert.ok(dockRoot && !dockRoot.hidden);
+
+    // 顶部存在「重导卡内书」按钮
+    const readText = node =>
+      String(node?.textContent || '') + (node?.children || []).map(readText).join('');
+
+    const reimportTopBtn = dockRoot.querySelector('.stm-cw-reimport-btn');
+    assert.ok(reimportTopBtn, '检测到角色卡内嵌 character_book 时应展示「重导卡内书」快捷钮');
+
+    // 打开「全部书库 (4)」
+    const allButtons = () => [...dockRoot.querySelectorAll('button')];
+    const libOpenBtn = allButtons().find(b => readText(b).includes('全部书库'));
+    assert.ok(libOpenBtn);
+    libOpenBtn.click();
+
+    // 先测试行内单本二次确认删除「宋仲庭｜长线黑泥篇」
+    let libRows = [...dockRoot.querySelectorAll('.stm-cw-lib-row')];
+    assert.equal(libRows.length, 4);
+    const heiniRow = libRows.find(
+      r => readText(r).includes('宋仲庭｜长线黑泥篇') && !readText(r).includes('V2.1'),
+    );
+    assert.ok(heiniRow);
+    const singleTrashBtn = heiniRow.querySelector('.stm-cw-lib-del-btn');
+    assert.ok(singleTrashBtn);
+    singleTrashBtn.click();
+
+    const confirmSingleBtn = dockRoot.querySelector('.stm-cw-lib-confirm-del');
+    assert.ok(confirmSingleBtn, '点击垃圾桶后行内平滑切换为二次确认按钮');
+    confirmSingleBtn.click();
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(ctx.worldNames.includes('宋仲庭｜长线黑泥篇'), false, '单本二次确认后从书库移除');
+
+    // 再测试「搜索“宋仲庭” -> 批量删除 -> 全选筛选结果 (2) -> 删除已选 (2) -> 确认永久删除 2 本」
+    const searchInput = dockRoot.querySelector('.stm-cw-lib-search');
+    if (searchInput) {
+      searchInput.value = '宋仲庭';
+      searchInput.dispatchEvent({ type: 'input' });
+    }
+    const batchToggleBtn = dockRoot.querySelector('.stm-cw-lib-batch-toggle');
+    assert.ok(batchToggleBtn);
+    batchToggleBtn.click();
+
+    let libSearchInBatch = dockRoot.querySelector('.stm-cw-lib-search');
+    if (libSearchInBatch && libSearchInBatch.value !== '宋仲庭') {
+      libSearchInBatch.value = '宋仲庭';
+      libSearchInBatch.dispatchEvent({ type: 'input' });
+    }
+
+    const selectAllFilteredBtn = allButtons().find(b => readText(b).includes('全选筛选结果 (2)'));
+    assert.ok(selectAllFilteredBtn, '搜索后批量栏应显示「全选筛选结果 (2)」，不会误选托斯卡');
+    selectAllFilteredBtn.click();
+
+    const triggerBatchDel = dockRoot.querySelector('.stm-cw-lib-batch-del');
+    assert.ok(triggerBatchDel && !triggerBatchDel.disabled);
+    assert.match(readText(triggerBatchDel), /删除已选 \(2\)/);
+    triggerBatchDel.click();
+
+    const confirmBatchDel = dockRoot.querySelector('.stm-cw-lib-batch-confirm');
+    assert.ok(confirmBatchDel, '批量删除须经行内二次确认');
+    confirmBatchDel.click();
+    await new Promise(r => setTimeout(r, 30));
+
+    assert.deepEqual(ctx.worldNames, ['托斯卡'], '仅选中的 2 本宋仲庭旧书被清理，托斯卡毫发无损');
+    assert.equal(ctx.characters[0].data.extensions.world, '', '当前角色主书死链同步自动解绑');
+    assert.ok(
+      removedAlertKeys.includes('AlertWI_宋仲庭.png'),
+      '清理同名世界书时同步清除 AlertWI_ 首次弹窗锁，允许后续正常重导角色卡',
+    );
+
+    // 删掉主书后，空态引导区直接提供「从角色卡导入『宋仲庭｜全剧目设定集V3』(3 条)」一键恢复按钮！
+    const emptyReimportBtn = allButtons().find(b =>
+      readText(b).includes('从角色卡导入「宋仲庭｜全剧目设定集V3」(3 条)'),
+    );
+    assert.ok(emptyReimportBtn, '删空主书后空态卡片直接给出从角色卡内嵌数据一键导入按钮');
+    emptyReimportBtn.click();
+    await new Promise(r => setTimeout(r, 30));
+
+    // 验证新导入的世界书已绑回角色主书，且 2 条 AU 条目完整加载进清爽世界书列表！
+    assert.equal(ctx.characters[0].data.extensions.world, '宋仲庭｜全剧目设定集V3');
+    const savedV3 = diskWorldStore.get('宋仲庭｜全剧目设定集V3');
+    assert.ok(savedV3);
+    const parsedEntries = readWorldInfoEntries(savedV3);
+    assert.equal(parsedEntries.totalCount, 3, '新版 3 条设定（含 2 个 AU 条目）全部落盘进酒馆书库');
+    assert.equal(parsedEntries.entries[1].comment, '【AU】旧公馆烟雨篇');
+    assert.equal(parsedEntries.entries[1].position, 4);
+    assert.equal(parsedEntries.entries[1].depth, 2);
+    assert.equal(parsedEntries.entries[2].comment, '【AU】京港豪门联姻篇');
+
+    const renderedTitles = [...dockRoot.querySelectorAll('.stm-wi-entry-title')].map(n => readText(n));
+    assert.ok(renderedTitles.includes('【AU】旧公馆烟雨篇'), 'UI 当场展示最新重导的 AU 条目');
+    assert.ok(renderedTitles.includes('【AU】京港豪门联姻篇'));
+
+    dock.destroy();
+  } finally {
+    resetCachedHostWorldInfoModule();
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test('v0.8.6: 角色卡脚本切开场白自动开关世界书条目时，清爽世界书实时热同步零旧缓存且绝不反覆写磁盘', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    resetCachedHostWorldInfoModule();
+
+    const bookName = '宋仲庭｜全剧目设定集V3';
+    const liveCacheBook = {
+      entries: {
+        0: { uid: 0, comment: '00｜【专属分支·鸣鸟与蛇AU】', key: [], constant: true, disable: true, content: 'hg' },
+        1: { uid: 1, comment: '00B｜【专属分支·古代皇宫AU】', key: [], constant: true, disable: true, content: 'palace' },
+        2: { uid: 2, comment: '00C｜【专属分支·美满之家AU】', key: [], constant: true, disable: true, content: 'sitcom' },
+        3: { uid: 3, comment: '01｜基础主线设定', key: [], constant: true, disable: false, content: 'main' },
+      },
+    };
+
+    const ctx = {
+      extensionSettings: {},
+      characterId: 0,
+      groupId: null,
+      chatId: 'song_au_sync',
+      chat: [{ name: '宋仲庭', is_user: false, mes: '开场' }],
+      worldNames: [bookName],
+      worldInfo: { globalSelect: [] },
+      characters: [
+        {
+          name: '宋仲庭',
+          avatar: '宋仲庭.png',
+          data: {
+            name: '宋仲庭',
+            extensions: { world: bookName },
+          },
+        },
+      ],
+      saveSettingsDebounced() {},
+      loadWorldInfo: async name => (name === bookName ? structuredClone(liveCacheBook) : null),
+      saveWorldInfo: async (name, payload) => {
+        if (name === bookName) {
+          liveCacheBook.entries = structuredClone(payload.entries);
+        }
+      },
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const dock = createCharWorldDock({ getContext: () => ctx, store });
+
+    // 1. 首次打开清爽世界书：3 个 AU 条目初始全部处于关闭状态 (disable: true)
+    dock.open('world');
+    await new Promise(r => setTimeout(r, 20));
+    const dockRoot = doc.getElementById('stm-char-world-dock');
+    const getEntrySwitchEls = () => [
+      ...(dockRoot.querySelector('.stm-wi-entries-list')?.querySelectorAll('.stm-wi-switch-input') || []),
+    ];
+    const getEntrySwitches = () => getEntrySwitchEls().map(el => el.checked);
+
+    assert.deepEqual(getEntrySwitches(), [false, false, false, true], '初始加载时 3 个 AU 均为关闭');
+
+    // 2. 用户关闭清爽世界书，在聊天中跳转到「古代皇宫AU」开场白：
+    //    模拟 TavernHelper.updateWorldbookWith 仅改写了内存 worldInfoCache（甚至尚未触发防抖 WORLDINFO_UPDATED）！
+    dock.close();
+    liveCacheBook.entries[1].disable = false; // 古代皇宫AU 被脚本自动开启！
+
+    // 用户重新打开清爽世界书 -> 必须立即强制重读最新 worldInfoCache，绝不能显示旧缓存！
+    dock.open('world');
+    await new Promise(r => setTimeout(r, 20));
+    assert.deepEqual(
+      getEntrySwitches(),
+      [false, true, false, true],
+      '重新打开清爽世界书时立即反映脚本刚开启的「古代皇宫AU」，零旧缓存残留',
+    );
+
+    // 3. 保持清爽世界书开启状态，外部脚本通过 WORLDINFO_UPDATED 切到「鸣鸟与蛇AU」：
+    liveCacheBook.entries[0].disable = false;
+    liveCacheBook.entries[1].disable = true;
+    dock.handleWorldInfoUpdated(bookName, liveCacheBook);
+    assert.deepEqual(
+      getEntrySwitches(),
+      [true, false, false, true],
+      '面板打开期间收到外部 WORLDINFO_UPDATED 时当场实时翻转开关',
+    );
+
+    // 4. 保持清爽世界书开启状态，外部仅触发 MESSAGE_SWIPED 并在 30ms 后改写 worldInfoCache（无立即 WORLDINFO_UPDATED）：
+    dock.handleExternalSwipeSync();
+    setTimeout(() => {
+      liveCacheBook.entries[0].disable = true;
+      liveCacheBook.entries[2].disable = false; // 切到美满之家AU
+    }, 30);
+    await new Promise(r => setTimeout(r, 140));
+    assert.deepEqual(
+      getEntrySwitches(),
+      [false, false, true, true],
+      'MESSAGE_SWIPED 后静默重读 worldInfoCache，防抖保存期间也能即时同步开关',
+    );
+
+    // 5. 此时用户在清爽世界书里手动改第 4 条（基础主线设定），自动落盘后绝不能把脚本刚开的「美满之家AU」冲掉！
+    const fourthSwitch = getEntrySwitchEls()[3];
+    fourthSwitch.checked = false;
+    fourthSwitch.dispatchEvent({ type: 'change' });
+    await dock.flushPendingSave();
+    assert.equal(liveCacheBook.entries[2].disable, false, '手动修改其他条目绝不会拿旧快照冲掉脚本刚开的 AU 条目');
+    assert.equal(liveCacheBook.entries[3].disable, true);
+
+    dock.destroy();
+  } finally {
+    resetCachedHostWorldInfoModule();
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.7: 书架删角色卡/删档后自动跳过酒馆 SAFETY_CHAT 安全占位死胡同页，严格放行临时助手聊天', async () => {
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const { isSafetyPlaceholderChat, recoverHomeFromSafetyChat } = await import(
+      '../src/shell/home-cloak.js'
+    );
+
+    const chatEl = doc.createElement('div');
+    chatEl.id = 'chat';
+    const safetyDomMes = doc.createElement('div');
+    safetyDomMes.className = 'mes';
+    chatEl.append(safetyDomMes);
+    doc.body.append(chatEl);
+
+    // 1. 临时助手聊天（uses_system_ui: true）绝不能被误判为 SAFETY_CHAT
+    const tempAssistantCtx = {
+      characterId: undefined,
+      groupId: null,
+      chat: [
+        {
+          name: 'Assistant',
+          is_system: true,
+          is_user: false,
+          mes: '临时对话引导',
+          extra: { uses_system_ui: true, isSmallSys: true },
+        },
+      ],
+    };
+    assert.equal(isSafetyPlaceholderChat(tempAssistantCtx), false, '临时助手聊天严禁误判清除');
+
+    // 2. 删卡/删档后酒馆 resetChatState() 塞入的 SAFETY_CHAT
+    const safetyCtx = {
+      characterId: undefined,
+      groupId: null,
+      chat: [
+        {
+          name: 'SillyTavern System',
+          force_avatar: 'img/five.png',
+          is_system: true,
+          is_user: false,
+          mes: '你删除了一个角色或聊天，出于安全原因返回了这里。选个新角色吧！',
+        },
+      ],
+    };
+    assert.equal(isSafetyPlaceholderChat(safetyCtx), true);
+
+    let clearedCharName = null;
+    let forcedWelcomeCount = 0;
+    const recovered = await recoverHomeFromSafetyChat({
+      getContext: () => safetyCtx,
+      doc,
+      coreModule: {
+        setCharacterName(v) {
+          clearedCharName = v;
+        },
+      },
+      welcomeModule: {
+        async openWelcomeScreen(opts) {
+          if (opts?.force) {
+            forcedWelcomeCount += 1;
+            const wp = doc.createElement('div');
+            wp.className = 'welcomePanel';
+            chatEl.append(wp);
+          }
+        },
+      },
+    });
+
+    assert.equal(recovered, true);
+    assert.equal(safetyCtx.chat.length, 0, '同步清空 SAFETY_CHAT 消息栈');
+    assert.equal(clearedCharName, '', '清空宿主遗留的 Assistant 假临时角色名');
+    assert.equal(forcedWelcomeCount, 1, '强制唤起欢迎面板供书架无缝挂载');
+    assert.equal(Boolean(chatEl.querySelector('.mes')), false, '移除残留的 #0 系统消息气泡');
+    assert.ok(chatEl.querySelector('.welcomePanel'), '欢迎页节点已恢复就绪');
+  } finally {
+    globalThis.document = prevDoc;
   }
 });

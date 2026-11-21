@@ -1,5 +1,5 @@
 /**
- * 砚台 · SillyTavern 伴侣 (st-mate) · 全栈样式表 v0.8.4（极简细线美学 & 60fps 零重排加速版）
+ * 砚台 · SillyTavern 伴侣 (st-mate) · 全栈样式表 v0.8.7（极简细线美学 & 60fps 零重排加速版）
  * 研发铁律：
  * 1. 所有新增类名与变量强制带 .stm-* / --stm-* 前缀，严禁污染酒馆宿主与玩家美化主题；
  * 2. 100% 跟随当前酒馆 SmartTheme 颜色变量（带深色优雅回退），零强改聊天气泡配色；
@@ -7211,12 +7211,32 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
   flex: 1 1 200px;
 }
 
+.stm-cw-lib-head-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
 .stm-cw-lib-search {
-  max-width: 200px;
+  max-width: 190px;
+}
+
+.stm-cw-lib-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--stm-border) 85%, transparent);
+  background: rgba(128, 128, 128, 0.08);
 }
 
 .stm-cw-lib-list {
-  max-height: 210px;
+  max-height: 230px;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
@@ -7233,11 +7253,17 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
   border-radius: 7px;
   border: 1px solid transparent;
   background: rgba(128, 128, 128, 0.06);
+  transition: background-color 0.14s ease, border-color 0.14s ease;
 }
 
 .stm-cw-lib-row.is-current {
   border-color: color-mix(in srgb, var(--stm-accent) 50%, transparent);
   background: color-mix(in srgb, var(--stm-accent) 13%, transparent);
+}
+
+.stm-cw-lib-row.is-batch-selected {
+  border-color: rgba(240, 113, 120, 0.55);
+  background: rgba(240, 113, 120, 0.11);
 }
 
 .stm-cw-lib-pick {
@@ -7257,10 +7283,70 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
   cursor: pointer;
 }
 
+.stm-cw-lib-batch-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  margin: 0;
+  color: var(--stm-ink);
+  font-size: 12.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stm-cw-lib-check {
+  width: 15px;
+  height: 15px;
+  margin: 0 !important;
+  flex-shrink: 0;
+  accent-color: #f07178;
+  cursor: pointer;
+}
+
 .stm-cw-lib-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.stm-cw-lib-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.stm-cw-lib-del-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--stm-muted);
+  opacity: 0.72;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease, opacity 0.14s ease;
+}
+
+.stm-cw-lib-del-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.stm-cw-lib-del-btn:hover {
+  opacity: 1;
+  color: #f6a0a5;
+  border-color: rgba(240, 113, 120, 0.45);
+  background: rgba(240, 113, 120, 0.15);
 }
 
 .stm-cw-glob-toggle {
@@ -7274,6 +7360,24 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
 .stm-cw-glob-label {
   font-size: 11.5px;
   color: var(--stm-muted);
+}
+
+@media (max-width: 640px) {
+  .stm-cw-lib-head-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .stm-cw-lib-search {
+    flex: 1 1 140px;
+    max-width: none;
+  }
+
+  .stm-cw-lib-del-btn {
+    opacity: 0.92;
+    width: 28px;
+    height: 28px;
+  }
 }
 
 /* 世界书条目搜索与筛选工具栏 */

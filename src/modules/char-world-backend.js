@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.4';
-import { saveExportBlob } from '../core/file-saver.js?v=0.8.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.7';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.8.4';
+} from './preset-backend.js?v=0.8.7';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -2212,6 +2212,488 @@ export async function createHostWorldBook(
     bookName: finalName,
     boundToChar: Boolean(bindToCurrentChar && profile.kind === 'char'),
     enabledGlobal: Boolean(enableGlobal),
+  };
+}
+
+/**
+ * 从内存 `world_names` / `selected_world_info` / `worldInfoCache`、原生 `#world_info` / `#world_editor_select`
+ * 下拉框，以及受影响的角色主书绑定与 `AlertWI_` 导入锁中彻底清理已删除的世界书。
+ */
+function removeWorldBookFromMemoryAndDom(
+  bookName,
+  { ctx = null, wiMod = null, doc = globalThis.document } = {},
+) {
+  const target = typeof bookName === 'string' ? bookName.trim() : '';
+  if (!target) return;
+
+  wiMod?.worldInfoCache?.delete?.(target);
+
+  if (Array.isArray(wiMod?.world_names)) {
+    const idx = wiMod.world_names.indexOf(target);
+    if (idx !== -1) wiMod.world_names.splice(idx, 1);
+  }
+  if (Array.isArray(ctx?.worldNames) && ctx.worldNames !== wiMod?.world_names) {
+    const idx = ctx.worldNames.indexOf(target);
+    if (idx !== -1) ctx.worldNames.splice(idx, 1);
+  }
+  if (Array.isArray(wiMod?.selected_world_info)) {
+    const idx = wiMod.selected_world_info.indexOf(target);
+    if (idx !== -1) wiMod.selected_world_info.splice(idx, 1);
+  }
+  if (Array.isArray(ctx?.worldInfo?.globalSelect) && ctx.worldInfo.globalSelect !== wiMod?.selected_world_info) {
+    const idx = ctx.worldInfo.globalSelect.indexOf(target);
+    if (idx !== -1) ctx.worldInfo.globalSelect.splice(idx, 1);
+  }
+
+  // 同步清理原生 #world_info / #world_editor_select 的 <option>，并对齐最新 world_names 下标
+  if (doc && typeof doc.getElementById === 'function') {
+    for (const selectId of ['world_info', 'world_editor_select']) {
+      const selectEl = doc.getElementById(selectId);
+      if (!selectEl?.options) continue;
+      for (let i = selectEl.options.length - 1; i >= 0; i -= 1) {
+        const opt = selectEl.options[i];
+        const text = String(opt?.textContent ?? opt?.text ?? '').trim();
+        if (text === target) {
+          if (typeof opt.remove === 'function') {
+            opt.remove();
+          } else if (typeof selectEl.remove === 'function') {
+            selectEl.remove(i);
+          } else if (Array.isArray(selectEl.options)) {
+            selectEl.options.splice(i, 1);
+          }
+        }
+      }
+      const latestNames = Array.isArray(wiMod?.world_names)
+        ? wiMod.world_names
+        : Array.isArray(ctx?.worldNames)
+          ? ctx.worldNames
+          : null;
+      if (latestNames) {
+        for (let i = 0; i < selectEl.options.length; i += 1) {
+          const opt = selectEl.options[i];
+          const text = String(opt?.textContent ?? opt?.text ?? '').trim();
+          if (!text || String(opt?.value ?? '') === '') continue;
+          const newIdx = latestNames.indexOf(text);
+          if (newIdx >= 0) {
+            opt.value = String(newIdx);
+          }
+        }
+      }
+    }
+
+    const charWorldInput = doc.getElementById('character_world');
+    if (charWorldInput && String(charWorldInput.value || '').trim() === target) {
+      charWorldInput.value = '';
+    }
+  }
+
+  // 若当前打开的角色在内存里仍挂着这本已删主书，立即清空内存字段，防重绘残影
+  const activeChar =
+    ctx?.characterId !== undefined && ctx?.characterId !== null
+      ? ctx?.characters?.[ctx.characterId]
+      : null;
+  if (activeChar && String(activeChar?.data?.extensions?.world || '').trim() === target) {
+    if (activeChar.data?.extensions) {
+      activeChar.data.extensions.world = '';
+    }
+    if ('world' in activeChar) {
+      activeChar.world = '';
+    }
+  }
+
+  // 清理关联角色卡的 AlertWI_<avatar> 首次弹窗锁，确保用户后续重导角色卡时酒馆原生弹窗不再装聋作哑
+  const clearAlertKeyForAvatar = avatar => {
+    const cleanAvatar = typeof avatar === 'string' ? avatar.trim() : '';
+    if (!cleanAvatar) return;
+    const key = `AlertWI_${cleanAvatar}`;
+    try {
+      ctx?.accountStorage?.removeItem?.(key);
+    } catch {
+      // ignore
+    }
+    try {
+      globalThis.localStorage?.removeItem?.(key);
+    } catch {
+      // ignore
+    }
+  };
+
+  if (activeChar?.avatar) {
+    clearAlertKeyForAvatar(activeChar.avatar);
+  }
+  if (Array.isArray(ctx?.characters)) {
+    for (const ch of ctx.characters) {
+      if (!ch?.avatar) continue;
+      const linkedWorld = String(ch?.data?.extensions?.world || '').trim();
+      const embeddedName = String(ch?.data?.character_book?.name || '').trim();
+      if (linkedWorld === target || embeddedName === target) {
+        clearAlertKeyForAvatar(ch.avatar);
+      }
+    }
+  }
+}
+
+/**
+ * 批量或单本从酒馆世界书库彻底删除世界书（优先走官方 `deleteWorldInfo`，离线回退 `/api/worldinfo/delete`），
+ * 并自动解绑受影响的全局启用/当前角色主书内存态与 `AlertWI_` 导入锁。
+ */
+export async function deleteHostWorldBooks(
+  bookNames,
+  {
+    getContext,
+    worldInfoModule = null,
+    fetchImpl = globalThis.fetch,
+    doc = globalThis.document,
+  } = {},
+) {
+  const rawList = Array.isArray(bookNames) ? bookNames : [bookNames];
+  const targets = [];
+  const seen = new Set();
+  for (const item of rawList) {
+    const clean = typeof item === 'string' ? item.trim() : '';
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    targets.push(clean);
+  }
+
+  if (targets.length === 0) {
+    return { ok: false, deleted: [], failed: [] };
+  }
+
+  const ctx = getContext?.();
+  const wiMod =
+    worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
+
+  const hostDeleteFn =
+    typeof wiMod?.deleteWorldInfo === 'function'
+      ? wiMod.deleteWorldInfo.bind(wiMod)
+      : typeof ctx?.deleteWorldInfo === 'function'
+        ? ctx.deleteWorldInfo.bind(ctx)
+        : null;
+
+  const deleted = [];
+  const failed = [];
+
+  for (const target of targets) {
+    const activeCharBefore =
+      ctx?.characterId !== undefined && ctx?.characterId !== null
+        ? ctx?.characters?.[ctx.characterId]
+        : null;
+    const wasPrimaryOnActiveChar =
+      Boolean(activeCharBefore) &&
+      String(activeCharBefore?.data?.extensions?.world || '').trim() === target;
+
+    let ok = false;
+    let handledByHostFn = false;
+
+    if (hostDeleteFn) {
+      try {
+        ok = Boolean(await hostDeleteFn(target));
+        handledByHostFn = ok;
+      } catch {
+        ok = false;
+      }
+    }
+
+    if (!ok && typeof fetchImpl === 'function') {
+      try {
+        const headers =
+          typeof ctx?.getRequestHeaders === 'function'
+            ? ctx.getRequestHeaders()
+            : { 'Content-Type': 'application/json' };
+        const res = await fetchImpl(resolveEndpointHref('api/worldinfo/delete', doc), {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ name: target }),
+        });
+        ok = Boolean(res?.ok);
+      } catch {
+        ok = false;
+      }
+    }
+
+    if (ok) {
+      removeWorldBookFromMemoryAndDom(target, { ctx, wiMod, doc });
+      // 若走的是纯后端回退路径且刚删掉当前角色主书，顺手持久化清空该角色 world 死链并存盘设置
+      if (!handledByHostFn) {
+        if (wasPrimaryOnActiveChar && typeof fetchImpl === 'function') {
+          try {
+            await saveCharacterProfilePatch(
+              { world: '' },
+              { getContext, chid: ctx.characterId, fetchImpl, doc },
+            );
+          } catch {
+            // 内存已清空，忽略离线环境保存异常
+          }
+        }
+        ctx?.saveSettingsDebounced?.();
+      }
+      deleted.push(target);
+    } else {
+      failed.push(target);
+    }
+  }
+
+  return {
+    ok: deleted.length > 0 && failed.length === 0,
+    deleted,
+    failed,
+  };
+}
+
+export async function deleteHostWorldBook(bookName, options = {}) {
+  const res = await deleteHostWorldBooks([bookName], options);
+  return {
+    ok: res.deleted.length === 1,
+    bookName: res.deleted[0] || String(bookName || '').trim(),
+    deleted: res.deleted,
+    failed: res.failed,
+  };
+}
+
+/**
+ * 检测当前打开的单人角色卡 PNG/JSON 是否带有内嵌世界书 (`data.character_book`)。
+ * 供 UI 提供「强制从角色卡内嵌数据重导覆盖」能力（根治酒馆遇到同名世界书静默跳过更新导致新条目打不开的痛点）。
+ */
+export function inspectEmbeddedCharacterBook(ctx) {
+  const isGroup =
+    ctx?.groupId !== undefined && ctx?.groupId !== null && String(ctx.groupId).trim() !== '';
+  if (isGroup || !hasActiveChatSelection(ctx)) {
+    return {
+      hasEmbedded: false,
+      bookName: '',
+      charName: '',
+      entryCount: 0,
+    };
+  }
+
+  const char = ctx?.characters?.[ctx?.characterId];
+  const rawBook = char?.data?.character_book;
+  if (!rawBook || typeof rawBook !== 'object') {
+    return {
+      hasEmbedded: false,
+      bookName: '',
+      charName: String(char?.name || '').trim(),
+      entryCount: 0,
+    };
+  }
+
+  const rawEntries = Array.isArray(rawBook.entries)
+    ? rawBook.entries
+    : rawBook.entries && typeof rawBook.entries === 'object'
+      ? Object.values(rawBook.entries)
+      : [];
+
+  if (rawEntries.length === 0) {
+    return {
+      hasEmbedded: false,
+      bookName: '',
+      charName: String(char?.name || '').trim(),
+      entryCount: 0,
+    };
+  }
+
+  const charName = String(char?.data?.name || char?.name || '角色').trim() || '角色';
+  const fallbackName =
+    String(char?.data?.extensions?.world || '').trim() || `${charName}'s Lorebook`;
+  const bookName = cleanWorldBookName(rawBook.name || fallbackName) || `${charName}设定集`;
+
+  return {
+    hasEmbedded: true,
+    bookName,
+    charName,
+    entryCount: rawEntries.length,
+  };
+}
+
+/**
+ * 将角色卡内嵌的 V2 `character_book` 转换为酒馆磁盘世界书结构（优先复用官方 `convertCharacterBook`，离线 1:1 兜底）。
+ */
+export function convertEmbeddedCharacterBookToWorldInfo(
+  characterBook,
+  { worldInfoModule = null } = {},
+) {
+  if (!characterBook || typeof characterBook !== 'object') {
+    return { entries: {} };
+  }
+
+  const wiMod = worldInfoModule || cachedHostWorldInfoMod;
+  if (typeof wiMod?.convertCharacterBook === 'function' && Array.isArray(characterBook.entries)) {
+    try {
+      const converted = wiMod.convertCharacterBook(structuredClone(characterBook));
+      if (converted && typeof converted === 'object' && converted.entries) {
+        return converted;
+      }
+    } catch {
+      // 回退纯函数转换
+    }
+  }
+
+  const rawList = Array.isArray(characterBook.entries)
+    ? characterBook.entries
+    : characterBook.entries && typeof characterBook.entries === 'object'
+      ? Object.values(characterBook.entries)
+      : [];
+
+  const result = {
+    entries: {},
+    originalData: structuredClone(characterBook),
+  };
+
+  rawList.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object') return;
+    const rawId = entry.id ?? entry.uid ?? index;
+    const uid = Number.isInteger(Number(rawId)) ? Number(rawId) : index;
+    const ext = entry.extensions && typeof entry.extensions === 'object' ? entry.extensions : {};
+
+    const keys = Array.isArray(entry.keys)
+      ? [...entry.keys]
+      : Array.isArray(entry.key)
+        ? [...entry.key]
+        : parseWorldInfoKeywords(entry.keys ?? entry.key ?? '');
+    const secondaryKeys = Array.isArray(entry.secondary_keys)
+      ? [...entry.secondary_keys]
+      : Array.isArray(entry.keysecondary)
+        ? [...entry.keysecondary]
+        : parseWorldInfoKeywords(entry.secondary_keys ?? entry.keysecondary ?? '');
+
+    const resolvedPos =
+      ext.position !== undefined
+        ? clampInt(ext.position, 0, 7, 0)
+        : typeof entry.position === 'number'
+          ? clampInt(entry.position, 0, 7, 0)
+          : entry.position === 'before_char'
+            ? 0
+            : 1;
+
+    const isDisabled =
+      entry.disable !== undefined
+        ? Boolean(entry.disable)
+        : entry.enabled !== undefined
+          ? !Boolean(entry.enabled)
+          : false;
+
+    result.entries[uid] = {
+      ...structuredClone(DEFAULT_WI_ENTRY_TEMPLATE),
+      uid,
+      key: keys,
+      keysecondary: secondaryKeys,
+      comment: String(entry.comment ?? ''),
+      content: String(entry.content ?? ''),
+      constant: Boolean(entry.constant),
+      selective: entry.selective !== undefined ? Boolean(entry.selective) : true,
+      order: clampInt(entry.insertion_order ?? entry.order, -9999, 99999, 100),
+      position: resolvedPos,
+      excludeRecursion: Boolean(ext.exclude_recursion ?? entry.excludeRecursion ?? false),
+      preventRecursion: Boolean(ext.prevent_recursion ?? entry.preventRecursion ?? false),
+      delayUntilRecursion: ext.delay_until_recursion ?? entry.delayUntilRecursion ?? false,
+      disable: isDisabled,
+      addMemo: Boolean(entry.comment),
+      displayIndex: Number.isFinite(Number(ext.display_index ?? entry.displayIndex))
+        ? Number(ext.display_index ?? entry.displayIndex)
+        : index,
+      probability: clampInt(ext.probability ?? entry.probability, 0, 100, 100),
+      useProbability: Boolean(ext.useProbability ?? entry.useProbability ?? true),
+      depth: clampInt(ext.depth ?? entry.depth, 0, 999, 4),
+      selectiveLogic: clampInt(ext.selectiveLogic ?? entry.selectiveLogic, 0, 3, 0),
+      outletName: String(ext.outlet_name ?? entry.outletName ?? ''),
+      group: String(ext.group ?? entry.group ?? ''),
+      groupOverride: Boolean(ext.group_override ?? entry.groupOverride ?? false),
+      groupWeight: clampInt(ext.group_weight ?? entry.groupWeight, 0, 10000, 100),
+      scanDepth: ext.scan_depth ?? entry.scanDepth ?? null,
+      caseSensitive: ext.case_sensitive ?? entry.caseSensitive ?? null,
+      matchWholeWords: ext.match_whole_words ?? entry.matchWholeWords ?? null,
+      useGroupScoring: ext.use_group_scoring ?? entry.useGroupScoring ?? null,
+      automationId: String(ext.automation_id ?? entry.automationId ?? ''),
+      role: clampInt(ext.role ?? entry.role, 0, 2, 0),
+      vectorized: Boolean(ext.vectorized ?? entry.vectorized ?? false),
+      sticky: ext.sticky ?? entry.sticky ?? null,
+      cooldown: ext.cooldown ?? entry.cooldown ?? null,
+      delay: ext.delay ?? entry.delay ?? null,
+      matchPersonaDescription: Boolean(ext.match_persona_description ?? entry.matchPersonaDescription ?? false),
+      matchCharacterDescription: Boolean(ext.match_character_description ?? entry.matchCharacterDescription ?? false),
+      matchCharacterPersonality: Boolean(ext.match_character_personality ?? entry.matchCharacterPersonality ?? false),
+      matchCharacterDepthPrompt: Boolean(ext.match_character_depth_prompt ?? entry.matchCharacterDepthPrompt ?? false),
+      matchScenario: Boolean(ext.match_scenario ?? entry.matchScenario ?? false),
+      matchCreatorNotes: Boolean(ext.match_creator_notes ?? entry.matchCreatorNotes ?? false),
+      extensions: structuredClone(ext),
+      triggers: Array.isArray(ext.triggers)
+        ? [...ext.triggers]
+        : Array.isArray(entry.triggers)
+          ? [...entry.triggers]
+          : [],
+      ignoreBudget: Boolean(ext.ignore_budget ?? entry.ignoreBudget ?? false),
+    };
+  });
+
+  return result;
+}
+
+/**
+ * 强制从当前单人角色卡内嵌的 `data.character_book` 重新提取世界书并覆盖保存到酒馆书库，同时自动绑定为角色主世界书。
+ */
+export async function reimportEmbeddedCharacterBook({
+  getContext,
+  worldInfoModule = null,
+  fetchImpl = globalThis.fetch,
+  doc = globalThis.document,
+} = {}) {
+  const ctx = getContext?.();
+  const info = inspectEmbeddedCharacterBook(ctx);
+  if (!info.hasEmbedded) {
+    throw new Error('当前角色卡内未检测到内嵌世界书数据');
+  }
+
+  const wiMod =
+    worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
+  const char = ctx?.characters?.[ctx?.characterId];
+  const converted = convertEmbeddedCharacterBookToWorldInfo(char.data.character_book, {
+    worldInfoModule: wiMod,
+  });
+
+  await saveHostWorldBook(info.bookName, converted, {
+    getContext,
+    worldInfoModule: wiMod,
+    fetchImpl,
+    doc,
+  });
+
+  const updateListFn =
+    typeof wiMod?.updateWorldInfoList === 'function'
+      ? wiMod.updateWorldInfoList.bind(wiMod)
+      : typeof ctx?.updateWorldInfoList === 'function'
+        ? ctx.updateWorldInfoList.bind(ctx)
+        : null;
+  if (updateListFn) {
+    try {
+      await updateListFn();
+    } catch {
+      // ignore offline
+    }
+  }
+
+  ensureWorldBookRegisteredInMemoryAndDom(info.bookName, { ctx, wiMod, doc });
+
+  await bindCharacterPrimaryWorldBook(info.bookName, {
+    getContext,
+    chid: ctx.characterId,
+    worldInfoModule: wiMod,
+    fetchImpl,
+    doc,
+  });
+
+  if (typeof ctx?.reloadWorldInfoEditor === 'function') {
+    try {
+      await ctx.reloadWorldInfoEditor(info.bookName, true);
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    ok: true,
+    bookName: info.bookName,
+    entryCount: info.entryCount,
   };
 }
 
