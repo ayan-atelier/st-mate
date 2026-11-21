@@ -6,8 +6,8 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
-import { svgMarkup } from '../core/icons.js?v=0.8.3';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.4';
+import { svgMarkup } from '../core/icons.js?v=0.8.4';
 
 export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShell }) {
   let bodyObserver = null;
@@ -28,11 +28,26 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     );
   }
 
+  function findHomeBookshelfRoot(doc) {
+    const chatEl = doc?.getElementById?.('chat');
+    if (chatEl?.children) {
+      const direct = [...chatEl.children].find(c => c?.classList?.contains?.('jd-bookshelf'));
+      if (direct) return direct;
+    }
+    return doc?.querySelector?.('#chat > .jd-bookshelf') || null;
+  }
+
   function enhanceBookshelfToolbar() {
     const doc = globalThis.document;
     if (!doc) return;
 
-    const shelfToolbar = doc.querySelector('#chat > .jd-bookshelf > .jd-shelf-toolbar');
+    const shelfRoot = findHomeBookshelfRoot(doc);
+    if (!shelfRoot) return;
+
+    const shelfKids = shelfRoot.children ? [...shelfRoot.children] : [];
+    const shelfToolbar =
+      shelfKids.find(c => c?.classList?.contains?.('jd-shelf-toolbar')) ||
+      shelfRoot.querySelector?.('.jd-shelf-toolbar');
     if (!shelfToolbar) return;
 
     const nativeHomeBtn = shelfToolbar.querySelector('.jd-native-home');
@@ -46,7 +61,11 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     if (!actionWrap) {
       actionWrap = doc.createElement('div');
       actionWrap.className = 'stm-shelf-actions';
-      nativeHomeBtn.before(actionWrap);
+      if (typeof nativeHomeBtn.before === 'function') {
+        nativeHomeBtn.before(actionWrap);
+      } else {
+        nativeHomeBtn.parentNode?.insertBefore?.(actionWrap, nativeHomeBtn);
+      }
       actionWrap.append(nativeHomeBtn);
     }
 
@@ -103,12 +122,16 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     }
 
     // 精简第二行右侧「刷新 ↻」为纯线性刷新图标（与左侧导入图标对称呼应，减少首页文字噪点）
-    const shelfRoot = shelfToolbar.parentElement;
-    const refreshBtn = shelfRoot
-      ? [...shelfRoot.querySelectorAll(':scope > .jd-shelf-info > .jd-text-button')].find(
-          btn => originalLabels.has(btn) || (btn.textContent || '').includes('刷新'),
-        )
-      : null;
+    const shelfInfo =
+      shelfKids.find(c => c?.classList?.contains?.('jd-shelf-info')) ||
+      shelfRoot.querySelector?.('.jd-shelf-info');
+    const infoKids = shelfInfo?.children ? [...shelfInfo.children] : [];
+    const refreshBtn =
+      infoKids.find(
+        btn =>
+          btn?.classList?.contains?.('jd-text-button') &&
+          (originalLabels.has(btn) || (btn.textContent || '').includes('刷新')),
+      ) || null;
 
     if (refreshBtn) {
       if (!originalLabels.has(refreshBtn)) {
@@ -127,6 +150,25 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
           refreshBtn.title = '';
           refreshBtn.removeAttribute('aria-label');
         }
+      }
+    }
+
+    // 同步升级左侧导入按钮提示文案：开启伴侣时提示支持角色卡/预设/主题/世界书/正则万能混传分流
+    const addCharBtn =
+      infoKids.find(btn => btn?.classList?.contains?.('jd-add-character')) ||
+      shelfInfo?.querySelector?.('.jd-add-character') ||
+      null;
+    if (addCharBtn) {
+      if (!originalLabels.has(addCharBtn)) {
+        originalLabels.set(addCharBtn, addCharBtn.title || '从文件导入角色卡');
+      }
+      if (addCharBtn.dataset.stmMode !== modeTag) {
+        addCharBtn.dataset.stmMode = modeTag;
+        const nextTip = shellEnabled
+          ? '万能导入：支持多选混传角色卡 / 预设 / 美化主题 / 世界书 / 正则脚本（自动识别分流）'
+          : originalLabels.get(addCharBtn) || '从文件导入角色卡';
+        addCharBtn.title = nextTip;
+        addCharBtn.setAttribute('aria-label', nextTip);
       }
     }
   }
@@ -224,7 +266,10 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     if (!doc) return;
     doc.getElementById('stm-welcome-return-btn')?.remove();
 
-    const actionWrap = doc.querySelector('#chat > .jd-bookshelf .stm-shelf-actions');
+    const shelfRoot = findHomeBookshelfRoot(doc);
+    const actionWrap =
+      shelfRoot?.querySelector?.('.stm-shelf-actions') ||
+      doc.querySelector('#chat > .jd-bookshelf .stm-shelf-actions');
     if (actionWrap) {
       const nativeHomeBtn = actionWrap.querySelector('.jd-native-home');
       if (nativeHomeBtn) {
@@ -232,18 +277,37 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
         nativeHomeBtn.classList.remove('stm-shelf-icon-only');
         nativeHomeBtn.title = '';
         nativeHomeBtn.removeAttribute('aria-label');
-        actionWrap.before(nativeHomeBtn);
+        if (typeof actionWrap.before === 'function') {
+          actionWrap.before(nativeHomeBtn);
+        } else {
+          actionWrap.parentNode?.insertBefore?.(nativeHomeBtn, actionWrap);
+        }
       }
       actionWrap.remove();
     }
 
-    for (const btn of doc.querySelectorAll('#chat > .jd-bookshelf > .jd-shelf-info > .jd-text-button')) {
+    const shelfInfo =
+      (shelfRoot?.children ? [...shelfRoot.children] : []).find(c =>
+        c?.classList?.contains?.('jd-shelf-info'),
+      ) || shelfRoot?.querySelector?.('.jd-shelf-info');
+    const infoKids = shelfInfo?.children ? [...shelfInfo.children] : [];
+
+    for (const btn of infoKids.filter(n => n?.classList?.contains?.('jd-text-button'))) {
       if (originalLabels.has(btn)) {
         btn.textContent = originalLabels.get(btn) || '刷新 ↻';
         btn.classList.remove('stm-shelf-icon-only');
         btn.title = '';
         btn.removeAttribute('aria-label');
         delete btn.dataset.stmMode;
+      }
+    }
+
+    for (const addBtn of infoKids.filter(n => n?.classList?.contains?.('jd-add-character'))) {
+      if (originalLabels.has(addBtn)) {
+        const origTip = originalLabels.get(addBtn) || '从文件导入角色卡';
+        addBtn.title = origTip;
+        addBtn.setAttribute('aria-label', origTip);
+        delete addBtn.dataset.stmMode;
       }
     }
   }

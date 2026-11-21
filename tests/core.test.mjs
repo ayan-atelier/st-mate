@@ -6768,7 +6768,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
 
     const diskExtensions = new Map([
       ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
-      ['third-party/yantai-bookshelf', { type: 'local', version: '1.4.5', isUpToDate: false }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.0', isUpToDate: false }],
       ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.6', isUpToDate: true }],
       ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
       ['third-party/yantai-memory', { type: 'local', version: '0.4.0', isUpToDate: true }],
@@ -7514,6 +7514,345 @@ test('v0.8.3: 预设提示词条目一键复制（紧随下方自动展开且防
     await new Promise(r => setTimeout(r, 15));
   } finally {
     globalThis.fetch = prevFetch;
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.4: 书架首页「万能自动分流导入」（7类资产指纹识别 + 一键混传落盘 + 空MIME修复 + 原生无损回退）', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    const {
+      classifySmartImportItem,
+      createSmartImporterController,
+      extractPngTextKeywords,
+      importRegexScriptsToHost,
+      importSmartFiles,
+    } = await import('../src/modules/smart-importer.js');
+    const { createHomeCloak } = await import('../src/shell/home-cloak.js');
+
+    // 1. 构造带 tEXt chunk 的 PNG 字节测试提取器（区分普通角色卡 PNG 与罕见 naidata 世界书 PNG）
+    function makeMockPngWithKeyword(keyword) {
+      const sig = [137, 80, 78, 71, 13, 10, 26, 10];
+      const kwBytes = [...Buffer.from(keyword, 'ascii'), 0, 65, 66];
+      const len = kwBytes.length;
+      const lenBytes = [(len >>> 24) & 255, (len >>> 16) & 255, (len >>> 8) & 255, len & 255];
+      const typeBytes = [...Buffer.from('tEXt', 'ascii')];
+      const crc = [0, 0, 0, 0];
+      return new Uint8Array([...sig, ...lenBytes, ...typeBytes, ...kwBytes, ...crc]);
+    }
+
+    const charPngBytes = makeMockPngWithKeyword('chara');
+    const naiPngBytes = makeMockPngWithKeyword('naidata');
+    assert.equal(extractPngTextKeywords(charPngBytes).has('chara'), true);
+    assert.equal(classifySmartImportItem({ fileName: 'card.png', pngBytes: charPngBytes }).kind, 'character');
+    assert.equal(classifySmartImportItem({ fileName: 'lore.png', pngBytes: naiPngBytes }).kind, 'worldinfo');
+    assert.equal(classifySmartImportItem({ fileName: 'pack.charx' }).kind, 'character');
+    assert.equal(classifySmartImportItem({ fileName: 'wallpaper.jpg' }).kind, 'invalid');
+
+    // 2. 验证 JSON 七大指纹精准互斥识别
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'char.json',
+        textContent: JSON.stringify({ spec: 'chara_card_v2', data: { name: '宋仲庭', first_mes: '你好' } }),
+      }).kind,
+      'character',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'preset.json',
+        textContent: JSON.stringify({ temperature: 1.05, openai_max_context: 65536, prompts: [] }),
+      }).kind,
+      'preset',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'theme.json',
+        textContent: JSON.stringify({
+          name: '雾蓝夜读',
+          main_text_color: 'rgba(235, 238, 245, 1)',
+          blur_tint_color: 'rgba(20, 22, 28, 0.95)',
+          custom_css: ':root { --test-theme: 1; }',
+        }),
+      }).kind,
+      'theme',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'world.json',
+        textContent: JSON.stringify({ entries: { 0: { uid: 0, key: ['江东'], content: '银行设定' } } }),
+      }).kind,
+      'worldinfo',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'regex_pack.json',
+        textContent: JSON.stringify([
+          { scriptName: '状态栏折叠', findRegex: '/<status>/g', replaceString: '' },
+          { scriptName: '思维链净化', findRegex: '/<think>/g', replaceString: '' },
+        ]),
+      }).kind,
+      'regex',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'qr.json',
+        textContent: JSON.stringify({ version: 2, name: '小剧场合集', qrList: [] }),
+      }).kind,
+      'quickreply',
+    );
+    assert.equal(
+      classifySmartImportItem({
+        fileName: 'helper.json',
+        textContent: JSON.stringify({ type: 'script', name: '辅助脚本', content: 'console.log(1)' }),
+      }).kind,
+      'helper_script',
+    );
+
+    // 3. 验证全链路多选混传分流：1张角色卡(空MIME模拟移动端) + 1套带脏反代的预设 + 1套美化主题 + 1本世界书 + 2条正则 + 1个助手脚本
+    const presetSelect = doc.createElement('select');
+    presetSelect.id = 'settings_preset_openai';
+    const baseOpt = doc.createElement('option');
+    baseOpt.value = '0';
+    baseOpt.textContent = 'Default';
+    presetSelect.append(baseOpt);
+    presetSelect.value = '0';
+    doc.body.append(presetSelect);
+
+    const themeSelect = doc.createElement('select');
+    themeSelect.id = 'themes';
+    doc.body.append(themeSelect);
+
+    const wiSelect = doc.createElement('select');
+    wiSelect.id = 'world_info';
+    doc.body.append(wiSelect);
+
+    const ctx = {
+      extensionSettings: { regex: [] },
+      powerUserSettings: { theme: 'Default' },
+      chatCompletionSettings: { prompts: [], prompt_order: [] },
+      mainApi: 'openai',
+      characterId: undefined,
+      groupId: null,
+      characters: [],
+      saveSettingsDebounced() {},
+    };
+
+    const apiCalls = [];
+    const mockFetch = async (url, init = {}) => {
+      const href = String(url);
+      apiCalls.push(href);
+      if (href.endsWith('/api/worldinfo/import')) {
+        return { ok: true, status: 200, json: async () => ({ name: '江东设定集' }) };
+      }
+      if (href.endsWith('/api/presets/save')) {
+        const body = JSON.parse(init.body || '{}');
+        assert.equal('reverse_proxy' in (body.preset || {}), false, '混传导入预设必须自动剥离外部反代地址');
+        return { ok: true, status: 200, json: async () => ({ name: body.name }) };
+      }
+      if (href.endsWith('/api/themes/save')) {
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    const droppedCharFiles = [];
+    const mockCoreMod = {
+      async processDroppedFiles(files) {
+        droppedCharFiles.push(...files);
+      },
+    };
+    const mockWiMod = { world_names: [] };
+    let helperTrees = [];
+    const mockHelperApi = {
+      updateScriptTreesWith(updater) {
+        helperTrees = updater(helperTrees);
+      },
+    };
+
+    // 故意传入 type: '' 模拟 Android / TauriTavern 文件选择器丢失 MIME
+    const mixedFiles = [
+      new File([charPngBytes], '裴敬之.png', { type: '' }),
+      new File(
+        [
+          JSON.stringify({
+            temperature: 1.1,
+            openai_max_context: 65536,
+            reverse_proxy: 'https://evil-leak.example/v1',
+            proxy_password: 'leak',
+            prompts: [{ identifier: 'main', name: '主提示', role: 'system', content: '测试' }],
+          }),
+        ],
+        '清冷慢热预设.json',
+        { type: '' },
+      ),
+      new File(
+        [
+          JSON.stringify({
+            name: '纸间夜色',
+            main_text_color: 'rgba(240, 236, 228, 1)',
+            blur_tint_color: 'rgba(24, 22, 20, 0.94)',
+            custom_css: ':root { --zj-test: 1; }',
+          }),
+        ],
+        '纸间夜色.json',
+        { type: '' },
+      ),
+      new File(
+        [JSON.stringify({ entries: { 0: { uid: 0, key: ['水牢'], content: '江东银行地底' } } })],
+        '江东设定集.json',
+        { type: '' },
+      ),
+      new File(
+        [
+          JSON.stringify([
+            { scriptName: '折叠状态栏', findRegex: '/\\[status\\]/g', replaceString: '' },
+            { scriptName: '净化空行', findRegex: '/\\n{3,}/g', replaceString: '\\n\\n' },
+          ]),
+        ],
+        '常用正则包.json',
+        { type: '' },
+      ),
+      new File(
+        [JSON.stringify({ type: 'script', id: 'sc_demo_1', name: '动态立绘脚本', content: 'void 0;' })],
+        '动态立绘脚本.json',
+        { type: '' },
+      ),
+    ];
+
+    const batchRes = await importSmartFiles(mixedFiles, {
+      getContext: () => ctx,
+      doc,
+      fetchImpl: mockFetch,
+      coreModule: mockCoreMod,
+      worldInfoModule: mockWiMod,
+      tavernHelperApi: mockHelperApi,
+    });
+
+    assert.equal(batchRes.errors.length, 0);
+    assert.deepEqual(batchRes.counts, {
+      character: 1,
+      preset: 1,
+      theme: 1,
+      worldinfo: 1,
+      regex: 2,
+      quickreply: 0,
+      helper_script: 1,
+    });
+    assert.equal(droppedCharFiles.length, 1);
+    assert.equal(droppedCharFiles[0].type, 'image/png', '自动修复移动端丢失的 image/png MIME');
+    assert.ok(mockWiMod.world_names.includes('江东设定集'), '世界书同步写入内存 world_names');
+    assert.equal(ctx.extensionSettings.regex.length, 2, '2 条正则写入全局正则列表');
+    assert.equal(ctx.powerUserSettings.theme, '纸间夜色', '导入主题后自动切换启用');
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--SmartThemeBodyColor'),
+      'rgba(240, 236, 228, 1)',
+      '立即刷新底层 SmartTheme 变量',
+    );
+    assert.equal(helperTrees.length, 1, '酒馆助手脚本自动挂载进全局脚本树');
+    assert.match(batchRes.summaryText, /1 张角色卡/);
+    assert.match(batchRes.summaryText, /预设「清冷慢热预设」/);
+    assert.match(batchRes.summaryText, /美化主题「纸间夜色」/);
+    assert.match(batchRes.summaryText, /世界书「江东设定集」/);
+    assert.match(batchRes.summaryText, /2 条正则脚本/);
+
+    // 重复导入相同正则时原地更新不制造垃圾重复项
+    await importRegexScriptsToHost(
+      [{ scriptName: '折叠状态栏', findRegex: '/\\[status\\]/g', replaceString: '<div>new</div>' }],
+      { getContext: () => ctx, doc },
+    );
+    assert.equal(ctx.extensionSettings.regex.length, 2, '同名同匹配式正则原地更新零重复堆积');
+    assert.equal(ctx.extensionSettings.regex[0].replaceString, '<div>new</div>');
+
+    // 4. 验证书架首页 DOM 按钮接管与「切回原生酒馆」无损恢复
+    const chat = doc.createElement('div');
+    chat.id = 'chat';
+    const shelf = doc.createElement('section');
+    shelf.className = 'jd-bookshelf';
+    const toolbar = doc.createElement('div');
+    toolbar.className = 'jd-shelf-toolbar';
+    const nativeHome = doc.createElement('button');
+    nativeHome.className = 'jd-tab jd-native-home';
+    nativeHome.textContent = '原版首页';
+    toolbar.append(nativeHome);
+
+    const infoBar = doc.createElement('div');
+    infoBar.className = 'jd-shelf-info';
+    let nativeCharImportClicks = 0;
+    const addCharBtn = doc.createElement('button');
+    addCharBtn.className = 'jd-add-character';
+    addCharBtn.title = '从文件导入角色卡';
+    addCharBtn.addEventListener('click', () => {
+      nativeCharImportClicks += 1;
+    });
+    infoBar.append(addCharBtn);
+    shelf.append(toolbar, infoBar);
+    chat.append(shelf);
+    doc.body.append(chat);
+    doc.body.classList.add('jd-bookshelf-home-active');
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const cloak = createHomeCloak({ getContext: () => ctx, store });
+    const controller = createSmartImporterController({ getContext: () => ctx, store, doc });
+    cloak.refresh();
+
+    assert.match(addCharBtn.title, /万能导入/, '开启伴侣时书架导入钮提示升级为万能导入');
+
+    let pickerOpened = 0;
+    const origEnsureClick = doc.createElement.bind(doc);
+    doc.createElement = tag => {
+      const node = origEnsureClick(tag);
+      if (String(tag).toLowerCase() === 'input') {
+        node.click = () => {
+          pickerOpened += 1;
+        };
+      }
+      return node;
+    };
+
+    // 模拟真实浏览器捕获阶段 -> 目标阶段点击分发
+    const dispatchDocCaptureThenBtn = () => {
+      let stopped = false;
+      const evt = {
+        type: 'click',
+        target: addCharBtn,
+        preventDefault() {},
+        stopPropagation() {
+          stopped = true;
+        },
+        stopImmediatePropagation() {
+          stopped = true;
+        },
+      };
+      for (const fn of doc.listeners.get('click') || []) {
+        fn(evt);
+        if (stopped) break;
+      }
+      if (!stopped) addCharBtn.click();
+    };
+
+    dispatchDocCaptureThenBtn();
+    assert.equal(pickerOpened, 1, '伴侣开启时点书架导入钮唤起万能多选文件框');
+    assert.equal(nativeCharImportClicks, 0, '成功拦截单一导卡入口，避免重复弹两次文件框');
+
+    // 切回原生酒馆后：提示文案与原生单一导卡点击完全恢复！
+    store.update({ shellEnabled: false });
+    cloak.refresh();
+    assert.equal(addCharBtn.title, '从文件导入角色卡', '切回原生酒馆后恢复原始提示词');
+    dispatchDocCaptureThenBtn();
+    assert.equal(pickerOpened, 1);
+    assert.equal(nativeCharImportClicks, 1, '原生模式下直通书架原本的导角色卡逻辑');
+
+    doc.createElement = origEnsureClick;
+    controller.destroy();
+    cloak.destroy();
+  } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
   }

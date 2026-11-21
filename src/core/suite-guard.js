@@ -7,7 +7,7 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.8.3';
+import { detectPlatform } from './env.js?v=0.8.4';
 
 export const TAVERN_HELPER_SPEC = Object.freeze({
   folderName: 'JS-Slash-Runner',
@@ -23,7 +23,7 @@ export const COMPANION_PLUGINS = Object.freeze([
     folderName: 'yantai-bookshelf',
     displayName: '砚台 · 角色书架',
     repoUrl: 'https://github.com/ayan-atelier/yantai-bookshelf',
-    minVersion: '1.4.5',
+    minVersion: '1.5.0',
     defaultEnabled: true,
     legacyDomSelector: '.jd-bookshelf, #jd-bookshelf-return',
   },
@@ -331,7 +331,7 @@ export function buildEnvironmentDiagnosticReport({
   getContext,
   store,
   auditState = null,
-  stmVersion = '0.8.3',
+  stmVersion = '0.8.4',
 } = {}) {
   const ctx = getContext?.();
   const s = store?.get?.() || {};
@@ -439,7 +439,7 @@ export function createSuiteCoordinator({
   getContext,
   store,
   moduleBridge,
-  stmVersion = '0.8.3',
+  stmVersion = '0.8.4',
   fetcher = (...args) => globalThis.fetch?.(...args),
   reloadHostExtensions = null,
   onStateChange = null,

@@ -10,42 +10,43 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.8.3';
+} from './src/core/env.js?v=0.8.4';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.8.3';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.3';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.3';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.3';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.3';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.3';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.3';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.8.3';
-import { createTopbar } from './src/shell/topbar.js?v=0.8.3';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.3';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.3';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.3';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.3';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.3';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.3';
+} from './src/core/file-saver.js?v=0.8.4';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.4';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.4';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.4';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.4';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.4';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.4';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.8.4';
+import { createTopbar } from './src/shell/topbar.js?v=0.8.4';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.4';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.4';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.4';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.4';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.4';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.4';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.8.3';
-import { createApiDock } from './src/modules/api-dock.js?v=0.8.3';
+} from './src/modules/assistant-core.js?v=0.8.4';
+import { createApiDock } from './src/modules/api-dock.js?v=0.8.4';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.8.3';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.3';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.3';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.3';
-import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.3';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.3';
+} from './src/modules/preset-backend.js?v=0.8.4';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.4';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.4';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.4';
+import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.8.4';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.4';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.4';
 
-const STM_VERSION = '0.8.3';
+const STM_VERSION = '0.8.4';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -83,6 +84,7 @@ function createStMateRuntime() {
   let suiteCoordinator = null;
   let settingsDialog = null;
   let homeCloak = null;
+  let smartImporter = null;
   let tapImmersive = null;
   let drawerBridge = null;
   let extensionsTidy = null;
@@ -312,11 +314,13 @@ function createStMateRuntime() {
         SlashCommand.fromProps({
           name: 'stmate',
           helpString:
-            '打开 ST伴侣设置中心（传入 char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
+            '打开 ST伴侣设置中心（传入 import 呼出万能自动分流导入，char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {
               void toggleShell(!store.get().shellEnabled);
+            } else if (cmd === 'import') {
+              smartImporter?.openPicker();
             } else if (cmd === 'topbar' || cmd === 'bar') {
               const nextMode = store.get().topbarMode === 'native' ? 'rp' : 'native';
               store.update({ topbarMode: nextMode });
@@ -494,6 +498,12 @@ function createStMateRuntime() {
       store,
       onOpenSettings: () => settingsDialog?.open(),
       onToggleShell: toggleShell,
+    });
+
+    smartImporter = createSmartImporterController({
+      getContext,
+      store,
+      onAfterImport: () => refreshAll(),
     });
 
     tapImmersive = createTapImmersive({
@@ -890,6 +900,7 @@ function createStMateRuntime() {
     extensionsTidy?.destroy();
     drawerBridge?.destroy();
     tapImmersive?.destroy();
+    smartImporter?.destroy();
     homeCloak?.destroy();
     settingsDialog?.destroy();
 
@@ -904,6 +915,7 @@ function createStMateRuntime() {
     extensionsTidy = null;
     drawerBridge = null;
     tapImmersive = null;
+    smartImporter = null;
     homeCloak = null;
     settingsDialog = null;
     suiteCoordinator = null;
