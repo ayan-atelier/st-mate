@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { normalizePresetStudio } from '../core/schema.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { normalizePresetStudio } from '../core/schema.js?v=0.8.3';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 
@@ -2386,6 +2386,73 @@ export function createCustomPromptEntry(
   }
 
   return newPrompt;
+}
+
+/**
+ * 一键克隆指定提示词条目（系统动态占位槽 `marker: true` 不可复制；内置 `main`/`nsfw` 等可复制为独立自定义条目）：
+ * - 自动剥离叠加的 `· 副本` 尾巴并生成唯一名称（`xxx · 副本`、`xxx · 副本 2`）；
+ * - 默认置于原条目正下方（`srcOrderIdx + 1`），默认 `enabled: false` 防止玩家尚未编辑完就双倍重复发送。
+ */
+export function duplicatePromptEntry(
+  oaiSettings,
+  sourceIdentifier,
+  { enabled = false, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const prompts = Array.isArray(oaiSettings?.prompts) ? oaiSettings.prompts : [];
+  const srcPrompt = prompts.find(p => p && p.identifier === sourceIdentifier);
+  if (!srcPrompt) {
+    return { ok: false, reason: 'not_found' };
+  }
+  if (srcPrompt.marker) {
+    return { ok: false, reason: 'marker_protected' };
+  }
+
+  const bucket = resolveActivePromptOrderBucket(oaiSettings, { promptManager, ensureIfMissing: true });
+  if (!bucket) {
+    return { ok: false, reason: 'no_bucket' };
+  }
+
+  const rawBaseName = String(srcPrompt.name || sourceIdentifier).trim() || '提示词条目';
+  const cleanStem = rawBaseName.replace(/(?:\s*·\s*副本(?:\s+\d+)?)+$/u, '').trim() || rawBaseName;
+  const existingNamesLower = new Set(
+    prompts.map(p => String(p?.name || '').trim().toLowerCase()).filter(Boolean),
+  );
+
+  let copyName = `${cleanStem} · 副本`.slice(0, 160);
+  let seq = 2;
+  while (existingNamesLower.has(copyName.toLowerCase())) {
+    const suffix = ` · 副本 ${seq}`;
+    copyName = `${cleanStem.slice(0, Math.max(1, 160 - suffix.length))}${suffix}`;
+    seq += 1;
+  }
+
+  const srcOrderIdx = bucket.order.findIndex(item => item && item.identifier === sourceIdentifier);
+  const insertIndex = srcOrderIdx >= 0 ? srcOrderIdx + 1 : bucket.order.length;
+
+  const created = createCustomPromptEntry(
+    oaiSettings,
+    {
+      name: copyName,
+      enabled: Boolean(enabled),
+      role: srcPrompt.role,
+      content: typeof srcPrompt.content === 'string' ? srcPrompt.content : '',
+      injection_position: srcPrompt.injection_position,
+      injection_depth: srcPrompt.injection_depth,
+      injection_order: srcPrompt.injection_order,
+    },
+    { insertIndex, promptManager },
+  );
+
+  if (!created) {
+    return { ok: false, reason: 'create_failed' };
+  }
+
+  created.forbid_overrides = Boolean(srcPrompt.forbid_overrides);
+  created.injection_trigger = Array.isArray(srcPrompt.injection_trigger)
+    ? [...srcPrompt.injection_trigger]
+    : [];
+
+  return { ok: true, prompt: created, insertIndex };
 }
 
 /**

@@ -6,9 +6,9 @@
  * 3. 「副 API 通道」独立卡片清晰呈现，选定站子后支持直接下拉搜索该站子模型列表（收藏置顶）或后台静默拉取模型，告别纯手填。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.7.10';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.7.10';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.3';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.8.3';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from '../shell/host-actions.js?v=0.8.3';
 import {
   API_SOURCES,
   MORE_SOURCE_IDS,
@@ -33,7 +33,7 @@ import {
   testStationChatReply,
   toggleFavoriteModel,
   writeStationSecret,
-} from './api-backend.js?v=0.7.10';
+} from './api-backend.js?v=0.8.3';
 
 export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOpen }) {
   let dockEl = null;
@@ -2154,9 +2154,14 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
     return dockEl;
   }
 
+  function isApiTakeoverEnabled() {
+    const s = store.get();
+    return Boolean(s.shellEnabled && s.modules?.api !== false);
+  }
+
   function open() {
-    if (!store.get().shellEnabled) {
-      openNativeDrawer('sys-settings-button', { getContext });
+    if (!isApiTakeoverEnabled()) {
+      openNativeDrawer('sys-settings-button', { toggleIfOpen: false, getContext });
       return;
     }
 
@@ -2234,12 +2239,16 @@ export function createApiDock({ getContext, store, onOpenStateChange, onBeforeOp
   }
 
   function toggle() {
+    if (!isApiTakeoverEnabled()) {
+      openNativeDrawer('sys-settings-button', { toggleIfOpen: true, getContext });
+      return;
+    }
     if (isOpen) close();
     else open();
   }
 
   function refresh() {
-    if (!store.get().shellEnabled) {
+    if (!isApiTakeoverEnabled()) {
       close();
       return;
     }

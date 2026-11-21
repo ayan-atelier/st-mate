@@ -7,21 +7,21 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.3';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.7.10';
+} from '../shell/host-actions.js?v=0.8.3';
 import {
   getBoundPresetForEntity,
   getHostPresetState,
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.7.10';
+} from './preset-backend.js?v=0.8.3';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -38,24 +38,31 @@ import {
   createWorldBookAutoSaver,
   createWorldInfoBookEntry,
   cycleWorldInfoEntryTriggerMode,
+  deleteCharacterGalleryItem,
   deleteWorldInfoBookEntry,
   enablePresetWorldInfoSlots,
   exportActiveCharacterCard,
   filterWorldInfoEntries,
   formatWorldInfoKeywords,
+  getCoverCacheRevision,
   inspectPresetWorldInfoSlots,
   inspectWorldBookActivation,
   loadHostWorldBook,
   primeHostWorldInfoModule,
   readActiveCharacterProfile,
+  readCharacterCoverGallery,
   readWorldInfoEntries,
+  replacePrimaryCharacterAvatarFile,
+  resolveGalleryImageHref,
   resolveWorldInfoActivationState,
   saveCharacterProfilePatch,
   saveHostWorldBook,
   setGlobalWorldBookEnabled,
   toggleWorldInfoEntryEnabled,
   updateWorldInfoBookEntry,
-} from './char-world-backend.js?v=0.7.10';
+  uploadCharacterGalleryFiles,
+  writeCharacterCoverGallery,
+} from './char-world-backend.js?v=0.8.3';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -126,6 +133,8 @@ export function createCharWorldDock({
   let confirmDeleteGreeting = false;
   let exportMenuOpen = false;
   let exportingFormat = '';
+  let coverStudioOpen = false;
+  let uploadingCoverBusy = false;
   const openFieldSections = new Set(); // 核心设定默认全部折叠，保持角色画册感与防剧透
   const charDraftMap = new Map(); // avatar -> unsaved patch overlay
 
@@ -162,9 +171,16 @@ export function createCharWorldDock({
     return node;
   }
 
+  function isTabTakeoverEnabled(tabName) {
+    const s = store.get();
+    if (!s.shellEnabled) return false;
+    if (tabName === 'world') return Boolean(s.modules?.worldBook ?? s.modules?.charWorld);
+    return Boolean(s.modules?.charCard ?? s.modules?.charWorld);
+  }
+
   function isTakeoverEnabled() {
     const s = store.get();
-    return Boolean(s.shellEnabled && s.modules.charWorld);
+    return Boolean(s.shellEnabled && (s.modules?.charCard || s.modules?.worldBook || s.modules?.charWorld));
   }
 
   function syncBoundsToSheldNow() {
@@ -416,6 +432,11 @@ export function createCharWorldDock({
   async function selectWorldBookAndLoad(nextBookName, { switchToWorldTab = false } = {}) {
     const clean = typeof nextBookName === 'string' ? nextBookName.trim() : '';
     await flushAllPendingSaves();
+    if (switchToWorldTab && !isTabTakeoverEnabled('world')) {
+      close();
+      fallbackOpenNativeDrawer('world', false);
+      return;
+    }
     selectedWorldBook = clean;
     expandedEntryUid = null;
     confirmDeleteEntryUid = null;
@@ -458,6 +479,12 @@ export function createCharWorldDock({
       el('span', '', profile.kind === 'group' ? '群聊档案' : '角色档案'),
     );
     charTabBtn.addEventListener('click', async () => {
+      if (!isTabTakeoverEnabled('char')) {
+        await flushAllPendingSaves();
+        close();
+        fallbackOpenNativeDrawer('char', false);
+        return;
+      }
       if (activeTab === 'char') return;
       await flushAllPendingSaves();
       activeTab = 'char';
@@ -485,6 +512,12 @@ export function createCharWorldDock({
       countPill,
     );
     worldTabBtn.addEventListener('click', async () => {
+      if (!isTabTakeoverEnabled('world')) {
+        await flushAllPendingSaves();
+        close();
+        fallbackOpenNativeDrawer('world', false);
+        return;
+      }
       if (activeTab === 'world') return;
       await flushAllPendingSaves();
       activeTab = 'world';
@@ -832,13 +865,31 @@ export function createCharWorldDock({
     }
 
     // 1. 无外框画册舞台（手机端：美图 -> 角色名 -> Tag -> 统计 -> 导出/绑定预设/按需世界书；电脑端：左美图右信息）
-    const artUrl = profile.portraitUrl || profile.thumbUrl;
+    const galleryState = readCharacterCoverGallery(ctx, profile.avatar);
+    const rev = getCoverCacheRevision();
+    const rawPrimaryArt = profile.portraitUrl || profile.thumbUrl || '';
+    const primaryArtUrl =
+      rawPrimaryArt && rev > 0
+        ? `${rawPrimaryArt}${rawPrimaryArt.includes('?') ? '&' : '?'}stm_rev=${rev}`
+        : rawPrimaryArt;
+
+    const activeGalleryItem =
+      galleryState.selectedId !== 'primary'
+        ? galleryState.items.find(it => it.id === galleryState.selectedId) || null
+        : null;
+    const activeArtUrl = activeGalleryItem
+      ? resolveGalleryImageHref(activeGalleryItem.url) || primaryArtUrl
+      : primaryArtUrl;
+    const activeCrop = activeGalleryItem
+      ? { x: activeGalleryItem.x, y: activeGalleryItem.y }
+      : galleryState.primaryCrop;
+
     const hero = el('div', 'stm-cw-hero is-char-showcase');
 
     const portraitStage = el('div', 'stm-cw-portrait-stage');
-    if (artUrl) {
+    if (activeArtUrl) {
       const ambientBg = el('div', 'stm-cw-portrait-ambient');
-      ambientBg.style.setProperty('--stm-char-art', `url(${JSON.stringify(artUrl)})`);
+      ambientBg.style.setProperty('--stm-char-art', `url(${JSON.stringify(activeArtUrl)})`);
       portraitStage.append(ambientBg);
     }
 
@@ -846,13 +897,14 @@ export function createCharWorldDock({
     portraitBtn.type = 'button';
     portraitBtn.title = `点击查看高清完整原图${profile.avatar ? ` (${profile.avatar})` : ''}`;
     const portraitImg = el('img', 'stm-cw-portrait-img');
-    portraitImg.src = artUrl;
+    portraitImg.src = activeArtUrl;
     portraitImg.alt = profile.name;
+    portraitImg.style.objectPosition = `${activeCrop.x}% ${activeCrop.y}%`;
     const zoomIcon = el('span', 'stm-cw-portrait-zoom');
     zoomIcon.innerHTML = svgMarkup('maximize');
     portraitBtn.append(portraitImg, zoomIcon);
     portraitBtn.addEventListener('click', () => {
-      openPortraitLightbox(artUrl, profile.name);
+      openPortraitLightbox(activeArtUrl, profile.name);
     });
     portraitStage.append(portraitBtn);
 
@@ -924,7 +976,25 @@ export function createCharWorldDock({
         charNameDraft = profile.name;
         renderBodyPreservingScroll();
       });
-      titleRow.append(renameBtn);
+
+      const totalCovers = 1 + galleryState.items.length;
+      const coverBtn = el(
+        'button',
+        `stm-cw-rename-btn stm-cw-cover-trigger${coverStudioOpen ? ' is-active' : ''}`,
+      );
+      coverBtn.type = 'button';
+      coverBtn.title = '更换角色图、调整封面焦点或添加多张封面开启书架随机轮换';
+      coverBtn.setAttribute('aria-expanded', String(coverStudioOpen));
+      coverBtn.append(
+        createIconNode(doc, 'image', 'stm-inline-svg'),
+        el('span', '', totalCovers > 1 ? `换图 (${totalCovers})` : '换图'),
+      );
+      coverBtn.addEventListener('click', () => {
+        coverStudioOpen = !coverStudioOpen;
+        renderBodyPreservingScroll();
+      });
+
+      titleRow.append(renameBtn, coverBtn);
     }
     heroTopBlock.append(titleRow);
 
@@ -1125,6 +1195,204 @@ export function createCharWorldDock({
     metaCol.append(heroTopBlock, exportRow, inlineBinds);
     hero.append(portraitStage, metaCol);
     container.append(hero);
+
+    if (coverStudioOpen && profile.avatar && profile.avatar !== 'none') {
+      const coverPanel = el('div', 'stm-cw-cover-studio');
+
+      const studioHead = el('div', 'stm-cw-cover-head');
+      studioHead.append(
+        el(
+          'strong',
+          'stm-cw-cover-title',
+          `封面与多图库（共 ${1 + galleryState.items.length} 张）`,
+        ),
+      );
+
+      const rotWrap = el('label', 'stm-cw-cover-rot-toggle');
+      rotWrap.title = '开启后，每次退回角色书架首页都会从下方封面池随机挑一张展示（零动画卡顿）';
+      const rotSpan = el('span', 'stm-cw-cover-rot-label', '回首页随机轮换');
+      const rotInput = el('input', 'stm-switch-input');
+      rotInput.type = 'checkbox';
+      rotInput.checked = Boolean(galleryState.randomCover);
+      rotInput.disabled = galleryState.items.length === 0;
+      rotInput.addEventListener('change', () => {
+        writeCharacterCoverGallery(ctx, profile.avatar, { randomCover: rotInput.checked });
+        renderBodyPreservingScroll();
+      });
+      const rotTrack = el('span', 'stm-switch-track');
+      rotWrap.append(rotSpan, rotInput, rotTrack);
+      studioHead.append(rotWrap);
+      coverPanel.append(studioHead);
+
+      const strip = el('div', 'stm-cw-cover-strip');
+      const primaryThumbBtn = el(
+        'button',
+        `stm-cw-cover-thumb${!activeGalleryItem ? ' is-selected' : ''}`,
+      );
+      primaryThumbBtn.type = 'button';
+      primaryThumbBtn.title = '原卡默认主图';
+      const pImg = el('img', 'stm-cw-cover-thumb-img');
+      pImg.src = primaryArtUrl;
+      pImg.alt = '原卡图';
+      pImg.style.objectPosition = `${galleryState.primaryCrop.x}% ${galleryState.primaryCrop.y}%`;
+      primaryThumbBtn.append(pImg, el('span', 'stm-cw-cover-thumb-tag', '原卡'));
+      primaryThumbBtn.addEventListener('click', () => {
+        writeCharacterCoverGallery(ctx, profile.avatar, { selectedId: 'primary' });
+        renderBodyPreservingScroll();
+      });
+      strip.append(primaryThumbBtn);
+
+      for (const item of galleryState.items) {
+        const thumbWrap = el(
+          'div',
+          `stm-cw-cover-thumb-wrap${activeGalleryItem?.id === item.id ? ' is-selected' : ''}`,
+        );
+        const pickBtn = el(
+          'button',
+          `stm-cw-cover-thumb${activeGalleryItem?.id === item.id ? ' is-selected' : ''}`,
+        );
+        pickBtn.type = 'button';
+        const gImg = el('img', 'stm-cw-cover-thumb-img');
+        gImg.src = resolveGalleryImageHref(item.url);
+        gImg.alt = '';
+        gImg.style.objectPosition = `${item.x}% ${item.y}%`;
+        pickBtn.append(gImg);
+        pickBtn.addEventListener('click', () => {
+          writeCharacterCoverGallery(ctx, profile.avatar, { selectedId: item.id });
+          renderBodyPreservingScroll();
+        });
+
+        const delBtn = el('button', 'stm-cw-cover-thumb-del', '×');
+        delBtn.type = 'button';
+        delBtn.title = '移除这张角色图';
+        delBtn.addEventListener('click', async evt => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          await deleteCharacterGalleryItem(item.id, { getContext, avatar: profile.avatar });
+          renderBodyPreservingScroll();
+        });
+
+        thumbWrap.append(pickBtn, delBtn);
+        strip.append(thumbWrap);
+      }
+
+      const multiFileInput = el('input', '');
+      multiFileInput.type = 'file';
+      multiFileInput.accept = 'image/*';
+      multiFileInput.multiple = true;
+      multiFileInput.hidden = true;
+      multiFileInput.addEventListener('change', async () => {
+        const picked = Array.from(multiFileInput.files || []);
+        multiFileInput.value = '';
+        if (picked.length === 0 || uploadingCoverBusy) return;
+        uploadingCoverBusy = true;
+        renderBodyPreservingScroll();
+        try {
+          const res = await uploadCharacterGalleryFiles(picked, {
+            getContext,
+            avatar: profile.avatar,
+          });
+          toastMessage(`已添加 ${res.added.length} 张角色图（已开启书架随机轮换）`, 'success');
+        } catch (err) {
+          toastMessage(err?.message || '上传角色图失败', 'error');
+        } finally {
+          uploadingCoverBusy = false;
+          if (isOpen) renderBodyPreservingScroll();
+        }
+      });
+
+      const addThumbBtn = el('button', 'stm-cw-cover-add-btn');
+      addThumbBtn.type = 'button';
+      addThumbBtn.disabled = uploadingCoverBusy;
+      addThumbBtn.append(
+        createIconNode(doc, 'plus', 'stm-row-icon'),
+        el('span', '', uploadingCoverBusy ? '上传中…' : '添加多图'),
+      );
+      addThumbBtn.addEventListener('click', () => {
+        if (!uploadingCoverBusy) multiFileInput.click();
+      });
+      strip.append(addThumbBtn, multiFileInput);
+      coverPanel.append(strip);
+
+      // 焦点滑杆 + 替换原始卡面底图
+      const cropGrid = el('div', 'stm-cw-cover-crop-grid');
+      const workingCrop = { x: activeCrop.x, y: activeCrop.y };
+
+      const applyLiveCropPreview = () => {
+        portraitImg.style.objectPosition = `${workingCrop.x}% ${workingCrop.y}%`;
+      };
+      const commitCropChange = () => {
+        if (activeGalleryItem) {
+          const nextItems = galleryState.items.map(it =>
+            it.id === activeGalleryItem.id ? { ...it, x: workingCrop.x, y: workingCrop.y } : it,
+          );
+          writeCharacterCoverGallery(ctx, profile.avatar, { items: nextItems });
+        } else {
+          writeCharacterCoverGallery(ctx, profile.avatar, { primaryCrop: { ...workingCrop } });
+        }
+      };
+
+      for (const [axis, label] of [
+        ['x', '左右焦点'],
+        ['y', '上下焦点'],
+      ]) {
+        const cRow = el('label', 'stm-cw-crop-slider-row');
+        cRow.append(el('span', 'stm-cw-crop-slider-label', label));
+        const rInput = el('input', 'stm-range-input');
+        rInput.type = 'range';
+        rInput.min = '0';
+        rInput.max = '100';
+        rInput.value = String(workingCrop[axis]);
+        rInput.addEventListener('input', () => {
+          workingCrop[axis] = Number(rInput.value);
+          applyLiveCropPreview();
+        });
+        rInput.addEventListener('change', commitCropChange);
+        cRow.append(rInput);
+        cropGrid.append(cRow);
+      }
+      coverPanel.append(cropGrid);
+
+      const bottomTools = el('div', 'stm-cw-cover-bottom');
+      const replacePrimaryInput = el('input', '');
+      replacePrimaryInput.type = 'file';
+      replacePrimaryInput.accept = 'image/*';
+      replacePrimaryInput.hidden = true;
+      replacePrimaryInput.addEventListener('change', async () => {
+        const f = replacePrimaryInput.files?.[0];
+        replacePrimaryInput.value = '';
+        if (!f || uploadingCoverBusy) return;
+        uploadingCoverBusy = true;
+        renderBodyPreservingScroll();
+        try {
+          await replacePrimaryCharacterAvatarFile(f, { getContext, avatar: profile.avatar });
+          onCharacterChanged?.();
+          toastMessage('已替换角色卡原始封面（设定与存档均完整保留）', 'success');
+        } catch (err) {
+          toastMessage(err?.message || '替换原始封面失败', 'error');
+        } finally {
+          uploadingCoverBusy = false;
+          if (isOpen) renderBodyPreservingScroll();
+        }
+      });
+
+      const replacePrimaryBtn = el('button', 'stm-cw-secondary-btn stm-cw-replace-avatar-btn', '替换原卡底图');
+      replacePrimaryBtn.type = 'button';
+      replacePrimaryBtn.disabled = uploadingCoverBusy;
+      replacePrimaryBtn.title = '直接覆盖这张角色卡的原始 PNG 头像，设定与聊天存档不受影响';
+      replacePrimaryBtn.addEventListener('click', () => replacePrimaryInput.click());
+
+      const closeCoverBtn = el('button', 'stm-text-btn', '收起');
+      closeCoverBtn.type = 'button';
+      closeCoverBtn.addEventListener('click', () => {
+        coverStudioOpen = false;
+        renderBodyPreservingScroll();
+      });
+
+      bottomTools.append(replacePrimaryBtn, replacePrimaryInput, closeCoverBtn);
+      coverPanel.append(bottomTools);
+      container.append(coverPanel);
+    }
 
     // 4. 去框化折页清单（从「开场白」开始统一用极细分割线排列，默认全部收起，零方框堆叠压迫感）
     const sheetList = el('div', 'stm-cw-sheet-list');
@@ -1431,6 +1699,11 @@ export function createCharWorldDock({
       const goWorldBtn = el('button', 'stm-cw-primary-btn', '切换到清爽世界书 ›');
       goWorldBtn.type = 'button';
       goWorldBtn.addEventListener('click', () => {
+        if (!isTabTakeoverEnabled('world')) {
+          close();
+          fallbackOpenNativeDrawer('world', false);
+          return;
+        }
         activeTab = 'world';
         renderHeader();
         renderBody();
@@ -2456,9 +2729,11 @@ export function createCharWorldDock({
   function open(initialTab = null) {
     const normalizedTab =
       initialTab === 'world' ? 'world' : initialTab === 'char' ? 'char' : null;
+    const targetTab =
+      normalizedTab || (!hasActiveChatSelection(getContext?.()) ? 'world' : activeTab || 'char');
 
-    if (!isTakeoverEnabled()) {
-      fallbackOpenNativeDrawer(normalizedTab || activeTab, false);
+    if (!isTabTakeoverEnabled(targetTab)) {
+      fallbackOpenNativeDrawer(targetTab, false);
       return;
     }
 
@@ -2466,11 +2741,7 @@ export function createCharWorldDock({
     closeAllNativeDrawers();
     ensureDom();
 
-    if (normalizedTab) {
-      activeTab = normalizedTab;
-    } else if (!hasActiveChatSelection(getContext?.())) {
-      activeTab = 'world';
-    }
+    activeTab = targetTab;
 
     isOpen = true;
     lastOpenedAt = Date.now();
@@ -2525,6 +2796,7 @@ export function createCharWorldDock({
     libraryOpen = false;
     confirmDeleteGreeting = false;
     exportMenuOpen = false;
+    coverStudioOpen = false;
     confirmDeleteEntryUid = null;
     if (dockEl) {
       dockEl.hidden = true;
@@ -2545,6 +2817,7 @@ export function createCharWorldDock({
     libraryOpen = false;
     confirmDeleteGreeting = false;
     exportMenuOpen = false;
+    coverStudioOpen = false;
     confirmDeleteEntryUid = null;
 
     await flushAllPendingSaves();
@@ -2572,9 +2845,11 @@ export function createCharWorldDock({
   function toggle(initialTab = null) {
     const normalizedTab =
       initialTab === 'world' ? 'world' : initialTab === 'char' ? 'char' : null;
+    const targetTab = normalizedTab || (isOpen ? activeTab : hasActiveChatSelection(getContext?.()) ? 'char' : 'world');
 
-    if (!isTakeoverEnabled()) {
-      fallbackOpenNativeDrawer(normalizedTab || 'char', true);
+    if (!isTabTakeoverEnabled(targetTab)) {
+      if (isOpen) close();
+      fallbackOpenNativeDrawer(targetTab, true);
       return;
     }
 
@@ -2592,12 +2867,12 @@ export function createCharWorldDock({
       }
       close();
     } else {
-      open(normalizedTab);
+      open(targetTab);
     }
   }
 
   function refresh() {
-    if (!isTakeoverEnabled()) {
+    if (!isTakeoverEnabled() || (isOpen && !isTabTakeoverEnabled(activeTab))) {
       close();
       return;
     }

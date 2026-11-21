@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { saveExportBlob } from '../core/file-saver.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.3';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.7.10';
+} from './preset-backend.js?v=0.8.3';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -2732,4 +2732,396 @@ export function createWorldBookAutoSaver({
     isSaving: () => activeSavingCount > 0,
     getPendingBookName: () => pendingRecord?.bookName || '',
   };
+}
+
+// ============================================================================
+// 四、角色封面焦点、原始立绘替换与多图随机轮换图库（与《砚台 · 角色书架》无损共享）
+// ============================================================================
+
+const BOOKSHELF_SETTINGS_NS = 'jingdu_bookshelf';
+let coverCacheRevision = 0;
+
+export function getCoverCacheRevision() {
+  return coverCacheRevision;
+}
+
+function clampPct(val, fallback) {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(num)));
+}
+
+function ensureBookshelfHostStore(ctx) {
+  if (!ctx?.extensionSettings || typeof ctx.extensionSettings !== 'object') {
+    return null;
+  }
+  if (
+    !ctx.extensionSettings[BOOKSHELF_SETTINGS_NS] ||
+    typeof ctx.extensionSettings[BOOKSHELF_SETTINGS_NS] !== 'object' ||
+    Array.isArray(ctx.extensionSettings[BOOKSHELF_SETTINGS_NS])
+  ) {
+    ctx.extensionSettings[BOOKSHELF_SETTINGS_NS] = {};
+  }
+  const s = ctx.extensionSettings[BOOKSHELF_SETTINGS_NS];
+  if (!s.crops || typeof s.crops !== 'object' || Array.isArray(s.crops)) {
+    s.crops = {};
+  }
+  if (!s.galleries || typeof s.galleries !== 'object' || Array.isArray(s.galleries)) {
+    s.galleries = {};
+  }
+  return s;
+}
+
+export function resolveGalleryImageHref(rawUrl, root = globalThis) {
+  if (typeof rawUrl !== 'string' || !rawUrl.trim()) return '';
+  const trimmed = rawUrl.trim();
+  if (/^(?:javascript|data|vbscript):/i.test(trimmed)) return '';
+  try {
+    const base = root?.document?.baseURI || root?.location?.origin || 'http://localhost/';
+    const rel = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+    const parsed = new URL(rel, base);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.href;
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+export function readCharacterCoverGallery(ctx, avatar) {
+  const cleanAvatar = typeof avatar === 'string' ? avatar.trim() : '';
+  if (!cleanAvatar) {
+    return {
+      entityKey: '',
+      primaryCrop: { x: 50, y: 25 },
+      randomCover: false,
+      selectedId: 'primary',
+      items: [],
+    };
+  }
+  const entityKey = `char:${cleanAvatar}`;
+  const shelf = ctx?.extensionSettings?.[BOOKSHELF_SETTINGS_NS];
+  const rawCrop = shelf?.crops?.[entityKey] || {};
+  const rawGal = shelf?.galleries?.[entityKey] || {};
+  const rawItems = Array.isArray(rawGal.items) ? rawGal.items : [];
+
+  const items = [];
+  const seenIds = new Set();
+  for (let i = 0; i < rawItems.length && items.length < 24; i += 1) {
+    const it = rawItems[i];
+    if (!it || typeof it !== 'object' || typeof it.url !== 'string' || !it.url.trim()) continue;
+    const id = String(it.id || `cov_${i + 1}`).trim().slice(0, 64);
+    if (!id || id === 'primary' || seenIds.has(id)) continue;
+    seenIds.add(id);
+    items.push({
+      id,
+      url: it.url.trim().slice(0, 500),
+      x: clampPct(it.x, 50),
+      y: clampPct(it.y, 25),
+    });
+  }
+
+  const rawSelected = typeof rawGal.selectedId === 'string' ? rawGal.selectedId.trim() : 'primary';
+  const selectedId =
+    rawSelected !== 'primary' && items.some(it => it.id === rawSelected) ? rawSelected : 'primary';
+
+  return {
+    entityKey,
+    primaryCrop: {
+      x: clampPct(rawCrop.x, 50),
+      y: clampPct(rawCrop.y, 25),
+    },
+    randomCover: Boolean(rawGal.randomCover),
+    selectedId,
+    items,
+  };
+}
+
+export function writeCharacterCoverGallery(
+  ctx,
+  avatar,
+  patch = {},
+  { bumpAvatars = false, silentEvent = false } = {},
+) {
+  const cleanAvatar = typeof avatar === 'string' ? avatar.trim() : '';
+  const shelf = ensureBookshelfHostStore(ctx);
+  if (!cleanAvatar || !shelf) return null;
+
+  const prev = readCharacterCoverGallery(ctx, cleanAvatar);
+  const nextPrimaryCrop = patch.primaryCrop
+    ? {
+        x: clampPct(patch.primaryCrop.x, prev.primaryCrop.x),
+        y: clampPct(patch.primaryCrop.y, prev.primaryCrop.y),
+      }
+    : prev.primaryCrop;
+
+  const nextItems = Array.isArray(patch.items)
+    ? patch.items
+        .filter(it => it && typeof it === 'object' && typeof it.url === 'string' && it.url.trim())
+        .slice(0, 24)
+        .map((it, idx) => ({
+          id: String(it.id || `cov_${Date.now()}_${idx}`).trim().slice(0, 64),
+          url: it.url.trim().slice(0, 500),
+          x: clampPct(it.x, 50),
+          y: clampPct(it.y, 25),
+        }))
+    : prev.items;
+
+  const requestedSel =
+    typeof patch.selectedId === 'string' ? patch.selectedId.trim() : prev.selectedId;
+  const nextSelectedId =
+    requestedSel !== 'primary' && nextItems.some(it => it.id === requestedSel)
+      ? requestedSel
+      : 'primary';
+
+  const nextRandom =
+    typeof patch.randomCover === 'boolean' ? patch.randomCover : prev.randomCover;
+
+  shelf.crops[prev.entityKey] = nextPrimaryCrop;
+  shelf.galleries[prev.entityKey] = {
+    randomCover: nextRandom,
+    selectedId: nextSelectedId,
+    items: nextItems,
+  };
+
+  if (bumpAvatars) {
+    coverCacheRevision += 1;
+  }
+
+  ctx?.saveSettingsDebounced?.();
+  if (!silentEvent) {
+    globalThis.dispatchEvent?.(
+      new CustomEvent('yantai:bookshelf:gallery-updated', {
+        detail: { entityKey: prev.entityKey, bumpAvatars },
+      }),
+    );
+  }
+
+  return readCharacterCoverGallery(ctx, cleanAvatar);
+}
+
+async function fileToCompressedGalleryPayload(file) {
+  const mime = String(file?.type || '').toLowerCase();
+  const isGif = mime === 'image/gif' || /\.gif$/i.test(String(file?.name || ''));
+
+  // 在支持 Canvas 的浏览器环境下，将超大图压缩为高清轻量 WebP（最长边 1440px），确保手机滑书架零卡顿
+  if (
+    !isGif &&
+    typeof globalThis.createImageBitmap === 'function' &&
+    typeof globalThis.document?.createElement === 'function'
+  ) {
+    try {
+      const bitmap = await globalThis.createImageBitmap(file);
+      const maxSide = 1440;
+      const ratio = Math.min(1, maxSide / Math.max(bitmap.width || 1, bitmap.height || 1));
+      const w = Math.max(1, Math.round(bitmap.width * ratio));
+      const h = Math.max(1, Math.round(bitmap.height * ratio));
+      const canvas = globalThis.document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx2d = canvas.getContext?.('2d');
+      if (ctx2d) {
+        ctx2d.drawImage(bitmap, 0, 0, w, h);
+        bitmap.close?.();
+        const dataUrl = canvas.toDataURL('image/webp', 0.88);
+        if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/webp;base64,')) {
+          return {
+            base64: dataUrl.slice('data:image/webp;base64,'.length),
+            format: 'webp',
+          };
+        }
+      } else {
+        bitmap.close?.();
+      }
+    } catch {
+      // 回退原字节流编码
+    }
+  }
+
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  const base64 =
+    typeof globalThis.btoa === 'function'
+      ? globalThis.btoa(binary)
+      : Buffer.from(bytes).toString('base64');
+  const extMatch = String(file?.name || '').match(/\.([a-z0-9]+)$/i);
+  const rawExt = extMatch ? extMatch[1].toLowerCase() : '';
+  const format = ['webp', 'png', 'jpg', 'jpeg', 'gif'].includes(rawExt)
+    ? rawExt === 'jpeg'
+      ? 'jpg'
+      : rawExt
+    : mime.includes('png')
+      ? 'png'
+      : mime.includes('gif')
+        ? 'gif'
+        : mime.includes('webp')
+          ? 'webp'
+          : 'jpg';
+  return { base64, format };
+}
+
+/**
+ * 替换酒馆原始角色卡图片（角色设定与历史聊天存档 100% 保留）。
+ */
+export async function replacePrimaryCharacterAvatarFile(
+  file,
+  { getContext, avatar = '', fetchImpl = globalThis.fetch } = {},
+) {
+  if (!file) throw new Error('请选择要替换的角色图片文件');
+  const ctx = getContext?.();
+  const targetAvatar =
+    (typeof avatar === 'string' && avatar.trim()) ||
+    readActiveCharacterProfile(ctx)?.avatar ||
+    '';
+  if (!targetAvatar || targetAvatar === 'none') {
+    throw new Error('当前角色无原始角色图片文件');
+  }
+
+  const form = new FormData();
+  form.append('avatar', file, file.name || 'avatar.png');
+  form.append('avatar_url', targetAvatar);
+
+  const headers =
+    ctx?.getRequestHeaders?.({ omitContentType: true }) || {};
+  delete headers['Content-Type'];
+  delete headers['content-type'];
+
+  const base = globalThis.document?.baseURI || globalThis.location?.origin || 'http://localhost/';
+  const endpoint = new URL('api/characters/edit-avatar', base).href;
+  const res = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers,
+    body: form,
+    cache: 'no-store',
+  });
+  if (!res?.ok) {
+    throw new Error(`更换原始角色封面失败 (HTTP ${res?.status || 0})`);
+  }
+
+  writeCharacterCoverGallery(ctx, targetAvatar, {}, { bumpAvatars: true });
+  return { ok: true, avatar: targetAvatar };
+}
+
+/**
+ * 上传一张或多张备用角色立绘到酒馆服务端图库 (`api/images/upload`)，并挂载至角色封面池。
+ */
+export async function uploadCharacterGalleryFiles(
+  files,
+  { getContext, avatar = '', fetchImpl = globalThis.fetch } = {},
+) {
+  const fileList = Array.from(files || []).filter(Boolean);
+  if (fileList.length === 0) return { added: [], gallery: null };
+
+  const ctx = getContext?.();
+  const targetAvatar =
+    (typeof avatar === 'string' && avatar.trim()) ||
+    readActiveCharacterProfile(ctx)?.avatar ||
+    '';
+  if (!targetAvatar || targetAvatar === 'none') {
+    throw new Error('请先进入单人角色卡再上传多图封面');
+  }
+
+  const base = globalThis.document?.baseURI || globalThis.location?.origin || 'http://localhost/';
+  const endpoint = new URL('api/images/upload', base).href;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(typeof ctx?.getRequestHeaders === 'function' ? ctx.getRequestHeaders() : {}),
+  };
+
+  const stem = targetAvatar.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_').slice(0, 32) || 'char';
+  const current = readCharacterCoverGallery(ctx, targetAvatar);
+  const nextItems = [...current.items];
+  const added = [];
+
+  for (let i = 0; i < fileList.length && nextItems.length < 24; i += 1) {
+    const file = fileList[i];
+    const { base64, format } = await fileToCompressedGalleryPayload(file);
+    const stamp = `${Date.now()}_${i + 1}`;
+    const res = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        image: base64,
+        format,
+        ch_name: '_yantai_covers',
+        filename: `${stem}_${stamp}`,
+      }),
+    });
+    if (!res?.ok) {
+      throw new Error(`上传角色图失败 (HTTP ${res?.status || 0})`);
+    }
+    const payload = await res.json();
+    const relPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
+    if (!relPath) {
+      throw new Error('服务端未返回有效图片路径');
+    }
+    const entry = {
+      id: `cov_${stamp}`,
+      url: relPath,
+      x: 50,
+      y: 25,
+    };
+    nextItems.push(entry);
+    added.push(entry);
+  }
+
+  const autoEnableRandom = current.items.length === 0 && added.length > 0 ? true : current.randomCover;
+  const nextSelectedId =
+    !autoEnableRandom && added.length > 0 ? added[added.length - 1].id : current.selectedId;
+
+  const updated = writeCharacterCoverGallery(ctx, targetAvatar, {
+    items: nextItems,
+    randomCover: autoEnableRandom,
+    selectedId: nextSelectedId,
+  });
+
+  return { added, gallery: updated };
+}
+
+/**
+ * 从角色封面池移除一张备用图，并尽力通知酒馆清理对应磁盘图片文件。
+ */
+export async function deleteCharacterGalleryItem(
+  itemId,
+  { getContext, avatar = '', fetchImpl = globalThis.fetch } = {},
+) {
+  const ctx = getContext?.();
+  const targetAvatar =
+    (typeof avatar === 'string' && avatar.trim()) ||
+    readActiveCharacterProfile(ctx)?.avatar ||
+    '';
+  if (!targetAvatar) return null;
+
+  const current = readCharacterCoverGallery(ctx, targetAvatar);
+  const target = current.items.find(it => it.id === itemId);
+  const remaining = current.items.filter(it => it.id !== itemId);
+
+  if (target?.url && typeof fetchImpl === 'function') {
+    try {
+      const base = globalThis.document?.baseURI || globalThis.location?.origin || 'http://localhost/';
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(typeof ctx?.getRequestHeaders === 'function' ? ctx.getRequestHeaders() : {}),
+      };
+      await fetchImpl(new URL('api/images/delete', base).href, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ path: target.url }),
+      });
+    } catch {
+      // 忽略清理失败
+    }
+  }
+
+  return writeCharacterCoverGallery(ctx, targetAvatar, {
+    items: remaining,
+    randomCover: remaining.length > 0 ? current.randomCover : false,
+    selectedId: current.selectedId === itemId ? 'primary' : current.selectedId,
+  });
 }

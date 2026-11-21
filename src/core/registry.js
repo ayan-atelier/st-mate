@@ -4,7 +4,7 @@
  * 杜绝双份 DOM 挂载、重复事件监听与顶栏控制权打架。
  */
 
-import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.7.10';
+import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.8.3';
 
 export const CONTROL_REGISTRY_KEY = Symbol.for('yantai.control.registry.v1');
 export const STM_RUNTIME_KEY = Symbol.for('yantai.st_mate.runtime.v1');
@@ -64,9 +64,9 @@ export const MODULE_DESCRIPTORS = Object.freeze([
     key: 'echoes',
     registryId: 'yantai-echoes',
     settingsNamespace: 'yantai_echoes',
-    label: '重Roll平行分支',
+    label: '重Roll回看加强',
     icon: 'branch',
-    summary: '默认关闭保持楼层极简；勾选开启后可在楼层底部回看历史重Roll、加星收藏或分叉新支线。',
+    summary: '默认关闭保持楼层极简；开启后可在楼层底部回看历史重Roll、加星收藏或分叉新支线。',
   },
   {
     key: 'memory',

@@ -6,8 +6,8 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { svgMarkup } from '../core/icons.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { svgMarkup } from '../core/icons.js?v=0.8.3';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -16,7 +16,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.7.10';
+} from './host-actions.js?v=0.8.3';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -171,11 +171,13 @@ export function createTopbar({
   }
 
   function handleApiClick() {
-    if (typeof onToggleApiDock === 'function' && store.get().shellEnabled) {
+    const current = store.get();
+    if (typeof onToggleApiDock === 'function' && current.shellEnabled && current.modules.api !== false) {
       closeAllNativeDrawers();
       onToggleApiDock();
       return;
     }
+    onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
     if (openIds.includes('sys-settings-button')) {
       closeAllNativeDrawers();
@@ -293,15 +295,19 @@ export function createTopbar({
     syncOpenDrawerGeometry(doc, Boolean(shouldSuppress));
   }
 
-  function handlePersonaClick() {
+  function openPersonaStudio({ toggleIfAlreadyOpen = true } = {}) {
     onNativeDrawerOpened?.();
     const openIds = getOpenNativeDrawerIds();
     if (openIds.includes('persona-management-button')) {
-      closeAllNativeDrawers();
-      return;
+      if (toggleIfAlreadyOpen) {
+        closeAllNativeDrawers();
+        return;
+      }
     }
 
-    const opened = openNativeDrawer('persona-management-button', { toggleIfOpen: false, getContext });
+    const opened =
+      openIds.includes('persona-management-button') ||
+      openNativeDrawer('persona-management-button', { toggleIfOpen: false, getContext });
     const settings = store.get();
     if (opened && settings.modules.persona) {
       const handle = moduleBridge.getRegisteredHandle('yantai-persona-studio');
@@ -320,12 +326,17 @@ export function createTopbar({
     }
   }
 
+  function handlePersonaClick() {
+    openPersonaStudio({ toggleIfAlreadyOpen: true });
+  }
+
   function handleCharWorldClick() {
     const current = store.get();
+    const charEnabled = Boolean(current.modules.charCard ?? current.modules.charWorld);
     if (
       typeof onToggleCharWorldDock === 'function' &&
       current.shellEnabled &&
-      current.modules.charWorld
+      charEnabled
     ) {
       closeAllNativeDrawers();
       onToggleCharWorldDock();
@@ -337,7 +348,7 @@ export function createTopbar({
       closeAllNativeDrawers();
       return;
     }
-    openNativeDrawer(lastCharDrawerId, { toggleIfOpen: false, getContext });
+    openNativeDrawer(charEnabled ? lastCharDrawerId : 'rightNavHolder', { toggleIfOpen: false, getContext });
   }
 
   function syncPresetBadge(ctx = getContext?.()) {
@@ -406,15 +417,19 @@ export function createTopbar({
     if (!holder) return;
     const activeNativeMode = Boolean(current.shellEnabled && current.topbarMode === 'native');
 
+    const charEnabled = Boolean(current.modules?.charCard ?? current.modules?.charWorld);
+    const worldEnabled = Boolean(current.modules?.worldBook ?? current.modules?.charWorld);
+    const apiEnabled = Boolean(current.modules?.api !== false);
+
     const map = [
-      ['ai-config-button', activeNativeMode && Boolean(current.modules.presets && isPresetDockOpen?.())],
-      ['sys-settings-button', activeNativeMode && Boolean(isApiDockOpen?.())],
-      ['advanced-formatting-button', activeNativeMode && Boolean(current.modules.reader && isReaderDockOpen?.())],
+      ['ai-config-button', activeNativeMode && Boolean(current.modules?.presets && isPresetDockOpen?.())],
+      ['sys-settings-button', activeNativeMode && Boolean(apiEnabled && isApiDockOpen?.())],
+      ['advanced-formatting-button', activeNativeMode && Boolean(current.modules?.reader && isReaderDockOpen?.())],
       [
         'WI-SP-button',
         activeNativeMode &&
           Boolean(
-            current.modules.charWorld &&
+            worldEnabled &&
               isCharWorldDockOpen?.() &&
               (getCharWorldActiveTab?.() || 'char') === 'world',
           ),
@@ -423,7 +438,7 @@ export function createTopbar({
         'rightNavHolder',
         activeNativeMode &&
           Boolean(
-            current.modules.charWorld &&
+            charEnabled &&
               isCharWorldDockOpen?.() &&
               (getCharWorldActiveTab?.() || 'char') === 'char',
           ),
@@ -476,7 +491,7 @@ export function createTopbar({
       return;
     }
 
-    if (drawerId === 'sys-settings-button' && typeof onToggleApiDock === 'function') {
+    if (drawerId === 'sys-settings-button' && current.modules.api !== false && typeof onToggleApiDock === 'function') {
       consume();
       closeAllNativeDrawers();
       onToggleApiDock();
@@ -496,7 +511,8 @@ export function createTopbar({
       return;
     }
 
-    if (drawerId === 'WI-SP-button' && current.modules.charWorld) {
+    const worldEnabled = Boolean(current.modules.worldBook ?? current.modules.charWorld);
+    if (drawerId === 'WI-SP-button' && worldEnabled) {
       consume();
       closeAllNativeDrawers();
       const alreadyWorld =
@@ -513,7 +529,8 @@ export function createTopbar({
       return;
     }
 
-    if (drawerId === 'rightNavHolder' && current.modules.charWorld && hasActiveChatSelection(getContext?.())) {
+    const charEnabled = Boolean(current.modules.charCard ?? current.modules.charWorld);
+    if (drawerId === 'rightNavHolder' && charEnabled && hasActiveChatSelection(getContext?.())) {
       consume();
       closeAllNativeDrawers();
       const alreadyChar =
@@ -872,6 +889,7 @@ export function createTopbar({
   }
 
   return {
+    openPersona: () => openPersonaStudio({ toggleIfAlreadyOpen: false }),
     refresh,
     destroy,
   };

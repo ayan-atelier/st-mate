@@ -1,22 +1,23 @@
 /**
  * ST伴侣 (st-mate) · 与酒馆主栏等宽的顶栏下拉「页面排版与背景」抽屉 (.stm-reader-dock)
- * 严格遵循用户手绘三段式结构（零多余标题栏、少即是多）：
+ * 严格遵循用户四段式清爽结构（零多余标题栏、少即是多）：
  * 1. 文字排版：字号 (A- 16 +A) · 边距 (小 - 6 + 大) · 首行 (顶格 / 缩进) · 行距 (紧 - 2.0 + 松)
  * 2. 背景图：角色图 · 自定义（支持本地图库自由框选裁切 + 图床直链）· 原版 + 亮度 / 清晰度双滑杆
- * 3. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
+ * 3. 文字颜色：正文 · 对话 · 内心三色独立取色与单点恢复默认 + 浅色字 / 深色字 / 默认快捷配比（解决角色底图下字看不清）
+ * 4. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { svgMarkup } from '../core/icons.js?v=0.7.10';
-import { sanitizeAssetUrl } from '../core/schema.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { svgMarkup } from '../core/icons.js?v=0.8.3';
+import { sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.8.3';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.7.10';
-import { openImageCropDialog } from './image-cropper.js?v=0.7.10';
+} from './host-actions.js?v=0.8.3';
+import { openImageCropDialog } from './image-cropper.js?v=0.8.3';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -25,6 +26,77 @@ const FONT_OPTIONS = Object.freeze([
   { id: 'kai', shortLabel: '楷体', label: '温润楷体' },
   { id: 'custom', shortLabel: '自定义', label: '自定义字体链接' },
 ]);
+
+export const TEXT_COLOR_SLOTS = Object.freeze([
+  {
+    key: 'bodyColor',
+    label: '正文',
+    cssVar: '--SmartThemeBodyColor',
+    fallbackHex: '#ece8df',
+    hint: '点击调整叙述正文颜色',
+  },
+  {
+    key: 'quoteColor',
+    label: '对话',
+    cssVar: '--SmartThemeQuoteColor',
+    fallbackHex: '#d4b98c',
+    hint: '点击调整引号对话（“…”）颜色',
+  },
+  {
+    key: 'emColor',
+    label: '内心',
+    cssVar: '--SmartThemeEmColor',
+    fallbackHex: '#a6a095',
+    hint: '点击调整内心独白与斜体（*…*）颜色',
+  },
+]);
+
+export const TEXT_COLOR_PRESETS = Object.freeze([
+  {
+    id: 'light',
+    label: '浅色字',
+    title: '适合偏暗的角色背景图（柔白正文 · 暖金对话 · 银灰内心）',
+    bodyColor: '#f0ede6',
+    quoteColor: '#e6cfa8',
+    emColor: '#a8b0bd',
+  },
+  {
+    id: 'dark',
+    label: '深色字',
+    title: '适合明亮浅色背景图（浓墨正文 · 檀褐对话 · 烟灰内心）',
+    bodyColor: '#22201e',
+    quoteColor: '#7a4436',
+    emColor: '#66605a',
+  },
+]);
+
+function cssColorToHex(raw, fallbackHex = '#ece8df') {
+  const direct = sanitizeHexColor(raw);
+  if (direct) return direct;
+  if (typeof raw === 'string') {
+    const m = raw.match(/rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)/i);
+    if (m) {
+      const toHex = n =>
+        Math.min(255, Math.max(0, Math.round(Number(n) || 0)))
+          .toString(16)
+          .padStart(2, '0');
+      return `#${toHex(m[1])}${toHex(m[2])}${toHex(m[3])}`;
+    }
+  }
+  return fallbackHex;
+}
+
+function resolveThemeColorHex(doc, cssVar, fallbackHex) {
+  try {
+    const rootVal = globalThis.getComputedStyle?.(doc.documentElement)?.getPropertyValue?.(cssVar)?.trim();
+    if (rootVal) return cssColorToHex(rootVal, fallbackHex);
+    const bodyVal = globalThis.getComputedStyle?.(doc.body)?.getPropertyValue?.(cssVar)?.trim();
+    if (bodyVal) return cssColorToHex(bodyVal, fallbackHex);
+  } catch {
+    // ignore
+  }
+  return fallbackHex;
+}
 
 export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpenStateChange }) {
   let dockEl = null;
@@ -277,6 +349,9 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
         hideAvatars: false,
         bookPageFlow: false,
         fontChoice: 'default',
+        bodyColor: '',
+        quoteColor: '',
+        emColor: '',
       });
     });
     secTypeHead.append(resetBtn);
@@ -506,7 +581,111 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
     bodyEl.append(secBg);
 
     // =========================================================================
-    // 3. 其它（字体 · 隐去头像 · 无框书页 · 右滑重Roll）
+    // 3. 文字颜色（正文 · 对话 · 内心 + 浅色字 / 深色字 / 默认快捷配比）
+    // =========================================================================
+    const secColor = el('section', 'stm-dock-section');
+    const secColorHead = el('div', 'stm-sec-head');
+    secColorHead.append(el('span', 'stm-sec-title', '文字颜色'));
+
+    const colorPresetsBar = el('div', 'stm-color-presets');
+    for (const preset of TEXT_COLOR_PRESETS) {
+      const matched =
+        vibe.bodyColor === preset.bodyColor &&
+        vibe.quoteColor === preset.quoteColor &&
+        vibe.emColor === preset.emColor;
+      const pBtn = el(
+        'button',
+        `stm-color-preset-btn${matched ? ' is-active' : ''}`,
+        preset.label,
+      );
+      pBtn.type = 'button';
+      pBtn.title = preset.title;
+      pBtn.addEventListener('click', () => {
+        commitVibe({
+          bodyColor: preset.bodyColor,
+          quoteColor: preset.quoteColor,
+          emColor: preset.emColor,
+        });
+      });
+      colorPresetsBar.append(pBtn);
+    }
+
+    const isDefaultColors = !vibe.bodyColor && !vibe.quoteColor && !vibe.emColor;
+    const defaultColorBtn = el(
+      'button',
+      `stm-color-preset-btn${isDefaultColors ? ' is-active' : ''}`,
+      '默认',
+    );
+    defaultColorBtn.type = 'button';
+    defaultColorBtn.title = '恢复原美化主题的默认文字颜色';
+    defaultColorBtn.addEventListener('click', () => {
+      if (isDefaultColors) return;
+      commitVibe({ bodyColor: '', quoteColor: '', emColor: '' });
+    });
+    colorPresetsBar.append(defaultColorBtn);
+
+    secColorHead.append(colorPresetsBar);
+    secColor.append(secColorHead);
+
+    const colorGrid = el('div', 'stm-color-grid');
+    for (const slot of TEXT_COLOR_SLOTS) {
+      const customHex = sanitizeHexColor(vibe[slot.key]);
+      const effectiveHex = customHex || resolveThemeColorHex(doc, slot.cssVar, slot.fallbackHex);
+
+      const pill = el('div', `stm-color-pill${customHex ? ' is-active' : ''}`);
+      const trigger = el('label', 'stm-color-trigger');
+      trigger.title = slot.hint;
+
+      const swatch = el('span', 'stm-color-swatch');
+      swatch.style.setProperty('--stm-swatch', effectiveHex);
+
+      const nameSpan = el('span', 'stm-color-label', slot.label);
+      const stateSpan = el('span', 'stm-color-state', customHex ? '' : '默认');
+
+      const colorInput = el('input', 'stm-color-input');
+      colorInput.type = 'color';
+      colorInput.value = effectiveHex;
+      colorInput.setAttribute('aria-label', `${slot.label}颜色`);
+
+      colorInput.addEventListener('input', () => {
+        const picked = sanitizeHexColor(colorInput.value);
+        if (!picked) return;
+        swatch.style.setProperty('--stm-swatch', picked);
+        pill.classList.add('is-active');
+        stateSpan.textContent = '';
+        scheduleLiveVibe({ [slot.key]: picked });
+      });
+
+      colorInput.addEventListener('change', () => {
+        const picked = sanitizeHexColor(colorInput.value);
+        if (!picked) return;
+        commitVibe({ [slot.key]: picked });
+      });
+
+      trigger.append(swatch, nameSpan, stateSpan, colorInput);
+      pill.append(trigger);
+
+      if (customHex) {
+        const clearBtn = el('button', 'stm-color-reset');
+        clearBtn.type = 'button';
+        clearBtn.title = `恢复${slot.label}默认颜色`;
+        clearBtn.setAttribute('aria-label', `恢复${slot.label}默认颜色`);
+        clearBtn.innerHTML = svgMarkup('close');
+        clearBtn.addEventListener('click', evt => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          commitVibe({ [slot.key]: '' });
+        });
+        pill.append(clearBtn);
+      }
+
+      colorGrid.append(pill);
+    }
+    secColor.append(colorGrid);
+    bodyEl.append(secColor);
+
+    // =========================================================================
+    // 4. 其它（字体 · 隐去头像 · 无框书页 · 右滑重Roll）
     // =========================================================================
     const secOther = el('section', 'stm-dock-section');
     const secOtherHead = el('div', 'stm-sec-head');

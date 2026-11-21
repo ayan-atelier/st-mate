@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.7.10';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.3';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.3';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.7.10';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.7.10';
+} from '../shell/host-actions.js?v=0.8.3';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.8.3';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -28,6 +28,7 @@ import {
   deleteCustomPromptEntry,
   deleteHostPreset,
   duplicateHostPreset,
+  duplicatePromptEntry,
   exportPresetToJsonString,
   filterPromptEntries,
   getBoundPresetForEntity,
@@ -49,7 +50,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.7.10';
+} from './preset-backend.js?v=0.8.3';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -880,8 +881,56 @@ export function createPresetDock({
         renderPromptListOnly();
       });
 
-      // 3) 右侧上下移动微调按钮 + 展开箭头
+      // 3) 右侧一键复制 + 上下移动微调按钮 + 展开箭头
       const rightCtrl = el('div', 'stm-prompt-right-ctrl');
+
+      const copyBtn = el('button', 'stm-prompt-order-btn stm-prompt-copy-btn');
+      copyBtn.type = 'button';
+      copyBtn.disabled = entry.isMarker;
+      copyBtn.title = entry.isMarker
+        ? '系统动态占位槽不可复制'
+        : '复制此条目（在正下方生成副本并展开编辑）';
+      copyBtn.innerHTML = svgMarkup('copy');
+      copyBtn.addEventListener('click', evt => {
+        evt.stopPropagation();
+        const res = duplicatePromptEntry(oai, entry.identifier, { enabled: false });
+        if (!res.ok || !res.prompt) return;
+
+        confirmDeletePromptId = '';
+        expandedPromptId = res.prompt.identifier;
+        void syncHostPromptManagerAndSettings({
+          getContext,
+          changedPromptId: res.prompt.identifier,
+          immediateRender: true,
+          structuralChange: true,
+        });
+        scheduleAutoPersist();
+        toastMessage(`已复制「${res.prompt.name}」，改好后点左侧开关即可启用`, 'success');
+
+        const wouldHideByFilter =
+          promptFilterMode === 'enabled' ||
+          (promptSearchQuery.trim() &&
+            filterPromptEntries(
+              [
+                {
+                  name: res.prompt.name,
+                  identifier: res.prompt.identifier,
+                  content: res.prompt.content,
+                  enabled: res.prompt.enabled,
+                  isMarker: false,
+                },
+              ],
+              { query: promptSearchQuery, filterMode: promptFilterMode },
+            ).length === 0);
+
+        if (wouldHideByFilter) {
+          promptFilterMode = 'all';
+          promptSearchQuery = '';
+          renderBodyPreservingVaultScroll();
+        } else {
+          renderPromptListOnly();
+        }
+      });
 
       const upBtn = el('button', 'stm-prompt-order-btn');
       upBtn.type = 'button';
@@ -922,7 +971,7 @@ export function createPresetDock({
         renderPromptListOnly();
       });
 
-      rightCtrl.append(upBtn, downBtn, expandBtn);
+      rightCtrl.append(copyBtn, upBtn, downBtn, expandBtn);
       bar.append(toggleBtn, mainBtn, rightCtrl);
       itemBox.append(bar);
 

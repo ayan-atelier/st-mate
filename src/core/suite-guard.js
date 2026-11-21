@@ -7,7 +7,14 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.7.10';
+import { detectPlatform } from './env.js?v=0.8.3';
+
+export const TAVERN_HELPER_SPEC = Object.freeze({
+  folderName: 'JS-Slash-Runner',
+  displayName: '酒馆助手',
+  repoUrl: 'https://github.com/N0VI028/JS-Slash-Runner',
+  domSelector: '#TH-settings, #tavern-helper-settings, #tavern_helper_settings, #js-slash-runner-settings',
+});
 
 export const COMPANION_PLUGINS = Object.freeze([
   {
@@ -324,7 +331,7 @@ export function buildEnvironmentDiagnosticReport({
   getContext,
   store,
   auditState = null,
-  stmVersion = '0.7.10',
+  stmVersion = '0.8.3',
 } = {}) {
   const ctx = getContext?.();
   const s = store?.get?.() || {};
@@ -348,11 +355,15 @@ export function buildEnvironmentDiagnosticReport({
     ).trim() || '默认主题';
 
   const lines = [
-    `[砚台 · ST伴侣 环境体检单 v${stmVersion}]`,
+    `[砚台 · SillyTavern 伴侣 环境体检单 v${stmVersion}]`,
     `- 运行容器: ${osTag} · ${containerTag} (${vw}x${vh})`,
     `- 伴侣状态: 总开关=${s.shellEnabled ? '开启' : '挂起'} | 安全模式=${isSafeModeRequested(root) ? '是' : '否'} | 加速引擎=${s.modules?.turbo ? '开启' : '关闭'}`,
     `- 酒馆界面: 主题="${activeTheme}" | MovingUI=${Boolean(pu.movingUI || doc?.body?.classList?.contains?.('movingUI'))} | 模糊=${pu.blur_strength ?? '默认'}`,
   ];
+
+  if (auditState?.tavernHelper?.status && auditState.tavernHelper.status !== 'unknown') {
+    lines.push(`- 酒馆助手状态: ${auditState.tavernHelper.status}`);
+  }
 
   const companions = auditState?.companions || [];
   if (companions.length > 0) {
@@ -428,7 +439,7 @@ export function createSuiteCoordinator({
   getContext,
   store,
   moduleBridge,
-  stmVersion = '0.7.10',
+  stmVersion = '0.8.3',
   fetcher = (...args) => globalThis.fetch?.(...args),
   reloadHostExtensions = null,
   onStateChange = null,
@@ -446,6 +457,7 @@ export function createSuiteCoordinator({
       version: null,
       scope: null,
     })),
+    tavernHelper: { status: 'unknown', extName: `third-party/${TAVERN_HELPER_SPEC.folderName}` },
     legacy: { retiredInterface: false, discoveredInterface: false, hasAncientMonolith: false },
     enabledThirdParty: [],
     disabledThirdParty: [],
@@ -615,9 +627,39 @@ export function createSuiteCoordinator({
       }
     }
 
+    // 检测《酒馆助手》(JS-Slash-Runner / TavernHelper) 安装与启用状态
+    const helperDiscEntry = Array.isArray(discovered)
+      ? discovered.find(item => {
+          const nm = String(item?.name || '').toLowerCase();
+          return (
+            nm === 'third-party/js-slash-runner' ||
+            nm === 'third-party/tavernhelper' ||
+            nm === 'third-party/tavern-helper'
+          );
+        })
+      : null;
+    const hasHelperRuntime = Boolean(
+      root?.TavernHelper ||
+        (TAVERN_HELPER_SPEC.domSelector && doc?.querySelector?.(TAVERN_HELPER_SPEC.domSelector)),
+    );
+    let helperStatus = 'missing';
+    const helperExtName = helperDiscEntry?.name || `third-party/${TAVERN_HELPER_SPEC.folderName}`;
+    if (helperDiscEntry && disabledSet.has(helperExtName)) {
+      helperStatus = 'host_disabled';
+    } else if (helperDiscEntry || hasHelperRuntime) {
+      helperStatus = 'ready';
+    } else if (discovered === null) {
+      helperStatus = 'unknown';
+    }
+
     lastAudit = {
       checkedAt: Date.now(),
       companions: companionResults,
+      tavernHelper: {
+        status: helperStatus,
+        extName: helperExtName,
+        scope: helperDiscEntry?.type || null,
+      },
       legacy,
       enabledThirdParty,
       disabledThirdParty,
@@ -740,12 +782,172 @@ export function createSuiteCoordinator({
     return { installed, reEnabled, failed };
   }
 
+  /**
+   * 伴侣自身版本升级后（或每满 24 小时），在后台静默检查所有已装配套组件是否为远端最高版本，
+   * 若落后于远端 origin 或低于最低水位线，自动静默拉取更新（零弹窗打扰、面板无需展示子模块版本号）。
+   */
+  async function syncCompanionsToLatestIfNeeded({ skipDisplayNames = [] } = {}) {
+    if (busy || typeof fetcher !== 'function') return { updated: [] };
+    const syncMeta = store.get()?.suiteSync || { lastCheckedVersion: '', lastCheckedAt: 0 };
+    const now = Date.now();
+    const versionChanged = syncMeta.lastCheckedVersion !== stmVersion;
+    const intervalElapsed = now - Number(syncMeta.lastCheckedAt || 0) >= 24 * 60 * 60 * 1000;
+    const hasKnownOutdated = lastAudit.companions.some(
+      c => c.status === 'outdated' && ['local', 'global'].includes(c.scope),
+    );
+
+    if (!versionChanged && !intervalElapsed && !hasKnownOutdated) {
+      return { updated: [] };
+    }
+
+    store.update(
+      { suiteSync: { lastCheckedVersion: stmVersion, lastCheckedAt: now } },
+      { silent: true },
+    );
+
+    const skipSet = new Set(skipDisplayNames);
+    const ctx = getContext?.();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(typeof ctx?.getRequestHeaders === 'function' ? ctx.getRequestHeaders() : {}),
+    };
+
+    const updated = [];
+    for (const item of lastAudit.companions) {
+      if (skipSet.has(item.displayName)) continue;
+      if (!['local', 'global'].includes(item.scope)) continue;
+      if (item.status !== 'ready' && item.status !== 'outdated') continue;
+
+      const isGlobal = item.scope === 'global';
+      let needsPull = item.status === 'outdated';
+
+      if (!needsPull) {
+        try {
+          const verRes = await fetchWithTimeout(
+            fetcher,
+            resolveAppUrl('api/extensions/version', root),
+            {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ extensionName: item.folderName, global: isGlobal }),
+            },
+            20000,
+          );
+          if (verRes?.ok && typeof verRes.json === 'function') {
+            const verData = await verRes.json().catch(() => null);
+            if (verData && verData.isUpToDate === false) {
+              needsPull = true;
+            }
+          }
+        } catch {
+          // 离线或无版本接口时静默跳过
+        }
+      }
+
+      if (!needsPull) continue;
+
+      try {
+        const upRes = await fetchWithTimeout(
+          fetcher,
+          resolveAppUrl('api/extensions/update', root),
+          {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ extensionName: item.folderName, global: isGlobal }),
+          },
+          60000,
+        );
+        if (upRes?.ok) {
+          updated.push(item.displayName);
+          manifestVersionCache.delete(item.folderName);
+        }
+      } catch {
+        // 静默忽略后台拉取异常
+      }
+    }
+
+    if (updated.length > 0) {
+      await audit({ forceManifestCheck: true });
+    }
+    return { updated };
+  }
+
   async function autoProvisionIfNeeded() {
     if (isSafeModeRequested(root) || !store.get().shellEnabled) {
       await audit();
-      return { installed: [], reEnabled: [], failed: [] };
+      return { installed: [], reEnabled: [], failed: [], updated: [] };
     }
-    return installCompanions({ moduleKeys: null, forceReinstall: false });
+    const provisionRes = await installCompanions({ moduleKeys: null, forceReinstall: false });
+    const upgradeRes = await syncCompanionsToLatestIfNeeded({
+      skipDisplayNames: provisionRes.installed,
+    });
+    return { ...provisionRes, updated: upgradeRes.updated };
+  }
+
+  /**
+   * 检测未安装或被禁用的官方《酒馆助手》(N0VI028/JS-Slash-Runner) 时，一键代装或恢复启用。
+   */
+  async function installOrEnableTavernHelper() {
+    if (busy) return { ok: false, action: 'busy' };
+    busy = true;
+    busyLabel = '正在检查并准备《酒馆助手》…';
+    emitChange();
+
+    let ok = false;
+    let action = 'none';
+
+    try {
+      const state = await audit();
+      const th = state.tavernHelper || { status: 'missing', extName: `third-party/${TAVERN_HELPER_SPEC.folderName}` };
+      const ctx = getContext?.();
+
+      if (th.status === 'host_disabled') {
+        const extList = ctx?.extensionSettings?.disabledExtensions;
+        if (Array.isArray(extList)) {
+          const idx = extList.indexOf(th.extName);
+          if (idx >= 0) {
+            extList.splice(idx, 1);
+            ctx?.saveSettingsDebounced?.();
+          }
+        }
+        busyLabel = '正在重新挂载《酒馆助手》…';
+        emitChange();
+        await defaultReloadHostExtensions();
+        await audit({ forceManifestCheck: true });
+        ok = true;
+        action = 're_enabled';
+      } else if (th.status === 'ready') {
+        ok = true;
+        action = 'already_ready';
+      } else {
+        busyLabel = '正在安装《酒馆助手》…';
+        emitChange();
+        const res = await installSingleCompanion({
+          repoUrl: TAVERN_HELPER_SPEC.repoUrl,
+        });
+        if (res.ok) {
+          busyLabel = '正在挂载《酒馆助手》…';
+          emitChange();
+          await defaultReloadHostExtensions();
+          await audit({ forceManifestCheck: true });
+          ok = true;
+          action = 'installed';
+        }
+      }
+    } finally {
+      busy = false;
+      busyLabel = '';
+      emitChange();
+    }
+
+    if (ok && action === 'installed') {
+      notify?.('已安装并启用《酒馆助手》（建议刷新一次页面以确保角色卡脚本完全就绪）', 'success');
+    } else if (ok && action === 're_enabled') {
+      notify?.('已重新启用《酒馆助手》', 'success');
+    } else if (!ok) {
+      notify?.('《酒馆助手》下载未完成，请确认酒馆网络/代理可访问 GitHub 后重试', 'warning');
+    }
+    return { ok, action };
   }
 
   async function updateOutdatedCompanions() {
@@ -841,9 +1043,14 @@ export function createSuiteCoordinator({
     getCompanionStatus(moduleKey) {
       return lastAudit.companions.find(c => c.moduleKey === moduleKey) || null;
     },
+    getTavernHelperStatus() {
+      return lastAudit.tavernHelper || { status: 'unknown' };
+    },
     audit,
     autoProvisionIfNeeded,
+    syncCompanionsToLatestIfNeeded,
     installCompanions,
+    installOrEnableTavernHelper,
     updateOutdatedCompanions,
     buildDiagnosticReport,
     copyDiagnosticReport,

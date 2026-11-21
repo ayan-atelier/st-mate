@@ -187,7 +187,7 @@ import { createCharWorldDock } from '../src/modules/char-world-dock.js';
 import { createReaderDock } from '../src/shell/reader-dock.js';
 import { createTopbar } from '../src/shell/topbar.js';
 import { createSettingsDialog } from '../src/shell/settings-dialog.js';
-import { classifyExtensionEntry, createExtensionsTidy } from '../src/shell/extensions-tidy.js';
+import { classifyExtensionEntry, createExtensionsTidy, discoverWandEntries } from '../src/shell/extensions-tidy.js';
 import {
   attachFilesToHostInput,
   compressChatImageIfNeeded,
@@ -196,24 +196,28 @@ import {
   shouldCompressImageFile,
 } from '../src/shell/chat-vision.js';
 
-test('schema: 默认设置严格符合产品约定，且顶栏恒定收敛为 rp 态与全局轻触纯享', () => {
+test('schema: 默认设置严格符合产品约定，新用户轻触全屏默认关闭，老用户已存状态原样保留', () => {
   const normalized = normalizeSettings(undefined);
   assert.equal(normalized.shellEnabled, true);
   assert.equal(normalized.topbarMode, 'rp');
-  assert.equal(normalized.tapPureReading, true);
+  assert.equal(normalized.tapPureReading, false, '新用户默认关闭轻触正文全屏防误触');
   assert.equal(normalized.tapPureReadingScope, 'all');
   assert.equal(normalized.modules.turbo, true, '隐形流畅渲染引擎必须默认开启');
   assert.equal(normalized.modules.reader, true, '阅读排版与角色映幕必须默认开启');
   assert.equal(normalized.modules.bookshelf, true);
+  assert.equal(normalized.modules.api, true);
+  assert.equal(normalized.modules.charCard, true);
+  assert.equal(normalized.modules.worldBook, true);
   assert.equal(normalized.modules.persona, true);
-  assert.equal(normalized.modules.echoes, false, '重Roll平行分支必须默认关闭');
+  assert.equal(normalized.modules.echoes, false, '重Roll回看加强必须默认关闭');
   assert.equal(normalized.modules.memory, false, '叙事记忆必须默认关闭');
   assert.equal(normalized.vibe.fontSizePx, 0, '未调节时默认跟随玩家原有美化字号');
   assert.equal(normalized.vibe.paragraphIndent, 'default', '未调节时默认不强改段落缩进');
   assert.equal(normalized.auxApi.mode, 'follow_main', '伴侣助手默认零配置跟随主对话 API');
   assert.deepEqual(normalized.apiStudio.stations, []);
-  assert.equal(STM_SCHEMA_VERSION, 5);
-  assert.equal(normalized.schemaVersion, 5);
+  assert.equal(STM_SCHEMA_VERSION, 6);
+  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalizeSettings({ tapPureReading: true }).tapPureReading, true, '老用户已开启状态原样保留');
   assert.deepEqual(normalized.presetStudio, {
     defaultPreset: '',
     charBindings: {},
@@ -4794,11 +4798,15 @@ test('dock focus & cross-module integration: 四大 Dock 防吞焦点、lastDock
     });
     settingsDialog.installFallbackEntries();
     settingsDialog.open('api');
-    const dialogActionTexts = doc
+    const takeoverTitles = doc
       .getElementById('stm-settings-dialog')
-      .findAll(n => n.classList.contains('stm-action-card'))
-      .map(n => n.children.map(c => c.textContent).join(''));
-    assert.equal(dialogActionTexts.length, 4, '设置中心 API 页签应完整呈现 4 大核心工作台快捷入口');
+      .findAll(n => n.classList.contains('stm-takeover-row'))
+      .map(n => n.querySelector('.stm-switch-title')?.textContent);
+    assert.deepEqual(
+      takeoverTitles,
+      ['预设', 'API', '角色卡', '世界书'],
+      '原生与设置页完整呈现 4 大核心面板原版直达与开关',
+    );
     settingsDialog.close();
 
     // 1. 验证 apiDock 在输入框聚焦打字期间遇到外部 refresh() 绝不销毁重建焦点节点！
@@ -4916,7 +4924,7 @@ test('codebase guard: 全仓源码/样式/清单 0 彩色 Emoji，且 style.css 
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        if (ent.name === 'tests' || ent.name === 'node_modules') continue;
+        if (ent.name === 'tests' || ent.name === 'node_modules' || ent.name === 'presets') continue;
         out.push(...collectFiles(full));
       } else if (/\.(js|mjs|css|json|md)$/.test(ent.name)) {
         out.push(full);
@@ -5714,7 +5722,7 @@ test('suite UI declutter v0.7.4: 设置微透分组与常用置顶、预设馆�
     );
 
     const helpBtns = dlg.findAll(n => n.classList.contains('stm-help-btn'));
-    assert.ok(helpBtns.length >= 8, '每项功能均配备圆圈 ? 说明按钮');
+    assert.ok(helpBtns.length >= 7, '每项功能均配备圆圈 ? 说明按钮');
     const prevTurbo = store.get().modules.turbo;
     helpBtns[1].click();
     assert.equal(store.get().modules.turbo, prevTurbo, '点击圆圈 ? 仅展开说明绝不误触右侧开关');
@@ -5726,13 +5734,13 @@ test('suite UI declutter v0.7.4: 设置微透分组与常用置顶、预设馆�
     dlg.findAll(n => n.classList.contains('stm-help-btn'))[2].click();
     assert.equal(dlg.findAll(n => n.classList.contains('stm-switch-help-pop')).length, 0);
 
-    // 切到「扩展与原生」页签：验证第 1 行为「酒馆界面与美化主题」，第 2 行为「第三方扩展设置」
+    // 切到「原生与设置」页签：验证首两行为「用户设置与导入美化主题」与「扩展程序、正则、酒馆助手」
     tabBtns[1].click();
     const shortcutTitles = dlg
       .findAll(n => n.classList.contains('stm-shortcut-item'))
       .map(n => n.querySelector('.stm-switch-title')?.textContent);
-    assert.equal(shortcutTitles[0], '酒馆界面与美化主题');
-    assert.equal(shortcutTitles[1], '第三方扩展设置');
+    assert.equal(shortcutTitles[0], '用户设置与导入美化主题');
+    assert.equal(shortcutTitles[1], '扩展程序、正则、酒馆助手');
     settingsDialog.close();
 
     // 2. 预设馆：单行紧凑顶栏 + 改名归入预设行操作栏 + 上下主次分区 + 无外框弱化生成参数行
@@ -6680,6 +6688,832 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     readerDock.destroy();
     settingsDialog.destroy();
   } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选单与指南 + 界面整理魔法棒收纳二级页 + 酒馆助手一键代装 + 四大核心面板原版直达与独立开关 + 升级自动同步子插件 + ? 气泡防截断', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const cssSource = fs.readFileSync(
+      path.resolve('integrated-suite/st-mate/style.css'),
+      'utf8',
+    );
+    assert.match(
+      cssSource,
+      /\.stm-settings-group\s*\{[^}]*flex-shrink:\s*0/s,
+      '.stm-settings-group 必须设置 flex-shrink: 0 杜绝弹窗满高时挤压截断 ? 说明文字',
+    );
+    assert.match(
+      cssSource,
+      /\.stm-switch-card\.is-compact,\s*\.stm-shortcut-item\.is-compact\s*\{[^}]*overflow:\s*visible/s,
+      '紧凑开关卡片必须使用 overflow: visible 确保 ? 说明完整撑开',
+    );
+
+    const holder = doc.getElementById('top-settings-holder');
+    function mountDrawer(drawerId, contentId) {
+      const d = doc.createElement('div');
+      d.id = drawerId;
+      d.className = 'drawer';
+      const toggle = doc.createElement('div');
+      toggle.className = 'drawer-toggle';
+      const content = doc.createElement('div');
+      content.id = contentId;
+      content.className = 'drawer-content closedDrawer';
+      toggle.addEventListener('click', () => {
+        const opening = !content.classList.contains('openDrawer');
+        content.classList.toggle('openDrawer', opening);
+        content.classList.toggle('closedDrawer', !opening);
+      });
+      d.append(toggle, content);
+      holder.append(d);
+      return { drawer: d, toggle, content };
+    }
+
+    const aiDr = mountDrawer('ai-config-button', 'left-nav-panel');
+    const apiDr = mountDrawer('sys-settings-button', 'rm_api_block');
+    const wiDr = mountDrawer('WI-SP-button', 'WorldInfo');
+    const chrDr = mountDrawer('rightNavHolder', 'right-nav-panel');
+    mountDrawer('persona-management-button', 'PersonaManagement');
+
+    const col1 = doc.createElement('div');
+    col1.id = 'extensions_settings';
+    doc.body.append(col1);
+
+    // 构造底栏魔法棒菜单 (#extensionsMenu)，放入第三方按钮与内置容器按钮
+    const wandMenu = doc.getElementById('extensionsMenu');
+    const wandItemA = doc.createElement('div');
+    wandItemA.id = 'wand_third_party_btn';
+    wandItemA.className = 'list-group-item';
+    const wandSpanA = doc.createElement('span');
+    wandSpanA.textContent = '小手机工具箱';
+    wandItemA.append(wandSpanA);
+
+    const wandWrapB = doc.createElement('div');
+    wandWrapB.id = 'sd_wand_container';
+    wandWrapB.className = 'extension_container';
+    const wandItemB = doc.createElement('div');
+    wandItemB.className = 'list-group-item';
+    wandItemB.textContent = '生成图片';
+    wandWrapB.append(wandItemB);
+    wandMenu.append(wandItemA, wandWrapB);
+
+    const diskExtensions = new Map([
+      ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.4.5', isUpToDate: false }],
+      ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.6', isUpToDate: true }],
+      ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
+      ['third-party/yantai-memory', { type: 'local', version: '0.4.0', isUpToDate: true }],
+    ]);
+    const installCalls = [];
+    const versionCalls = [];
+    const updateCalls = [];
+
+    const mockFetcher = async (url, init = {}) => {
+      const href = String(url);
+      if (href.endsWith('/api/extensions/discover')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            [...diskExtensions.entries()].map(([name, meta]) => ({ name, type: meta.type })),
+        };
+      }
+      if (href.includes('/scripts/extensions/third-party/') && href.endsWith('/manifest.json')) {
+        const m = href.match(/third-party\/([^/]+)\/manifest\.json/);
+        const folder = m ? decodeURIComponent(m[1]) : '';
+        const meta = diskExtensions.get(`third-party/${folder}`);
+        if (!meta) return { ok: false, status: 404 };
+        return { ok: true, status: 200, json: async () => ({ version: meta.version }) };
+      }
+      if (href.endsWith('/api/extensions/version')) {
+        const body = JSON.parse(init.body || '{}');
+        versionCalls.push(body.extensionName);
+        const meta = diskExtensions.get(`third-party/${body.extensionName}`);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ isUpToDate: meta?.isUpToDate !== false }),
+        };
+      }
+      if (href.endsWith('/api/extensions/update')) {
+        const body = JSON.parse(init.body || '{}');
+        updateCalls.push(body.extensionName);
+        const meta = diskExtensions.get(`third-party/${body.extensionName}`);
+        if (meta) meta.isUpToDate = true;
+        return { ok: true, status: 200, json: async () => ({ shortCommitHash: 'def5678' }) };
+      }
+      if (href.endsWith('/api/extensions/install')) {
+        const body = JSON.parse(init.body || '{}');
+        installCalls.push(body);
+        const folder = String(body.url).split('/').pop();
+        diskExtensions.set(`third-party/${folder}`, {
+          type: 'local',
+          version: '4.11.3',
+          isUpToDate: true,
+        });
+        return { ok: true, status: 200, json: async () => ({ folderName: folder }) };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    const ctx = {
+      extensionSettings: {
+        disabledExtensions: [],
+        st_mate: {
+          suiteSync: { lastCheckedVersion: '0.7.10', lastCheckedAt: 1000 },
+        },
+      },
+      mainApi: 'openai',
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'shen.png', name: '沈清晏', description: '设定' }],
+      chat: [{ name: '沈清晏', is_user: false, mes: '早安' }],
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const moduleBridge = createModuleBridge({ root: win, getContext: () => ctx, store });
+
+    let memoryPanelOpened = false;
+    moduleBridge.registry.modules.set('yantai-memory', {
+      id: 'yantai-memory',
+      version: '0.4.0',
+      inspect: () => ({ enabled: store.get().modules.memory }),
+      setEnabled: async () => true,
+      open: () => {
+        memoryPanelOpened = true;
+      },
+    });
+
+    const coordinator = createSuiteCoordinator({
+      root: { document: doc, location: { href: 'http://localhost:8000/' } },
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      stmVersion: '0.8.0',
+      fetcher: mockFetcher,
+      reloadHostExtensions: async () => true,
+    });
+
+    // 1. 伴侣从 v0.7.10 升级至 v0.8.0 时：自动静默巡检远端 git 并把落后的 yantai-bookshelf 拉到最新！
+    const prov = await coordinator.autoProvisionIfNeeded();
+    assert.equal(versionCalls.length, 4, '伴侣版本升级后自动巡检全部已装子插件远端状态');
+    assert.deepEqual(prov.updated, ['砚台 · 角色书架'], '自动将远端有更新的角色书架静默拉到最新');
+    assert.deepEqual(updateCalls, ['yantai-bookshelf']);
+    assert.equal(store.get().suiteSync.lastCheckedVersion, '0.8.0');
+
+    const apiDock = createApiDock({ getContext: () => ctx, store });
+    const charWorldDock = createCharWorldDock({ getContext: () => ctx, store });
+    const extTidy = createExtensionsTidy({ root: { document: doc }, store, stmVersion: '0.8.0' });
+    let personaEntered = 0;
+
+    const settingsDialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      suiteCoordinator: coordinator,
+      stmVersion: '0.8.0',
+      onToggleShell: async val => store.update({ shellEnabled: val }),
+      onOpenPersonaStudio: () => {
+        personaEntered += 1;
+      },
+    });
+    settingsDialog.installFallbackEntries();
+    extTidy.sync();
+
+    // 2. 打开设置中心：验证权威命名、右上角无「切回原生酒馆」按钮、双页签文案与无版本号纯净列表
+    settingsDialog.open('modules');
+    const dlg = doc.getElementById('stm-settings-dialog');
+    const collectText = rootNode => rootNode.findAll(() => true).map(n => n.textContent || '').join(' ');
+    assert.equal(dlg.querySelector('.stm-dialog-title')?.textContent, 'SillyTavern 伴侣');
+    assert.equal(
+      dlg.querySelector('.stm-dialog-header-actions')?.findAll(n => n.tagName === 'BUTTON').length,
+      1,
+      '右上角仅保留关闭 × 钮，彻底移除劝退式切回原生按钮',
+    );
+    const tabLabels = dlg.findAll(n => n.classList.contains('stm-tab-btn')).map(b => collectText(b).trim());
+    assert.deepEqual(tabLabels, ['扩展功能', '原生与设置']);
+
+    const choiceCards = dlg.findAll(n => n.classList.contains('stm-topbar-choice-card'));
+    assert.equal(choiceCards.length, 2, '对话顶栏样式采用双卡可视化单选');
+    assert.ok(collectText(choiceCards[0]).includes('简洁明了，快捷进出'));
+    assert.ok(collectText(choiceCards[1]).includes('原汁原味，酒馆原版顶栏'));
+
+    // 点击伴侣顶栏右上角 ? 展开新手寻路指南，且不改变顶栏选中态
+    choiceCards[0].querySelector('.stm-help-btn').click();
+    assert.equal(store.get().topbarMode, 'rp');
+    assert.ok(dlg.querySelector('.stm-switch-help-pop.is-guide'), '展开伴侣顶栏新手寻路指南');
+
+    const tab1Text = collectText(dlg.querySelector('.stm-dialog-body'));
+    const tab1SwitchTitles = dlg
+      .querySelector('.stm-dialog-body')
+      .findAll(n => n.classList.contains('stm-switch-title'))
+      .map(n => n.textContent);
+    assert.equal(/v1\.1\.6|v0\.4\.0|v1\.0\.4|v1\.4\.5/.test(tab1Text), false, '配套增强列表不再显示任何子插件版本号');
+    assert.equal(tab1SwitchTitles.includes('角色书架首页'), false, '角色书架默认常驻，不再单独列出冗余开关');
+    assert.ok(tab1SwitchTitles.includes('重Roll回看加强'), '重Roll模块升级为直白易懂的重Roll回看加强');
+
+    // 验证「人设馆系统 -> 进入」与「叙事记忆系统 -> 设置」内联按钮
+    const inlineBtns = dlg.findAll(n => n.classList.contains('stm-row-inline-btn'));
+    const enterPersonaBtn = inlineBtns.find(b => b.textContent === '进入');
+    assert.ok(enterPersonaBtn, '人设馆系统开启时展示「进入」按钮');
+    enterPersonaBtn.click();
+    assert.equal(personaEntered, 1, '点「进入」直达人设馆工作台');
+    assert.equal(settingsDialog.isOpen(), false);
+
+    settingsDialog.open('modules');
+    const memSetBtn = dlg
+      .findAll(n => n.classList.contains('stm-switch-card'))
+      .find(c => collectText(c).includes('叙事记忆系统'))
+      ?.querySelector('.stm-row-inline-btn');
+    assert.ok(memSetBtn && memSetBtn.textContent === '设置');
+    memSetBtn.click();
+    assert.equal(memoryPanelOpened, true, '点叙事记忆「设置」直接打开记忆面板');
+
+    // 3. 进入「界面整理与低频收纳 -> 设置」二级页，验证魔法棒入口隐藏与恢复
+    settingsDialog.open('modules');
+    const tidySetBtn = dlg
+      .findAll(n => n.classList.contains('stm-switch-card'))
+      .find(c => collectText(c).includes('界面整理与低频收纳'))
+      ?.querySelector('.stm-row-inline-btn');
+    tidySetBtn.click();
+    assert.equal(dlg.querySelector('.stm-tabs').hidden, true, '进入二级页时自动收起顶栏双页签');
+    const discovered = discoverWandEntries(doc);
+    assert.equal(discovered.length, 2, '自动识别魔法棒内的 2 项外部入口且排除伴侣自身入口');
+
+    const wandCardB = dlg
+      .findAll(n => n.classList.contains('stm-switch-card'))
+      .find(c => collectText(c).includes('生成图片'));
+    const wandInputB = wandCardB.querySelector('.stm-switch-input');
+    wandInputB.checked = false;
+    wandInputB.dispatchEvent({ type: 'change' });
+    extTidy.sync();
+    assert.equal(wandItemB.classList.contains('stm-wand-hidden'), true, '取消勾选后隐藏该魔法棒入口');
+    assert.equal(wandWrapB.classList.contains('stm-wand-wrap-empty'), true, '外层空容器一并隐藏零留白');
+
+    dlg.querySelector('.stm-subview-back-btn').click();
+    assert.equal(dlg.querySelector('.stm-tabs').hidden, false, '点返回回到扩展功能主页');
+
+    // 4. 切至「原生与设置」页签：验证未装《酒馆助手》时一键代装 + 四大核心面板「进入原版 / 独立开关」
+    await coordinator.audit();
+    assert.equal(coordinator.getTavernHelperStatus().status, 'missing', '初始准确识别未安装酒馆助手');
+    settingsDialog.open('native');
+
+    const installHelperBtn = dlg.querySelector('.stm-helper-install-btn');
+    assert.ok(installHelperBtn, '未装酒馆助手时在扩展程序行醒目展示一键安装按钮');
+    assert.match(installHelperBtn.textContent, /未装酒馆助手/);
+    installHelperBtn.click();
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(installCalls.length, 1);
+    assert.equal(installCalls[0].url, 'https://github.com/N0VI028/JS-Slash-Runner');
+    assert.equal(coordinator.getTavernHelperStatus().status, 'ready', '一键安装后酒馆助手状态变为 ready');
+    assert.equal(dlg.querySelector('.stm-helper-install-btn'), null, '装好后自动收起安装提示按钮');
+
+    // 验证 4 行「左点进入原版 · 右切开关」：点击「预设 · 进入原版」打开原生抽屉且不关掉 presets 开关！
+    const takeoverRows = dlg.findAll(n => n.classList.contains('stm-takeover-row'));
+    assert.equal(takeoverRows.length, 4);
+    takeoverRows[0].querySelector('.stm-native-jump-zone').click();
+    assert.equal(aiDr.content.classList.contains('openDrawer'), true, '点左侧区域直接打开酒馆原生预设抽屉');
+    assert.equal(store.get().modules.presets, true, '点进入原版绝不误关伴侣预设馆开关');
+    aiDr.toggle.click();
+
+    // 验证单独关掉「世界书」开关：角色卡仍走伴侣档案页，而点世界书页签直达原生世界书抽屉！
+    settingsDialog.open('native');
+    const wbToggle = dlg
+      .findAll(n => n.classList.contains('stm-takeover-row'))[3]
+      .querySelector('.stm-switch-input');
+    wbToggle.checked = false;
+    wbToggle.dispatchEvent({ type: 'change' });
+    assert.equal(store.get().modules.charCard, true);
+    assert.equal(store.get().modules.worldBook, false);
+    settingsDialog.close();
+
+    charWorldDock.open('char');
+    assert.equal(charWorldDock.isOpen(), true, '角色卡开关仍开启，正常打开伴侣角色档案');
+    doc.getElementById('stm-char-world-dock').findAll(n => n.classList.contains('stm-cw-tab-btn'))[1].click();
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(charWorldDock.isOpen(), false, '世界书开关关闭时点世界书页签自动收起伴侣面板');
+    assert.equal(wiDr.content.classList.contains('openDrawer'), true, '无缝转跳打开原生世界书抽屉');
+    wiDr.toggle.click();
+
+    // 验证单独关掉「API」开关：apiDock.open() 自动回退打开原生 API 插头抽屉！
+    store.update({ modules: { api: false } });
+    apiDock.open();
+    assert.equal(apiDock.isOpen(), false);
+    assert.equal(apiDr.content.classList.contains('openDrawer'), true, 'API 开关关闭后直达原生插头抽屉');
+
+    extTidy.destroy();
+    charWorldDock.destroy();
+    apiDock.destroy();
+    settingsDialog.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.1 suite polish: ☰ 三横菜单人话重排 + 角色档案多封面图库与随机轮换 + Apple 轻薄卡片流双主题启用 + 内置砚台预设一键导入', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    const { createAtmosphere } = await import('../src/shell/atmosphere.js');
+    const {
+      COMPANION_THEME_DAY_NAME,
+      COMPANION_THEME_NIGHT_NAME,
+      applyCompanionTheme,
+      importOrActivateYantaiPreset,
+      syncActiveCompanionThemeOnBoot,
+    } = await import('../src/core/companion-kit.js');
+    const {
+      deleteCharacterGalleryItem,
+      readCharacterCoverGallery,
+      uploadCharacterGalleryFiles,
+      writeCharacterCoverGallery,
+    } = await import('../src/modules/char-world-backend.js');
+
+    // 1. 验证底栏「☰ 三横菜单」人话改名与黄金排序（重新生成/续写置顶 -> 分割线 -> 开启新对话/保存/存档管理/批量删除/退出）及无损还原
+    const optionsWrap = doc.createElement('div');
+    optionsWrap.id = 'options';
+    const optionsContent = doc.createElement('div');
+    optionsContent.className = 'options-content';
+
+    const makeOptionItem = (id, origText) => {
+      const a = doc.createElement('a');
+      a.id = id;
+      const sp = doc.createElement('span');
+      sp.textContent = origText;
+      sp.setAttribute('data-i18n', origText);
+      a.append(sp);
+      return { a, sp };
+    };
+
+    const optAn = makeOptionItem('option_toggle_AN', '作者注释');
+    const optBookmark = makeOptionItem('option_new_bookmark', '保存检查点');
+    const origHr = doc.createElement('hr');
+    const optNewChat = makeOptionItem('option_start_new_chat', '开始新聊天');
+    const optClose = makeOptionItem('option_close_chat', '关闭聊天');
+    const optManage = makeOptionItem('option_select_chat', '管理聊天文件');
+    const optDelete = makeOptionItem('option_delete_mes', '删除消息');
+    const optRegen = makeOptionItem('option_regenerate', '重新生成');
+    const optCont = makeOptionItem('option_continue', '续写');
+
+    optionsContent.append(
+      optAn.a,
+      optBookmark.a,
+      origHr,
+      optNewChat.a,
+      optClose.a,
+      optManage.a,
+      optDelete.a,
+      optRegen.a,
+      optCont.a,
+    );
+    optionsWrap.append(optionsContent);
+    doc.body.append(optionsWrap);
+
+    const ctx = {
+      extensionSettings: {},
+      powerUserSettings: { theme: '默认主题' },
+      mainApi: 'openai',
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'song.png', name: '宋仲庭', description: '高干设定' }],
+      chat: [{ name: '宋仲庭', is_user: false, mes: '雪停了。' }],
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const atmosphere = createAtmosphere({
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    atmosphere.refresh();
+
+    const visibleKids = optionsContent.children.filter(
+      n => !n.classList?.contains?.('stm-options-hr-hidden'),
+    );
+    assert.deepEqual(
+      visibleKids.map(n =>
+        n.tagName === 'HR'
+          ? '---'
+          : n.classList?.contains?.('stm-options-more')
+            ? 'stm-options-more'
+            : n.querySelector('span')?.textContent || n.className,
+      ),
+      [
+        '重新生成',
+        '续写',
+        '---',
+        '开启新对话',
+        '保存',
+        '存档管理',
+        '批量删除',
+        '退出',
+        'stm-options-more',
+      ],
+      '三横菜单严格按「重新生成 -> 续写 -> 分割线 -> 开启新对话/保存/存档管理/批量删除/退出 -> 更多原生工具」排列',
+    );
+
+    // 关闭 optimizeOptionsMenu 开关后，100% 恢复原有机翻文案与节点顺序
+    store.update({ tidy: { optimizeOptionsMenu: false, foldOptionsMenu: false } });
+    atmosphere.refresh();
+    assert.equal(optBookmark.sp.textContent, '保存检查点');
+    assert.equal(optManage.sp.textContent, '管理聊天文件');
+    assert.equal(optClose.sp.textContent, '关闭聊天');
+    assert.equal(origHr.classList.contains('stm-options-hr-hidden'), false);
+    assert.equal(optionsContent.children[0], optAn.a, '恢复原始首项位置');
+
+    // 2. 验证角色档案「多张角色图上传 + 焦点滑杆 + 回首页随机轮换 + 删除」全链路
+    const uploadedPayloads = [];
+    const deletedPaths = [];
+    const savedThemes = [];
+    const savedPresets = [];
+
+    const themeSelect = doc.createElement('select');
+    themeSelect.id = 'themes';
+    doc.body.append(themeSelect);
+
+    const presetSelect = doc.createElement('select');
+    presetSelect.id = 'settings_preset_openai';
+    const baseOpt = doc.createElement('option');
+    baseOpt.value = '0';
+    baseOpt.textContent = 'Default';
+    presetSelect.append(baseOpt);
+    presetSelect.value = '0';
+    doc.body.append(presetSelect);
+
+    const mockFetch = async (url, init = {}) => {
+      const href = String(url);
+      if (href.endsWith('/api/images/upload')) {
+        const body = JSON.parse(init.body || '{}');
+        uploadedPayloads.push(body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            path: `user/images/_yantai_covers/${body.filename}.${body.format}`,
+          }),
+        };
+      }
+      if (href.endsWith('/api/images/delete')) {
+        const body = JSON.parse(init.body || '{}');
+        deletedPaths.push(body.path);
+        return { ok: true, status: 200 };
+      }
+      if (href.endsWith('/api/themes/save')) {
+        const body = JSON.parse(init.body || '{}');
+        savedThemes.push(body);
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+      }
+      if (href.endsWith('/api/presets/save')) {
+        const body = JSON.parse(init.body || '{}');
+        savedPresets.push(body);
+        return { ok: true, status: 200, json: async () => ({ name: body.name }) };
+      }
+      return { ok: false, status: 404 };
+    };
+
+    const file1 = new File([new Uint8Array([137, 80, 78, 71])], 'snow_suit.png', { type: 'image/png' });
+    const file2 = new File([new Uint8Array([255, 216, 255])], 'office_night.jpg', { type: 'image/jpeg' });
+    const uploadRes = await uploadCharacterGalleryFiles([file1, file2], {
+      getContext: () => ctx,
+      avatar: 'song.png',
+      fetchImpl: mockFetch,
+    });
+    assert.equal(uploadRes.added.length, 2, '支持一次选择上传多张角色图');
+    assert.equal(uploadedPayloads.length, 2);
+    assert.equal(uploadedPayloads[0].ch_name, '_yantai_covers');
+
+    const galAfterAdd = readCharacterCoverGallery(ctx, 'song.png');
+    assert.equal(galAfterAdd.items.length, 2);
+    assert.equal(galAfterAdd.randomCover, true, '首次添加备用角色图后自动开启回书架随机轮换');
+
+    writeCharacterCoverGallery(ctx, 'song.png', { primaryCrop: { x: 42, y: 18 } });
+    assert.deepEqual(ctx.extensionSettings.jingdu_bookshelf.crops['char:song.png'], { x: 42, y: 18 });
+
+    await deleteCharacterGalleryItem(galAfterAdd.items[0].id, {
+      getContext: () => ctx,
+      avatar: 'song.png',
+      fetchImpl: mockFetch,
+    });
+    assert.equal(deletedPaths.length, 1, '删除备用角色图时同步通知服务端清理磁盘图片');
+    assert.equal(readCharacterCoverGallery(ctx, 'song.png').items.length, 1);
+
+    // 验证角色档案 UI 渲染出「换图 (2)」按钮且点击展开多图库与随机轮换开关
+    const charWorldDock = createCharWorldDock({ getContext: () => ctx, store });
+    charWorldDock.open('char');
+    const cwRoot = doc.getElementById('stm-char-world-dock');
+    const coverTrigger = cwRoot.querySelector('.stm-cw-cover-trigger');
+    assert.ok(coverTrigger, '角色名改名按钮旁呈现「换图」入口');
+    assert.match(coverTrigger.children.map(c => c.textContent).join(''), /换图 \(2\)/);
+    coverTrigger.click();
+    assert.ok(cwRoot.querySelector('.stm-cw-cover-studio'), '点击换图展开封面与多图库工作台');
+    assert.equal(
+      cwRoot.findAll(n => n.classList.contains('stm-cw-cover-thumb')).length,
+      2,
+      '展示原卡图 + 1 张备用图缩略卡',
+    );
+
+    // 3. 验证「启用伴侣主题」（静夜 / 浅昼 · 零算力光学微透玻璃 + 正中版心 + 银灰调 + 电脑端不残留白底变量）
+    doc.documentElement.style.setProperty('--SmartThemeBlurTintColor', 'rgba(255, 255, 255, 1)');
+    const nightRes = await applyCompanionTheme('night', {
+      getContext: () => ctx,
+      fetchImpl: mockFetch,
+      doc,
+      powerUserModule: {
+        power_user: {},
+        applyPowerUserSettings() {
+          // 模拟酒馆 power-user.js 无参调用 applyThemeColor() 不刷新 SmartTheme 变量的线上行为
+        },
+      },
+    });
+    assert.equal(nightRes.name, COMPANION_THEME_NIGHT_NAME);
+    assert.equal(ctx.powerUserSettings.theme, COMPANION_THEME_NIGHT_NAME);
+    assert.equal(themeSelect.value, COMPANION_THEME_NIGHT_NAME);
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--SmartThemeBlurTintColor'),
+      'rgba(22, 23, 28, 0.96)',
+      '电脑端即使走 applyPowerUserSettings 也强制刷新底层 SmartTheme 变量，绝不发白串色',
+    );
+    assert.equal(savedThemes[0].chat_width, 100, '宽屏画布满幅无黑边，由内部卡片流 900px 严格居中');
+    assert.match(savedThemes[0].custom_css, /故事还在继续…/);
+    assert.match(savedThemes[0].custom_css, /max-width: 900px !important/);
+    assert.match(savedThemes[0].custom_css, /#c4c9d4/);
+    assert.doesNotMatch(savedThemes[0].custom_css, /#d4b98c/i);
+    assert.match(savedThemes[0].custom_css, /#options_button::before/);
+    assert.match(savedThemes[0].custom_css, /#top-settings-holder > #ai-config-button/);
+    assert.match(savedThemes[0].custom_css, /inset 0 1px 0 var\(--yt-glass-Rim\)/);
+
+    // 模拟老版本已启用伴侣主题后刷新：syncActiveCompanionThemeOnBoot 自动热升级 custom_css 与 SmartTheme 变量
+    ctx.powerUserSettings.custom_css = '/* old v0.8.1 css */';
+    doc.documentElement.style.setProperty('--SmartThemeBlurTintColor', 'rgba(255, 255, 255, 1)');
+    let bootSaved = 0;
+    ctx.saveSettingsDebounced = () => {
+      bootSaved += 1;
+    };
+    assert.equal(syncActiveCompanionThemeOnBoot({ getContext: () => ctx, doc }), true);
+    assert.equal(bootSaved, 1, '检测到伴侣主题旧样式时自动升级并持久化');
+    assert.match(ctx.powerUserSettings.custom_css, /故事还在继续…/);
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--SmartThemeBlurTintColor'),
+      'rgba(22, 23, 28, 0.96)',
+    );
+
+    const dayRes = await applyCompanionTheme('day', {
+      getContext: () => ctx,
+      fetchImpl: mockFetch,
+      doc,
+    });
+    assert.equal(dayRes.name, COMPANION_THEME_DAY_NAME);
+    assert.equal(savedThemes.length, 2);
+    assert.equal(savedThemes[1].blur_strength, 0, '伴侣主题强制 0 毛玻璃确保手机 60 帧丝滑');
+
+    // 4. 验证内置《砚台预设 V2.1》一键导入与二次点击直接切换防重复副本
+    const fsMod = await import('node:fs');
+    const pathMod = await import('node:path');
+    const bundledPresetRaw = fsMod.readFileSync(
+      pathMod.resolve('integrated-suite/st-mate/assets/presets/砚台预设_V2.1.json'),
+      'utf8',
+    );
+    const firstImport = await importOrActivateYantaiPreset({
+      getContext: () => ctx,
+      fetchImpl: mockFetch,
+      doc,
+      rawPresetContent: bundledPresetRaw,
+    });
+    assert.equal(firstImport.action, 'imported');
+    assert.equal(firstImport.name, '砚台预设 V2.1');
+    assert.equal(savedPresets.length, 1);
+
+    const secondImport = await importOrActivateYantaiPreset({
+      getContext: () => ctx,
+      fetchImpl: mockFetch,
+      doc,
+      rawPresetContent: bundledPresetRaw,
+    });
+    assert.equal(secondImport.action, 'activated', '已存在砚台预设 V2.1 时直接切换，不重复新建副本');
+    assert.equal(savedPresets.length, 1);
+
+    charWorldDock.destroy();
+    atmosphere.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v0.8.3: 预设提示词条目一键复制（紧随下方自动展开且防误发）+ 阅读抽屉正文/对话/内心三色调节与防注入护栏', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevFetch = globalThis.fetch;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ name: '测试预设' }) });
+
+  try {
+    const { sanitizeHexColor } = await import('../src/core/schema.js');
+    const { buildPageOverrideCss } = await import('../src/shell/atmosphere.js');
+    const { createReaderDock } = await import('../src/shell/reader-dock.js');
+    const { duplicatePromptEntry, readOrderedPromptEntries } = await import('../src/modules/preset-backend.js');
+    const { createPresetDock } = await import('../src/modules/preset-dock.js');
+
+    // 1. 颜色字段清洗与防 CSS 注入校验
+    assert.equal(sanitizeHexColor(''), '');
+    assert.equal(sanitizeHexColor('#AbC'), '#aabbcc');
+    assert.equal(sanitizeHexColor(' #F0EDE6 '), '#f0ede6');
+    assert.equal(sanitizeHexColor('red; } body { display: none'), '', '严禁任何非标准 Hex 进入动态样式表');
+
+    // 2. 页面覆盖样式生成：默认三色留空零覆盖，设值后精准覆盖 SmartTheme 及主流第三方主题变量并保护内联颜色
+    const ctx = {
+      extensionSettings: {},
+      powerUserSettings: { gestures: false },
+      mainApi: 'openai',
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'pei.png', name: '裴敬之', description: '设定' }],
+      chat: [{ name: '裴敬之', is_user: false, mes: '没有炭火。*只是做这件事罢了* “敬之……”' }],
+      chatCompletionSettings: {
+        openai_max_context: 32768,
+        openai_max_tokens: 4096,
+        temp_openai: 1,
+        prompts: [
+          {
+            identifier: 'main',
+            name: '主提示词',
+            system_prompt: true,
+            marker: false,
+            role: 'system',
+            content: '保持冷峻克制笔触。',
+            injection_position: 0,
+            injection_depth: 4,
+            injection_order: 100,
+          },
+          {
+            identifier: 'charDescription',
+            name: '角色描述',
+            system_prompt: true,
+            marker: true,
+          },
+          {
+            identifier: 'style_rule',
+            name: '文风细则',
+            system_prompt: false,
+            marker: false,
+            role: 'user',
+            content: '减少形容词堆砌。',
+            injection_position: 1,
+            injection_depth: 2,
+            injection_order: 88,
+          },
+        ],
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: [
+              { identifier: 'main', enabled: true },
+              { identifier: 'charDescription', enabled: true },
+              { identifier: 'style_rule', enabled: true },
+            ],
+          },
+        ],
+      },
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    assert.equal(store.get().vibe.bodyColor, '');
+    assert.equal(store.get().vibe.quoteColor, '');
+    assert.equal(store.get().vibe.emColor, '');
+
+    const defaultCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: false });
+    assert.equal(defaultCss.includes('--SmartThemeBodyColor'), false, '未设颜色时不生成任何颜色覆盖规则');
+
+    // 3. 验证阅读抽屉中「文字颜色」严格位于「背景图」下方、「其它」上方，且支持一键预设、单点恢复与总重置
+    const readerDock = createReaderDock({ getContext: () => ctx, store });
+    readerDock.open();
+    const rRoot = doc.getElementById('stm-reader-dock');
+    const secTitles = rRoot.findAll(n => n.classList.contains('stm-sec-title')).map(n => n.textContent);
+    assert.deepEqual(
+      secTitles,
+      ['文字排版', '背景图', '文字颜色', '其它'],
+      '文字颜色分区严格置于「背景图」下方、「其它」上方',
+    );
+
+    const colorLabels = rRoot.findAll(n => n.classList.contains('stm-color-label')).map(n => n.textContent);
+    assert.deepEqual(colorLabels, ['正文', '对话', '内心']);
+
+    // 点击「浅色字」一键配比
+    const lightPresetBtn = rRoot
+      .findAll(n => n.classList.contains('stm-color-preset-btn'))
+      .find(b => b.textContent === '浅色字');
+    lightPresetBtn.click();
+    assert.equal(store.get().vibe.bodyColor, '#f0ede6');
+    assert.equal(store.get().vibe.quoteColor, '#e6cfa8');
+    assert.equal(store.get().vibe.emColor, '#a8b0bd');
+
+    const activeColorCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: true });
+    assert.match(activeColorCss, /--SmartThemeBodyColor:\s*#f0ede6\s*!important/);
+    assert.match(activeColorCss, /--SmartThemeQuoteColor:\s*#e6cfa8\s*!important/);
+    assert.match(activeColorCss, /--SmartThemeEmColor:\s*#a8b0bd\s*!important/);
+    assert.match(activeColorCss, /:not\(\[style\*="color"\]\)/, '保护角色卡自定义内联颜色状态栏不被误染');
+
+    // 单独恢复「对话」一项为默认，其余两项保持不变
+    const clearBtns = rRoot.findAll(n => n.classList.contains('stm-color-reset'));
+    assert.equal(clearBtns.length, 3);
+    clearBtns[1].click();
+    assert.equal(store.get().vibe.bodyColor, '#f0ede6');
+    assert.equal(store.get().vibe.quoteColor, '');
+    assert.equal(store.get().vibe.emColor, '#a8b0bd');
+
+    // 点击顶部总「重置」一并清空三项文字颜色
+    rRoot.querySelector('.stm-reset-link').click();
+    assert.equal(store.get().vibe.bodyColor, '');
+    assert.equal(store.get().vibe.quoteColor, '');
+    assert.equal(store.get().vibe.emColor, '');
+
+    // 4. 验证预设提示词条目一键复制：系统槽禁复制、普通/内置条目正下方生成副本、防叠词命名且自动展开编辑
+    const markerDup = duplicatePromptEntry(ctx.chatCompletionSettings, 'charDescription');
+    assert.equal(markerDup.ok, false);
+    assert.equal(markerDup.reason, 'marker_protected');
+
+    const mainDup = duplicatePromptEntry(ctx.chatCompletionSettings, 'main');
+    assert.equal(mainDup.ok, true);
+    assert.equal(mainDup.prompt.name, '主提示词 · 副本');
+    assert.equal(mainDup.prompt.system_prompt, false, '内置槽复制出的副本转为可自由删除的用户条目');
+    assert.equal(mainDup.prompt.enabled, false, '副本默认关闭防未改完就双倍重复发送');
+    assert.equal(mainDup.insertIndex, 1, '精准插入在原条目正下方');
+
+    const mainDupAgain = duplicatePromptEntry(ctx.chatCompletionSettings, mainDup.prompt.identifier);
+    assert.equal(mainDupAgain.ok, true);
+    assert.equal(mainDupAgain.prompt.name, '主提示词 · 副本 2', '二次复制自动递增序号，拒绝丑陋的 · 副本 · 副本');
+
+    // 验证预设馆 UI 上的复制按钮点击（含处于「仅看已开」过滤态时自动切回全部并展开新副本编辑器）
+    const presetSelect = doc.createElement('select');
+    presetSelect.id = 'settings_preset_openai';
+    const opt = doc.createElement('option');
+    opt.value = '0';
+    opt.textContent = '测试预设';
+    presetSelect.append(opt);
+    presetSelect.value = '0';
+    doc.body.append(presetSelect);
+
+    const presetDock = createPresetDock({ getContext: () => ctx, store });
+    presetDock.open();
+    const pRoot = doc.getElementById('stm-preset-dock');
+
+    // 先切到「仅看已开」筛选模式
+    const onlyEnabledFilterBtn = pRoot
+      .findAll(n => n.classList.contains('stm-mini-pill'))
+      .find(b => b.textContent === '仅看已开');
+    onlyEnabledFilterBtn.click();
+
+    const copyBtns = pRoot.findAll(n => n.classList.contains('stm-prompt-copy-btn'));
+    assert.equal(copyBtns.length, 3);
+    assert.equal(copyBtns[1].disabled, true, '系统动态占位槽复制钮置灰禁用对齐列宽');
+    assert.equal(copyBtns[2].disabled, false);
+
+    // 点击「文风细则」的复制按钮
+    copyBtns[2].click();
+
+    const orderedAfterUiCopy = readOrderedPromptEntries(ctx.chatCompletionSettings).entries;
+    const styleIdx = orderedAfterUiCopy.findIndex(e => e.identifier === 'style_rule');
+    const copiedStyle = orderedAfterUiCopy[styleIdx + 1];
+    assert.equal(copiedStyle.name, '文风细则 · 副本');
+    assert.equal(copiedStyle.role, 'user');
+    assert.equal(copiedStyle.injectionPosition, 1);
+    assert.equal(copiedStyle.injectionDepth, 2);
+    assert.equal(copiedStyle.injectionOrder, 88);
+    assert.equal(copiedStyle.content, '减少形容词堆砌。');
+
+    const expandedCards = pRoot.findAll(
+      n => n.classList.contains('stm-prompt-card') && n.classList.contains('is-expanded'),
+    );
+    assert.equal(expandedCards.length, 1, '新复制出的条目立即就地展开内联编辑框');
+    assert.match(expandedCards[0].querySelector('.stm-prompt-name')?.textContent || '', /文风细则 · 副本/);
+
+    presetDock.destroy();
+    readerDock.destroy();
+    await new Promise(r => setTimeout(r, 15));
+  } finally {
+    globalThis.fetch = prevFetch;
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
   }

@@ -6,8 +6,8 @@
  * 3. 严禁使用 display:contents 与 subtree:true 深度监听（彻底杜绝 iOS TauriTavern 多插件重排闪退），关闭开关时 100% 归位原始 DOM。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
-import { closeAllNativeDrawers } from './host-actions.js?v=0.7.10';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.3';
+import { closeAllNativeDrawers } from './host-actions.js?v=0.8.3';
 
 export const LOW_FREQ_BUILTIN_CONTAINER_IDS = Object.freeze([
   'vectors_container',
@@ -101,10 +101,82 @@ export function classifyExtensionEntry(node) {
   return { kind: 'third_party', tier: 4 };
 }
 
+/**
+ * 扫描底栏「魔法棒」(#extensionsMenu) 中的可管理入口（始终保护 #stm-wand-entry 不被隐藏）。
+ */
+export function discoverWandEntries(doc) {
+  const menu = doc?.getElementById?.('extensionsMenu');
+  if (!menu?.children) return [];
+
+  const results = [];
+  const seenKeys = new Set();
+  const skipTags = new Set(['SCRIPT', 'STYLE', 'HR', 'INPUT', 'TEXTAREA', 'SELECT', 'TEMPLATE']);
+
+  for (const outer of [...menu.children]) {
+    if (!outer) continue;
+    const outerTag = String(outer.tagName || '').toUpperCase();
+    if (skipTags.has(outerTag) || outer.id === 'stm-wand-entry') continue;
+
+    const isContainer = Boolean(outer.classList?.contains?.('extension_container') && outer.children?.length);
+    const items = isContainer ? [...outer.children] : [outer];
+
+    for (const item of items) {
+      if (!item || item.id === 'stm-wand-entry') continue;
+      const itemTag = String(item.tagName || '').toUpperCase();
+      if (skipTags.has(itemTag)) continue;
+
+      let rawLabel = '';
+      const childSpans =
+        typeof item.querySelectorAll === 'function'
+          ? [...item.querySelectorAll('span')]
+          : item.children
+            ? [...item.children].filter(c => String(c?.tagName || '').toUpperCase() === 'SPAN')
+            : [];
+      for (const sp of childSpans) {
+        if (
+          sp.classList?.contains?.('fa-solid') ||
+          sp.classList?.contains?.('fa-regular') ||
+          sp.classList?.contains?.('stm-inline-svg')
+        ) {
+          continue;
+        }
+        const t = String(sp.textContent || '').trim();
+        if (t) {
+          rawLabel = t;
+          break;
+        }
+      }
+      if (!rawLabel) {
+        rawLabel = String(item.textContent || item.title || '').replace(/\s+/g, ' ').trim();
+      }
+      if (!rawLabel) continue;
+
+      const label = rawLabel.slice(0, 80);
+      const rawKey = item.id
+        ? `id:${item.id}`
+        : isContainer && outer.id
+          ? `wrap:${outer.id}:${label}`
+          : `label:${label}`;
+      const key = rawKey.slice(0, 120);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+
+      results.push({
+        key,
+        label,
+        element: item,
+        wrapper: isContainer ? outer : null,
+      });
+    }
+  }
+
+  return results;
+}
+
 export function createExtensionsTidy({
   root = globalThis,
   store,
-  stmVersion = '0.7.10',
+  stmVersion = '0.8.3',
   onOpenSettings,
   onToggleShell,
   onSwitchTopbarMode,
@@ -118,9 +190,11 @@ export function createExtensionsTidy({
 
   let drawerClassObserver = null;
   let hostChildObserver = null;
+  let wandChildObserver = null;
   let observedDrawerEl = null;
   let observedCol1 = null;
   let observedCol2 = null;
+  let observedWandEl = null;
   let syncRaf = 0;
   let isMutating = false;
 
@@ -230,7 +304,7 @@ export function createExtensionsTidy({
 
       const copyWrap = el(doc, 'div', 'stm-ext-hero-copy');
       const titleRow = el(doc, 'div', 'stm-ext-hero-title-row');
-      const titleNode = el(doc, 'strong', 'stm-ext-hero-title', '砚台 · ST伴侣');
+      const titleNode = el(doc, 'strong', 'stm-ext-hero-title', '砚台 · SillyTavern 伴侣');
       const statusChip = el(doc, 'span', 'stm-chip stm-ext-hero-chip', '');
       titleRow.append(titleNode, statusChip);
 
@@ -373,10 +447,51 @@ export function createExtensionsTidy({
     lowFreqToggleBtn = null;
   }
 
+  function applyWandMenuTidy(doc, settings) {
+    const wandMenu = doc?.getElementById?.('extensionsMenu') || null;
+    if (!wandMenu) return;
+
+    const shouldApply = Boolean(
+      settings?.shellEnabled &&
+        settings?.tidy?.enabled !== false &&
+        Array.isArray(settings?.tidy?.hiddenWandEntries) &&
+        settings.tidy.hiddenWandEntries.length > 0,
+    );
+
+    const entries = discoverWandEntries(doc);
+    const hiddenSet = shouldApply ? new Set(settings.tidy.hiddenWandEntries) : new Set();
+    const wrappers = new Set();
+
+    for (const entry of entries) {
+      const hideThis = shouldApply && hiddenSet.has(entry.key);
+      entry.element?.classList?.toggle?.('stm-wand-hidden', hideThis);
+      if (entry.wrapper) wrappers.add(entry.wrapper);
+    }
+
+    for (const wrap of wrappers) {
+      const kids = wrap.children ? [...wrap.children] : [];
+      const anyVisible = kids.some(k => !k.classList?.contains?.('stm-wand-hidden'));
+      wrap.classList?.toggle?.('stm-wand-wrap-empty', shouldApply && !anyVisible);
+    }
+
+    if (!shouldApply && typeof wandMenu.querySelectorAll === 'function') {
+      for (const node of wandMenu.querySelectorAll('.stm-wand-hidden, .stm-wand-wrap-empty')) {
+        node.classList?.remove?.('stm-wand-hidden', 'stm-wand-wrap-empty');
+      }
+    }
+  }
+
   function syncNow() {
     syncRaf = 0;
     const doc = root?.document;
     if (!doc || isMutating) return;
+
+    const s = store.get();
+    const wandMenu = doc.getElementById?.('extensionsMenu') || null;
+    if (wandMenu) {
+      attachWandObserver(wandMenu);
+      applyWandMenuTidy(doc, s);
+    }
 
     const col1 = doc.getElementById?.('extensions_settings') || null;
     const col2 = doc.getElementById?.('extensions_settings2') || null;
@@ -394,8 +509,9 @@ export function createExtensionsTidy({
     try {
       ensureHeroCard(doc, extBlock, primaryCol);
 
-      const s = store.get();
-      const shouldTidy = Boolean(s.shellEnabled && s.tidy?.tidyExtensionsPanel);
+      const shouldTidy = Boolean(
+        s.shellEnabled && s.tidy?.enabled !== false && s.tidy?.tidyExtensionsPanel,
+      );
       if (!shouldTidy) {
         restoreTidiedLayout(doc);
         // 重新确保 heroCard 仍在顶部
@@ -500,6 +616,17 @@ export function createExtensionsTidy({
     syncRaf = req(syncNow);
   }
 
+  function attachWandObserver(wandMenu) {
+    if (typeof root?.MutationObserver !== 'function' || !wandMenu) return;
+    if (wandMenu === observedWandEl) return;
+    wandChildObserver?.disconnect();
+    wandChildObserver = new root.MutationObserver(() => {
+      if (!isMutating) scheduleSync();
+    });
+    wandChildObserver.observe(wandMenu, { childList: true, subtree: false });
+    observedWandEl = wandMenu;
+  }
+
   function attachObservers(doc, col1, col2) {
     if (typeof root?.MutationObserver !== 'function') return;
 
@@ -539,15 +666,19 @@ export function createExtensionsTidy({
     }
     drawerClassObserver?.disconnect();
     hostChildObserver?.disconnect();
+    wandChildObserver?.disconnect();
     drawerClassObserver = null;
     hostChildObserver = null;
+    wandChildObserver = null;
     observedDrawerEl = null;
     observedCol1 = null;
     observedCol2 = null;
+    observedWandEl = null;
 
     const doc = root?.document;
     isMutating = true;
     try {
+      applyWandMenuTidy(doc, { shellEnabled: false });
       restoreTidiedLayout(doc);
       heroCardEl?.remove?.();
       doc?.getElementById?.('stm-ext-hero-card')?.remove?.();

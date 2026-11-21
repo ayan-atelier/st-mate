@@ -5,7 +5,7 @@
  */
 
 export const STM_NAMESPACE = 'st_mate';
-export const STM_SCHEMA_VERSION = 5;
+export const STM_SCHEMA_VERSION = 6;
 
 export const TOPBAR_MODES = Object.freeze(['rp', 'native']);
 export const TAP_SCOPES = Object.freeze(['all']);
@@ -99,7 +99,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   shellEnabled: true,
   topbarMode: 'rp',
   chatImageButton: true,
-  tapPureReading: true,
+  tapPureReading: false, // 新用户默认关闭防误触，已存储的老用户状态原样保留
   tapPureReadingScope: 'all',
   homeEntryMode: 'bookshelf-bar',
   drawerBridgeMode: 'inline-switch',
@@ -108,8 +108,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     reader: true, // 默认开启：页面排版与背景调整抽屉（顶栏 Aa 键）
     bookshelf: true,
     presets: true,
+    api: true,
     persona: true,
-    charWorld: true,
+    charCard: true,
+    worldBook: true,
+    charWorld: true, // 兼容聚合态：charCard || worldBook
     echoes: false, // 默认关闭，玩家需要查看楼上重Roll或平行分支时按需开启
     memory: false, // 默认关闭，完全不注册拦截器，避免与其他记忆插件冲突
   }),
@@ -131,10 +134,16 @@ export const DEFAULT_SETTINGS = Object.freeze({
     bookPageFlow: false,
     fontChoice: 'default', // default | serif | sans | kai | custom
     customFontUrl: '',
+    bodyColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖叙述正文颜色
+    quoteColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖引号对话颜色
+    emColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖内心独白/斜体颜色
   }),
   tidy: Object.freeze({
+    enabled: true,
+    optimizeOptionsMenu: true,
     foldOptionsMenu: true,
     tidyExtensionsPanel: true,
+    hiddenWandEntries: Object.freeze([]),
     pinnedExtensions: Object.freeze([]),
   }),
   apiStudio: Object.freeze({
@@ -155,6 +164,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
     archivedPresets: Object.freeze([]),
   }),
   suiteProvisioned: Object.freeze([]),
+  suiteSync: Object.freeze({
+    lastCheckedVersion: '',
+    lastCheckedAt: 0,
+  }),
 });
 
 function clampInt(value, min, max, fallback) {
@@ -198,6 +211,21 @@ export function sanitizeEndpointUrl(rawUrl) {
     }
   } catch {
     return '';
+  }
+  return '';
+}
+
+export function sanitizeHexColor(rawColor) {
+  if (typeof rawColor !== 'string') return '';
+  const trimmed = rawColor.trim();
+  if (!trimmed) return '';
+  const shortMatch = trimmed.match(/^#([0-9a-f]{3})$/i);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].toLowerCase().split('');
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  if (/^#[0-9a-f]{6}$/i.test(trimmed)) {
+    return trimmed.toLowerCase();
   }
   return '';
 }
@@ -330,7 +358,9 @@ export function normalizeSettings(raw = {}) {
   const rawStudio = src.apiStudio && typeof src.apiStudio === 'object' ? src.apiStudio : {};
   const rawAux = src.auxApi && typeof src.auxApi === 'object' ? src.auxApi : {};
   const rawPresetStudio = src.presetStudio && typeof src.presetStudio === 'object' ? src.presetStudio : {};
+  const rawSuiteSync = src.suiteSync && typeof src.suiteSync === 'object' ? src.suiteSync : {};
 
+  const hiddenWandEntries = cleanStringList(rawTidy.hiddenWandEntries, 80, 120);
   const pinnedExtensions = Array.isArray(rawTidy.pinnedExtensions)
     ? [
         ...new Set(
@@ -410,6 +440,14 @@ export function normalizeSettings(raw = {}) {
   }
   const rawAuxStationId = typeof rawAux.stationId === 'string' ? rawAux.stationId.trim().slice(0, 80) : '';
 
+  const fallbackCharWorld = pickBool(rawModules.charWorld, DEFAULT_SETTINGS.modules.charWorld);
+  const resolvedCharCard = pickBool(rawModules.charCard, fallbackCharWorld);
+  const resolvedWorldBook = pickBool(rawModules.worldBook, fallbackCharWorld);
+
+  const rawSyncAt = Number(rawSuiteSync.lastCheckedAt);
+  const normalizedSyncAt =
+    Number.isFinite(rawSyncAt) && rawSyncAt >= 0 ? Math.round(rawSyncAt) : 0;
+
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
@@ -424,8 +462,11 @@ export function normalizeSettings(raw = {}) {
       reader: pickBool(rawModules.reader, DEFAULT_SETTINGS.modules.reader),
       bookshelf: pickBool(rawModules.bookshelf, DEFAULT_SETTINGS.modules.bookshelf),
       presets: pickBool(rawModules.presets, DEFAULT_SETTINGS.modules.presets),
+      api: pickBool(rawModules.api, DEFAULT_SETTINGS.modules.api),
       persona: pickBool(rawModules.persona, DEFAULT_SETTINGS.modules.persona),
-      charWorld: pickBool(rawModules.charWorld, DEFAULT_SETTINGS.modules.charWorld),
+      charCard: resolvedCharCard,
+      worldBook: resolvedWorldBook,
+      charWorld: Boolean(resolvedCharCard || resolvedWorldBook),
       echoes: pickBool(rawModules.echoes, DEFAULT_SETTINGS.modules.echoes),
       memory: pickBool(rawModules.memory, DEFAULT_SETTINGS.modules.memory),
     },
@@ -450,10 +491,16 @@ export function normalizeSettings(raw = {}) {
       bookPageFlow: pickBool(rawVibe.bookPageFlow, DEFAULT_SETTINGS.vibe.bookPageFlow),
       fontChoice: pickEnum(rawVibe.fontChoice, FONT_CHOICES, DEFAULT_SETTINGS.vibe.fontChoice),
       customFontUrl: sanitizeAssetUrl(rawVibe.customFontUrl),
+      bodyColor: sanitizeHexColor(rawVibe.bodyColor),
+      quoteColor: sanitizeHexColor(rawVibe.quoteColor),
+      emColor: sanitizeHexColor(rawVibe.emColor),
     },
     tidy: {
+      enabled: pickBool(rawTidy.enabled, DEFAULT_SETTINGS.tidy.enabled),
+      optimizeOptionsMenu: pickBool(rawTidy.optimizeOptionsMenu, DEFAULT_SETTINGS.tidy.optimizeOptionsMenu),
       foldOptionsMenu: pickBool(rawTidy.foldOptionsMenu, DEFAULT_SETTINGS.tidy.foldOptionsMenu),
       tidyExtensionsPanel: pickBool(rawTidy.tidyExtensionsPanel, DEFAULT_SETTINGS.tidy.tidyExtensionsPanel),
+      hiddenWandEntries,
       pinnedExtensions,
     },
     apiStudio: {
@@ -479,6 +526,13 @@ export function normalizeSettings(raw = {}) {
           ),
         ]
       : [],
+    suiteSync: {
+      lastCheckedVersion:
+        typeof rawSuiteSync.lastCheckedVersion === 'string'
+          ? rawSuiteSync.lastCheckedVersion.trim().slice(0, 40)
+          : '',
+      lastCheckedAt: normalizedSyncAt,
+    },
   };
 }
 
@@ -501,15 +555,25 @@ export function createSettingsStore({ getContext }) {
   }
 
   function update(patch = {}, { silent = false } = {}) {
+    const modPatch = patch?.modules && typeof patch.modules === 'object' ? { ...patch.modules } : {};
+    if (
+      typeof modPatch.charWorld === 'boolean' &&
+      modPatch.charCard === undefined &&
+      modPatch.worldBook === undefined
+    ) {
+      modPatch.charCard = modPatch.charWorld;
+      modPatch.worldBook = modPatch.charWorld;
+    }
     const nextRaw = {
       ...cache,
       ...patch,
-      modules: { ...cache.modules, ...(patch?.modules || {}) },
+      modules: { ...cache.modules, ...modPatch },
       vibe: { ...cache.vibe, ...(patch?.vibe || {}) },
       tidy: { ...cache.tidy, ...(patch?.tidy || {}) },
       apiStudio: patch?.apiStudio ? { ...cache.apiStudio, ...patch.apiStudio } : cache.apiStudio,
       auxApi: { ...cache.auxApi, ...(patch?.auxApi || {}) },
       presetStudio: patch?.presetStudio ? { ...cache.presetStudio, ...patch.presetStudio } : cache.presetStudio,
+      suiteSync: patch?.suiteSync ? { ...cache.suiteSync, ...patch.suiteSync } : cache.suiteSync,
     };
     cache = normalizeSettings(nextRaw);
 

@@ -7,12 +7,12 @@
  * 4. 零 Emoji、1.5px 纯色细线图标内嵌助手 UI（支持窄屏独立顺滑滚动、16px 输入框防缩放、Enter 发送与流中随时停止）。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.7.10';
-import { toastMessage } from '../shell/host-actions.js?v=0.7.10';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.3';
+import { toastMessage } from '../shell/host-actions.js?v=0.8.3';
 import {
   createAssistantSession,
   resolveAssistantRuntimeChannel,
-} from './assistant-core.js?v=0.7.10';
+} from './assistant-core.js?v=0.8.3';
 import {
   PROMPT_ROLE_OPTIONS,
   UNLOCKED_MAX_CONTEXT,
@@ -33,7 +33,7 @@ import {
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.7.10';
+} from './preset-backend.js?v=0.8.3';
 
 export const MAX_UNDO_STEPS = 10;
 export const DEFAULT_ENTRY_MAX_CHARS = 1800;

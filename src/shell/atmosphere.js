@@ -6,8 +6,9 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.7.10';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.7.10';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.8.3';
+import { sanitizeHexColor } from '../core/schema.js?v=0.8.3';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.8.3';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -15,6 +16,17 @@ const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_logprobs',
   'option_convert_to_group',
   'option_impersonate',
+]);
+
+export const OPTIONS_MENU_PRIMARY_ORDER = Object.freeze([
+  { id: 'option_regenerate', label: '重新生成', group: 'gen' },
+  { id: 'option_continue', label: '续写', group: 'gen' },
+  { id: 'option_start_new_chat', label: '开启新对话', group: 'chat' },
+  { id: 'option_new_bookmark', label: '保存', group: 'chat' },
+  { id: 'option_select_chat', label: '存档管理', group: 'chat' },
+  { id: 'option_delete_mes', label: '批量删除', group: 'chat' },
+  { id: 'option_back_to_main', label: '返回主分支', group: 'chat' },
+  { id: 'option_close_chat', label: '退出', group: 'chat' },
 ]);
 
 export const FONT_STACKS = Object.freeze({
@@ -229,6 +241,67 @@ ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text {
 }`);
   }
 
+  const bodyColor = sanitizeHexColor(vibe.bodyColor);
+  const quoteColor = sanitizeHexColor(vibe.quoteColor);
+  const emColor = sanitizeHexColor(vibe.emColor);
+
+  if (bodyColor || quoteColor || emColor) {
+    const mesVarLines = [];
+    if (bodyColor) {
+      mesVarLines.push(
+        `  --SmartThemeBodyColor: ${bodyColor} !important;`,
+        `  --yt-ink: ${bodyColor} !important;`,
+        `  --nt-text: ${bodyColor} !important;`,
+        `  --jd-ink: ${bodyColor} !important;`,
+        `  --jd-emphasis: ${bodyColor} !important;`,
+        `  --zj-ink: ${bodyColor} !important;`,
+        `  --lcat-emphasis: ${bodyColor} !important;`,
+      );
+    }
+    if (quoteColor) {
+      mesVarLines.push(
+        `  --SmartThemeQuoteColor: ${quoteColor} !important;`,
+        `  --yt-quote: ${quoteColor} !important;`,
+        `  --jd-quote: ${quoteColor} !important;`,
+      );
+    }
+    if (emColor) {
+      mesVarLines.push(
+        `  --SmartThemeEmColor: ${emColor} !important;`,
+        `  --yt-em: ${emColor} !important;`,
+        `  --jd-italic: ${emColor} !important;`,
+      );
+    }
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) {
+${mesVarLines.join('\n')}
+}`);
+  }
+
+  if (bodyColor) {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text,
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text > :is(p, ul, ol):not([style*="color"]),
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text > :is(p, ul, ol) :is(strong, b):not([class]):not([style*="color"]):not([style*="color"] *):not(q *):not(em *):not(i *):not(font[color] *) {
+  color: ${bodyColor} !important;
+}`);
+  }
+
+  if (quoteColor) {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text q:not([style*="color"]):not([style*="color"] *):not(font[color] *),
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text q:not([style*="color"]):not([style*="color"] *):not(font[color] *) :is(em, i, strong, b):not([style*="color"]) {
+  color: ${quoteColor} !important;
+}`);
+  }
+
+  if (emColor) {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :is(em, i):not(q *):not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab):not([style*="color"]):not([style*="color"] *):not(font[color] *) {
+  color: ${emColor} !important;
+}`);
+  }
+
   return rules.join('\n');
 }
 
@@ -252,7 +325,10 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
   let menuExtraWrap = null;
   let menuToggleBtn = null;
   let menuExtraPanel = null;
+  let menuDividerEl = null;
   const movedMenuNodes = new Map();
+  let originalOptionOrder = null; // Array<Node> 初始节点顺序快照
+  const originalSpanMeta = new WeakMap(); // span -> { text, i18n }
 
   function cssSafeUrl(url) {
     return `url("${String(url || '').replace(/["\\]/g, '\\$&')}")`;
@@ -481,12 +557,63 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     syncOverrideStyleSheet(doc, overrideCss);
   }
 
-  function restoreOptionsMenu() {
+  function getOptionsContentEl(doc) {
+    return (
+      doc?.getElementById?.('options')?.querySelector?.('.options-content') ||
+      doc?.querySelector?.('#options .options-content') ||
+      null
+    );
+  }
+
+  function restoreOptionsMenuNamesAndOrder(doc) {
+    const container = getOptionsContentEl(doc);
+    menuDividerEl?.remove();
+    menuDividerEl = null;
+
+    if (!container) return;
+
+    const allKids = container.children ? [...container.children] : [];
+    for (const child of allKids) {
+      if (String(child?.tagName || '').toUpperCase() === 'HR') {
+        child.classList?.remove?.('stm-options-hr-hidden');
+      }
+      const spans =
+        typeof child.querySelectorAll === 'function'
+          ? [...child.querySelectorAll('span')]
+          : child.children?.filter?.(c => String(c?.tagName || '').toUpperCase() === 'SPAN') || [];
+      for (const span of spans) {
+        if (originalSpanMeta.has(span)) {
+          const orig = originalSpanMeta.get(span);
+          span.textContent = orig.text;
+          if (orig.i18n !== null) {
+            span.setAttribute?.('data-i18n', orig.i18n);
+          }
+          originalSpanMeta.delete(span);
+        }
+      }
+    }
+
+    if (Array.isArray(originalOptionOrder) && originalOptionOrder.length > 0) {
+      for (const node of originalOptionOrder) {
+        if (node && node !== menuExtraWrap && node !== menuDividerEl && container.contains?.(node)) {
+          container.appendChild(node);
+        }
+      }
+      if (menuExtraWrap?.parentNode === container) {
+        container.appendChild(menuExtraWrap);
+      }
+    }
+  }
+
+  function restoreOptionsMenuFold() {
+    const container = getOptionsContentEl(globalThis.document);
     for (const [node, placeholder] of movedMenuNodes) {
-      if (placeholder.isConnected) {
+      if (placeholder && placeholder.isConnected && typeof placeholder.replaceWith === 'function') {
         placeholder.replaceWith(node);
-      } else if (menuExtraWrap?.isConnected) {
+      } else if (menuExtraWrap?.isConnected && typeof menuExtraWrap.before === 'function') {
         menuExtraWrap.before(node);
+      } else if (container) {
+        container.appendChild(node);
       }
     }
     movedMenuNodes.clear();
@@ -494,6 +621,11 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     menuExtraWrap = null;
     menuToggleBtn = null;
     menuExtraPanel = null;
+  }
+
+  function restoreOptionsMenu() {
+    restoreOptionsMenuFold();
+    restoreOptionsMenuNamesAndOrder(globalThis.document);
   }
 
   function syncMenuFoldState() {
@@ -505,61 +637,167 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     }</span>`;
   }
 
+  function applyOptionsMenuOptimize(doc, container) {
+    if (!originalOptionOrder && container.children) {
+      originalOptionOrder = [...container.children].filter(
+        n => n !== menuExtraWrap && n !== menuDividerEl,
+      );
+    }
+
+    // 隐藏原生杂乱 <hr>，统一替换为「生成区 / 会话区」之间的干净单线
+    const kids = container.children ? [...container.children] : [];
+    for (const child of kids) {
+      if (String(child?.tagName || '').toUpperCase() === 'HR' && child !== menuDividerEl) {
+        child.classList?.add?.('stm-options-hr-hidden');
+      }
+    }
+
+    const genNodes = [];
+    const chatNodes = [];
+    for (const spec of OPTIONS_MENU_PRIMARY_ORDER) {
+      const currentKids = container.children ? [...container.children] : [];
+      const matched = currentKids.filter(k => k?.id === spec.id);
+      for (const anchor of matched) {
+        if (!anchor || menuExtraPanel?.contains?.(anchor)) continue;
+        const span =
+          typeof anchor.querySelector === 'function'
+            ? anchor.querySelector('span')
+            : anchor.children?.find?.(c => String(c?.tagName || '').toUpperCase() === 'SPAN');
+        if (span) {
+          if (!originalSpanMeta.has(span)) {
+            originalSpanMeta.set(span, {
+              text: span.textContent || '',
+              i18n: span.getAttribute?.('data-i18n') ?? null,
+            });
+          }
+          if (span.hasAttribute?.('data-i18n')) {
+            span.removeAttribute('data-i18n');
+          }
+          if (span.textContent !== spec.label) {
+            span.textContent = spec.label;
+          }
+        }
+        if (spec.group === 'gen') genNodes.push(anchor);
+        else chatNodes.push(anchor);
+      }
+    }
+
+    if (genNodes.length > 0 && chatNodes.length > 0) {
+      if (!menuDividerEl) {
+        menuDividerEl = doc.createElement('hr');
+        menuDividerEl.className = 'stm-options-divider';
+      }
+    } else if (menuDividerEl) {
+      menuDividerEl.remove();
+      menuDividerEl = null;
+    }
+
+    const desiredHead = [
+      ...genNodes,
+      ...(menuDividerEl ? [menuDividerEl] : []),
+      ...chatNodes,
+    ];
+    const headSet = new Set(desiredHead);
+    const tailAnchor =
+      (container.children ? [...container.children] : []).find(n => !headSet.has(n)) || null;
+
+    let nextRef = tailAnchor;
+    for (let i = desiredHead.length - 1; i >= 0; i -= 1) {
+      const target = desiredHead[i];
+      if (!target) continue;
+      if (typeof container.insertBefore === 'function') {
+        container.insertBefore(target, nextRef);
+      } else {
+        container.append(target);
+      }
+      nextRef = target;
+    }
+  }
+
   function applyOptionsMenuFold() {
     const doc = globalThis.document;
     if (!doc) return;
 
     const current = store.get();
-    if (!current.shellEnabled || !current.tidy.foldOptionsMenu || doc.getElementById('yt-interface-more')) {
+    const tidyActive = Boolean(
+      current.shellEnabled &&
+        current.tidy?.enabled !== false &&
+        !doc.getElementById('yt-interface-more'),
+    );
+
+    if (!tidyActive) {
       restoreOptionsMenu();
       return;
     }
 
-    if (menuExtraWrap?.isConnected) {
-      syncMenuFoldState();
-      return;
-    }
-
-    const container = doc.querySelector('#options .options-content');
+    const container = getOptionsContentEl(doc);
     if (!container) return;
 
-    const targets = LOW_FREQ_OPTION_IDS.map(id => doc.getElementById(id)).filter(el => el && container.contains(el));
-    if (!targets.length) return;
-
-    menuExtraWrap = doc.createElement('div');
-    menuExtraWrap.className = 'stm-options-more';
-
-    menuToggleBtn = doc.createElement('a');
-    menuToggleBtn.className = 'stm-options-more-toggle interactable';
-    menuToggleBtn.tabIndex = 0;
-    menuToggleBtn.setAttribute('role', 'button');
-    menuToggleBtn.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      menuExpanded = !menuExpanded;
-      syncMenuFoldState();
-    });
-    menuToggleBtn.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        menuToggleBtn.click();
-      }
-    });
-
-    menuExtraPanel = doc.createElement('div');
-    menuExtraPanel.className = 'stm-options-more-panel';
-
-    menuExtraWrap.append(menuToggleBtn, menuExtraPanel);
-    container.append(menuExtraWrap);
-
-    for (const item of targets) {
-      const marker = doc.createComment('stm-original-option');
-      item.before(marker);
-      movedMenuNodes.set(item, marker);
-      menuExtraPanel.append(item);
+    // 1. 先记录初始顺序，避免折叠抽走节点后再快照漏项
+    if (!originalOptionOrder && container.children) {
+      originalOptionOrder = [...container.children].filter(
+        n => n !== menuExtraWrap && n !== menuDividerEl,
+      );
     }
 
-    syncMenuFoldState();
+    // 2. 低频项折叠进底部「更多原生工具」
+    if (current.tidy?.foldOptionsMenu) {
+      if (!menuExtraWrap?.isConnected) {
+        const targets = LOW_FREQ_OPTION_IDS.map(id => doc.getElementById(id)).filter(
+          el => el && container.contains(el),
+        );
+        if (targets.length > 0) {
+          menuExtraWrap = doc.createElement('div');
+          menuExtraWrap.className = 'stm-options-more';
+
+          menuToggleBtn = doc.createElement('a');
+          menuToggleBtn.className = 'stm-options-more-toggle interactable';
+          menuToggleBtn.tabIndex = 0;
+          menuToggleBtn.setAttribute('role', 'button');
+          menuToggleBtn.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            menuExpanded = !menuExpanded;
+            syncMenuFoldState();
+          });
+          menuToggleBtn.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              menuToggleBtn.click();
+            }
+          });
+
+          menuExtraPanel = doc.createElement('div');
+          menuExtraPanel.className = 'stm-options-more-panel';
+
+          menuExtraWrap.append(menuToggleBtn, menuExtraPanel);
+          container.append(menuExtraWrap);
+
+          for (const item of targets) {
+            let marker = null;
+            if (typeof doc.createComment === 'function' && typeof item.before === 'function') {
+              marker = doc.createComment('stm-original-option');
+              item.before(marker);
+            }
+            movedMenuNodes.set(item, marker);
+            menuExtraPanel.append(item);
+          }
+        }
+      }
+      syncMenuFoldState();
+    } else {
+      restoreOptionsMenuFold();
+    }
+
+    // 3. 主操作区排序与人话命名优化（重新生成/续写置顶 -> 横线 -> 开启新对话/保存/存档管理/批量删除/退出）
+    if (current.tidy?.optimizeOptionsMenu !== false) {
+      applyOptionsMenuOptimize(doc, container);
+      if (menuExtraWrap?.parentNode === container && container.lastElementChild !== menuExtraWrap) {
+        container.appendChild(menuExtraWrap);
+      }
+    } else {
+      restoreOptionsMenuNamesAndOrder(doc);
+    }
   }
 
   function invalidateCurrentEntityBackdrop() {

@@ -6,8 +6,8 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.7.10';
-import { svgMarkup } from '../core/icons.js?v=0.7.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.3';
+import { svgMarkup } from '../core/icons.js?v=0.8.3';
 
 export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShell }) {
   let bodyObserver = null;

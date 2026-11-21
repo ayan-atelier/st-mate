@@ -10,41 +10,42 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.7.10';
+} from './src/core/env.js?v=0.8.3';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.7.10';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.7.10';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.7.10';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.7.10';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.7.10';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.7.10';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.7.10';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.7.10';
-import { createTopbar } from './src/shell/topbar.js?v=0.7.10';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.7.10';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.7.10';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.7.10';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.7.10';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.7.10';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.7.10';
+} from './src/core/file-saver.js?v=0.8.3';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.3';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.3';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.3';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.3';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.3';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.3';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.8.3';
+import { createTopbar } from './src/shell/topbar.js?v=0.8.3';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.3';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.3';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.3';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.3';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.3';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.3';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.7.10';
-import { createApiDock } from './src/modules/api-dock.js?v=0.7.10';
+} from './src/modules/assistant-core.js?v=0.8.3';
+import { createApiDock } from './src/modules/api-dock.js?v=0.8.3';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.7.10';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.7.10';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.7.10';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.7.10';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.7.10';
+} from './src/modules/preset-backend.js?v=0.8.3';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.3';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.3';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.3';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.3';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.3';
 
-const STM_VERSION = '0.7.10';
+const STM_VERSION = '0.8.3';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -55,7 +56,10 @@ function ensureFreshStylesheet() {
   if (!doc) return;
   for (const link of doc.querySelectorAll('link[rel="stylesheet"]')) {
     const href = link.getAttribute('href') || '';
-    if (href.includes('st-mate/style.css') && !href.includes(`v=${STM_VERSION}`)) {
+    if (
+      (href.includes('st-mate/style.css') || href.includes('yantai-bookshelf/style.css')) &&
+      !href.includes(`v=${STM_VERSION}`)
+    ) {
       const baseHref = href.split('?')[0];
       link.setAttribute('href', `${baseHref}?v=${STM_VERSION}`);
     }
@@ -195,7 +199,7 @@ function createStMateRuntime() {
     const registry = ensureControlRegistry(globalThis);
     controlHandle = {
       id: 'st-mate',
-      label: 'ST伴侣总台',
+      label: 'SillyTavern 伴侣总台',
       version: STM_VERSION,
       schemaVersion: STM_SCHEMA_VERSION,
       namespace: 'st_mate',
@@ -387,6 +391,7 @@ function createStMateRuntime() {
     };
 
     subscribe(types.APP_READY, () => {
+      syncActiveCompanionThemeOnBoot({ getContext, doc: globalThis.document });
       void primeHostOpenAiModule();
       void primeHostWorldInfoModule();
       void moduleBridge.applyAllFromStore();
@@ -601,12 +606,22 @@ function createStMateRuntime() {
       store,
       moduleBridge,
       suiteCoordinator,
+      stmVersion: STM_VERSION,
       onToggleShell: toggleShell,
       onPreviewAtmosphere: () => atmosphere?.refresh(),
       onOpenStateChange: () => {
         ttOverlayBackGuard?.sync();
       },
       onAfterOpenNativeDrawer: () => {
+        topbar?.refresh();
+        ttOverlayBackGuard?.sync();
+      },
+      onOpenPersonaStudio: () => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        topbar?.openPersona?.();
         topbar?.refresh();
         ttOverlayBackGuard?.sync();
       },
@@ -800,6 +815,7 @@ function createStMateRuntime() {
         if (!ctx?.extensionSettings) return false;
 
         store.hydrate();
+        syncActiveCompanionThemeOnBoot({ getContext, doc: globalThis.document });
         if (!safeModeNotified && isSafeModeRequested(globalThis)) {
           safeModeNotified = true;
           if (store.get().shellEnabled) {
