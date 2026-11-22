@@ -134,6 +134,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
     echoes: false, // 默认关闭，玩家需要查看楼上重Roll或平行分支时按需开启
     memory: false, // 默认关闭，完全不注册拦截器，避免与其他记忆插件冲突
   }),
+  turboConfig: Object.freeze({
+    floorWindowEnabled: true, // 默认开启：智能分端维护轻量 DOM 窗口（自动驻留 0 楼美化样式，不改存档），回顶按步长分段展开
+    keepFloors: 0, // 0 = 智能自适应（手机端保留 24 楼防卡闪退，电脑端宽裕保留 60 楼零限制感）；8 ~ 200 = 手动指定固定楼层数
+    loadStepFloors: 20, // 到顶回看时每次向前展开几楼（5 ~ 100，默认 20 楼）
+  }),
   vibe: Object.freeze({
     backdropMode: 'theme', // theme (原版) | character (角色图) | custom (自定义)
     backdropBrightness: 42,
@@ -387,6 +392,7 @@ export function normalizePresetStudio(raw = {}) {
 export function normalizeSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const rawModules = src.modules && typeof src.modules === 'object' ? src.modules : {};
+  const rawTurboConfig = src.turboConfig && typeof src.turboConfig === 'object' ? src.turboConfig : {};
   const rawVibe = src.vibe && typeof src.vibe === 'object' ? src.vibe : {};
   const rawTidy = src.tidy && typeof src.tidy === 'object' ? src.tidy : {};
   const rawStudio = src.apiStudio && typeof src.apiStudio === 'object' ? src.apiStudio : {};
@@ -537,6 +543,25 @@ export function normalizeSettings(raw = {}) {
       echoes: pickBool(rawModules.echoes, DEFAULT_SETTINGS.modules.echoes),
       memory: pickBool(rawModules.memory, DEFAULT_SETTINGS.modules.memory),
     },
+    turboConfig: {
+      floorWindowEnabled: pickBool(
+        rawTurboConfig.floorWindowEnabled,
+        DEFAULT_SETTINGS.turboConfig.floorWindowEnabled,
+      ),
+      keepFloors:
+        rawTurboConfig.keepFloors === 0 ||
+        rawTurboConfig.keepFloors === '0' ||
+        rawTurboConfig.keepFloors === undefined ||
+        rawTurboConfig.keepFloors === null
+          ? 0
+          : clampInt(rawTurboConfig.keepFloors, 8, 200, 0),
+      loadStepFloors: clampInt(
+        rawTurboConfig.loadStepFloors,
+        5,
+        100,
+        DEFAULT_SETTINGS.turboConfig.loadStepFloors,
+      ),
+    },
     vibe: {
       backdropMode: pickEnum(rawVibe.backdropMode, BACKDROP_MODES, DEFAULT_SETTINGS.vibe.backdropMode),
       backdropBrightness: derivedBrightness,
@@ -635,6 +660,9 @@ export function createSettingsStore({ getContext }) {
       ...cache,
       ...patch,
       modules: { ...cache.modules, ...modPatch },
+      turboConfig: patch?.turboConfig
+        ? { ...cache.turboConfig, ...patch.turboConfig }
+        : cache.turboConfig,
       vibe: { ...cache.vibe, ...(patch?.vibe || {}) },
       tidy: { ...cache.tidy, ...(patch?.tidy || {}) },
       apiStudio: patch?.apiStudio ? { ...cache.apiStudio, ...patch.apiStudio } : cache.apiStudio,

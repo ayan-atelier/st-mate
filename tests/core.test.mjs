@@ -9155,3 +9155,269 @@ test('v0.8.9: 对话侧边三键悬浮胶囊（默认关闭 / 单点翻5楼 / �
     globalThis.document = prevDoc;
   }
 });
+
+test('turbo engine 2.0: 88 楼长对话动态保留最近 20 楼 -> 一键回顶至 68 楼 -> 点击向前再展开 20 楼至 48 楼 -> 第 0 楼美化 CSS 驻留守护 & 回到底部自动回收', async () => {
+  const prevDoc = globalThis.document;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const {
+      AUTO_KEEP_FLOORS_DESKTOP,
+      AUTO_KEEP_FLOORS_MOBILE,
+      MOBILE_STREAMING_FPS_CAP,
+      createPerfEngine,
+      extractSafeStyleCss,
+      formatShowMoreLabel,
+      resolveEffectiveKeepFloors,
+    } = await import('../src/shell/perf-engine.js');
+    const { createSettingsDialog } = await import('../src/shell/settings-dialog.js');
+
+    // 1. 纯函数与分端自适应策略校验
+    assert.equal(resolveEffectiveKeepFloors(0, false), AUTO_KEEP_FLOORS_DESKTOP, '电脑端自动模式宽裕保留 60 楼零限制感');
+    assert.equal(resolveEffectiveKeepFloors(0, true), AUTO_KEEP_FLOORS_MOBILE, '手机端自动模式守护 24 楼防闪退');
+    assert.equal(resolveEffectiveKeepFloors(20, false), 20, '手动指定 20 楼在双端均严格生效');
+    assert.equal(
+      extractSafeStyleCss('开场白<style>.card-box { color: gold; }</style><script>evil()</script>'),
+      '.card-box { color: gold; }',
+    );
+    assert.equal(formatShowMoreLabel(68, 20), '↑ 展开前 20 楼（上方还有 68 楼已收起防卡顿）');
+    assert.equal(formatShowMoreLabel(12, 20), '↑ 展开上方剩余 12 楼历史对话');
+
+    // 2. 构造完整 88 楼聊天（mesid 0..87，第 0 楼内嵌角色卡全局美化 <style>，各楼带同源前端卡 iframe）
+    const allChatMessages = Array.from({ length: 88 }, (_, id) => ({
+      mes: id === 0 ? '<style>.custom-rp-card { border-radius: 14px; }</style>第0楼开场白' : `第${id}楼正文`,
+      is_user: id % 2 === 1,
+      name: id % 2 === 1 ? '清砚' : '角色',
+    }));
+    const powerUserSettings = { chat_truncation: 100, streaming_fps: 30 };
+    const hostCtx = {
+      extensionSettings: {},
+      chatId: 'long-88-chat',
+      characterId: 0,
+      chat: allChatMessages,
+      powerUserSettings,
+      saveSettingsDebounced: () => {},
+    };
+    const store = createSettingsStore({ getContext: () => hostCtx });
+
+    // 默认值校验：keepFloors = 0（智能自适应）、每次向前展开 20 楼
+    assert.equal(store.get().turboConfig.floorWindowEnabled, true);
+    assert.equal(store.get().turboConfig.keepFloors, 0);
+    assert.equal(store.get().turboConfig.loadStepFloors, 20);
+
+    const chatEl = doc.createElement('div');
+    chatEl.id = 'chat';
+    chatEl.clientHeight = 500;
+    doc.body.append(chatEl);
+
+    const makeMesNode = id => {
+      const m = doc.createElement('div');
+      m.className = 'mes';
+      m.setAttribute('mesid', String(id));
+      m.offsetHeight = 100;
+      if (id === 0) {
+        const st = doc.createElement('style');
+        st.textContent = '.custom-rp-card { border-radius: 14px; }';
+        m.append(st);
+      }
+      const img = doc.createElement('img');
+      const iframe = doc.createElement('iframe');
+      const iframeDoc = createMiniDomHarness().doc;
+      iframe.contentDocument = iframeDoc;
+      m.append(img, iframe);
+      return m;
+    };
+
+    const recalcScrollLayout = (stickBottom = false) => {
+      const mesCount = chatEl.children.filter(c => c.classList.contains('mes')).length;
+      chatEl.scrollHeight = Math.max(500, mesCount * 100);
+      if (stickBottom) {
+        chatEl.scrollTop = Math.max(0, chatEl.scrollHeight - chatEl.clientHeight);
+      }
+    };
+
+    // 初始页面挂了全部 88 楼（模拟边聊边堆积到 88 楼且玩家位于底部）
+    for (let i = 0; i < 88; i += 1) {
+      chatEl.append(makeMesNode(i));
+    }
+    recalcScrollLayout(true);
+
+    let hostBubbleTriggered = 0;
+    doc.body.addEventListener('click', evt => {
+      if (evt?.target?.id === 'show_more_messages') {
+        hostBubbleTriggered += 1;
+      }
+    });
+
+    // 模拟酒馆原生 showMoreMessages(count)：在 #show_more_messages 后插入前 count 楼
+    let lastRequestedStep = 0;
+    const mockShowMoreMessages = async stepCount => {
+      lastRequestedStep = stepCount;
+      const curMes = chatEl.children.filter(c => c.classList.contains('mes'));
+      const firstId = Number(curMes[0]?.getAttribute('mesid') || 0);
+      const startId = Math.max(0, firstId - stepCount);
+      const banner = chatEl.children.find(c => c.id === 'show_more_messages');
+      const prevH = chatEl.scrollHeight;
+      for (let id = firstId - 1; id >= startId; id -= 1) {
+        const node = makeMesNode(id);
+        if (banner) {
+          const idx = chatEl.children.indexOf(banner);
+          chatEl.children.splice(idx + 1, 0, node);
+          node.parentNode = chatEl;
+        } else {
+          chatEl.prepend(node);
+        }
+      }
+      if (startId === 0 && banner) banner.remove();
+      recalcScrollLayout(false);
+      chatEl.scrollTop = chatEl.scrollHeight - prevH;
+    };
+
+    // Mock IntersectionObserver to test offscreen iframe animation hibernation & early wakeup
+    let ioCallback = null;
+    class MockIO {
+      constructor(cb) {
+        ioCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+
+    const runtimeEnv = {
+      ...win,
+      innerWidth: 1440,
+      innerHeight: 900,
+      navigator: { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', maxTouchPoints: 0 },
+      document: doc,
+      IntersectionObserver: MockIO,
+      requestAnimationFrame: fn => {
+        fn();
+        return 0;
+      },
+    };
+
+    const perf = createPerfEngine({
+      store,
+      getContext: () => hostCtx,
+      root: runtimeEnv,
+      loadMoreFloors: mockShowMoreMessages,
+    });
+
+    // 3A. 电脑端测试：默认自动模式保留宽裕 60 楼（mesid 28..87），且 streaming_fps 保持 30 丝毫不改！
+    perf.refresh({ forcePrune: true });
+    let renderedMes = chatEl.children.filter(c => c.classList.contains('mes'));
+    assert.equal(renderedMes.length, 60, '电脑端自动模式宽裕保留 60 楼 (28..87)');
+    assert.equal(powerUserSettings.chat_truncation, 60);
+    assert.equal(powerUserSettings.streaming_fps, 30, '电脑端完全不触碰原生 30fps 流式帧率');
+
+    // 验证离屏同源前端卡 iframe 穿透暂停动画，进入 960px 预热范围时立即唤醒恢复！
+    assert.ok(ioCallback, '挂载 IntersectionObserver 追踪离屏楼层');
+    const sampleHibernateMes = renderedMes[0];
+    const sampleIframe = sampleHibernateMes.querySelector('iframe');
+    ioCallback([{ target: sampleHibernateMes, isIntersecting: false }]);
+    assert.equal(sampleHibernateMes.dataset.stmOffscreen, '1');
+    assert.equal(
+      sampleIframe.contentDocument.documentElement.dataset.stmIframePaused,
+      '1',
+      '滚出屏幕两屏外的前端卡 iframe 自动暂停空转 CSS 动画',
+    );
+    ioCallback([{ target: sampleHibernateMes, isIntersecting: true }]);
+    assert.equal(sampleHibernateMes.dataset.stmOffscreen, undefined);
+    assert.equal(
+      sampleIframe.contentDocument.documentElement.dataset.stmIframePaused,
+      undefined,
+      '靠近视口 960px 预热区时提前无感唤醒恢复动画',
+    );
+
+    // 3B. 切换为手机端视口：自动收紧至 24 楼（mesid 64..87），且 streaming_fps 温和托管至 15fps！
+    runtimeEnv.innerWidth = 390;
+    runtimeEnv.innerHeight = 844;
+    runtimeEnv.navigator = { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', maxTouchPoints: 5 };
+    recalcScrollLayout(true);
+    perf.refresh({ forcePrune: true });
+    renderedMes = chatEl.children.filter(c => c.classList.contains('mes'));
+    assert.equal(renderedMes.length, 24, '手机端自动模式精准守护 24 楼');
+    assert.equal(powerUserSettings.chat_truncation, 24);
+    assert.equal(powerUserSettings.streaming_fps, MOBILE_STREAMING_FPS_CAP, '手机端温和平衡流式帧率至 15fps 降温防卡');
+
+    // 4. 在设置中心内联展开流畅渲染引擎卡片，点快捷胶囊切换为手动「20楼」 -> 验证 88->68->48 楼闭环！
+    const dlg = createSettingsDialog({
+      getContext: () => hostCtx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null, syncModuleEnabled: async () => {} },
+      onForcePruneTurbo: () => perf.refresh({ forcePrune: true }),
+    });
+    dlg.open('modules');
+    let foldTrigger = doc.getElementById('stm-settings-dialog').querySelector('.stm-turbo-fold-trigger');
+    assert.ok(foldTrigger, '流畅渲染引擎右侧提供楼层设置按钮');
+    assert.match(foldTrigger.textContent, /智能楼层/, '默认自动档温和显示「智能楼层」');
+    foldTrigger.click();
+
+    const pills = doc.getElementById('stm-settings-dialog').querySelectorAll('.stm-turbo-pill');
+    const pill20 = pills.find(p => p.textContent === '20楼');
+    assert.ok(pill20, '展开面板提供 20楼 快捷胶囊');
+    recalcScrollLayout(true);
+    pill20.click();
+
+    renderedMes = chatEl.children.filter(c => c.classList.contains('mes'));
+    assert.equal(renderedMes.length, 20, '切换为 20楼 后屏幕仅保留最近 20 楼 (mesid 68..87)');
+    assert.equal(renderedMes[0].getAttribute('mesid'), '68', '窗口首楼精准为第 68 楼');
+    assert.equal(renderedMes.at(-1).getAttribute('mesid'), '87', '窗口末楼精准为第 87 楼（共 88 楼）');
+    assert.equal(powerUserSettings.chat_truncation, 20);
+
+    // 验证第 0 楼被收起后，其全局美化 <style> 自动驻留到 <head> 守护锚点！
+    const styleAnchor = doc.getElementById('stm-floor0-style-anchor');
+    assert.ok(styleAnchor, '第 0 楼卸载后自动生成 #stm-floor0-style-anchor 守护样式');
+    assert.match(styleAnchor.textContent, /\.custom-rp-card/, '第 0 楼美化 CSS 完整驻留不崩');
+
+    const banner68 = doc.getElementById('show_more_messages');
+    assert.ok(banner68, '顶部自动挂载 #show_more_messages');
+    assert.equal(banner68.textContent, '↑ 展开前 20 楼（上方还有 68 楼已收起防卡顿）');
+
+    // 5. 玩家一键回顶（scrollTop = 0，直达第 68 楼），点击横条向前再展开 20 楼 -> 变成 48..87 楼！
+    chatEl.scrollTop = 0;
+    banner68.click();
+    await new Promise(r => setTimeout(r, 10));
+
+    assert.equal(hostBubbleTriggered, 0, '捕获阶段同步阻断冒泡，绝不重复触发酒馆原生整百楼加载');
+    assert.equal(lastRequestedStep, 20, '精准按配置的 20 楼步长向前加载');
+    renderedMes = chatEl.children.filter(c => c.classList.contains('mes'));
+    assert.equal(renderedMes.length, 40, '展开后共渲染 40 楼 (48..87)');
+    assert.equal(renderedMes[0].getAttribute('mesid'), '48', '向前精准展开出 48..67 楼');
+    assert.equal(
+      doc.getElementById('show_more_messages')?.textContent,
+      '↑ 展开前 20 楼（上方还有 48 楼已收起防卡顿）',
+      '横条实时刷新剩余 48 楼计数',
+    );
+
+    // 玩家停留在上方阅读时（scrollTop 在上方），即使触发重算也绝不抽走刚展开的楼层！
+    chatEl.scrollTop = 200;
+    perf.pruneNow();
+    assert.equal(
+      chatEl.children.filter(c => c.classList.contains('mes')).length,
+      40,
+      '玩家在上方回看历史时绝不擅自收起楼层',
+    );
+
+    // 6. 玩家看完历史回到底部继续发完下一轮回复（handleGenerationEnded）-> 自动回收回 20 楼轻快窗口！
+    recalcScrollLayout(true);
+    perf.handleGenerationEnded();
+    renderedMes = chatEl.children.filter(c => c.classList.contains('mes'));
+    assert.equal(renderedMes.length, 20, '回到底部继续对话后自动收回临时展开的旧楼层');
+    assert.equal(renderedMes[0].getAttribute('mesid'), '68');
+
+    // 7. 关闭流畅渲染引擎 -> 100% 无损归还玩家原本的 chat_truncation=100、streaming_fps=30 并清理样式锚点
+    store.update({ modules: { turbo: false } });
+    perf.refresh();
+    assert.equal(powerUserSettings.chat_truncation, 100, '关闭引擎后无损归还原生 chat_truncation=100');
+    assert.equal(powerUserSettings.streaming_fps, 30, '关闭引擎后无损归还原生 streaming_fps=30');
+    assert.equal(doc.getElementById('stm-floor0-style-anchor'), null, '关闭引擎后清理驻留样式节点');
+
+    dlg.destroy();
+    perf.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});

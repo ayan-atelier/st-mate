@@ -13,12 +13,12 @@ import {
   findInstalledYantaiPresetName,
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
-} from '../core/companion-kit.js?v=0.8.9c';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.9c';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.8.9c';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.8.9c';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.8.9c';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.8.9c';
+} from '../core/companion-kit.js?v=0.9.0';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.0';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.0';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.0';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.0';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.0';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -76,6 +76,7 @@ export function createSettingsDialog({
   suiteCoordinator = null,
   stmVersion = '0.8.4',
   onToggleShell,
+  onForcePruneTurbo = null,
   onOpenPersonaStudio,
   onOpenStateChange,
   onAfterOpenNativeDrawer,
@@ -88,6 +89,7 @@ export function createSettingsDialog({
   let activeSubView = ''; // '' | 'tidy'
   let expandedHelpKey = '';
   let nativeBarFoldOpen = false;
+  let turboFoldOpen = false;
   let themePickerOpen = false;
   let applyingThemeBusy = false;
   let importingPresetBusy = false;
@@ -493,6 +495,237 @@ export function createSettingsDialog({
     return card;
   }
 
+  function makeTurboEngineCard(current) {
+    const doc = globalThis.document;
+    const helpKey = 'mod_turbo';
+    const isHelpOpen = expandedHelpKey === helpKey;
+    const turboOn = Boolean(current.modules?.turbo);
+    const tc = current.turboConfig || {};
+    const windowOn = tc.floorWindowEnabled !== false;
+    const rawKeep = Number(tc.keepFloors);
+    const isAutoKeep = !Number.isFinite(rawKeep) || rawKeep < 8;
+    const keepFloors = isAutoKeep ? 0 : Math.min(200, Math.round(rawKeep));
+    const loadStepFloors = Math.max(5, Math.min(100, Number(tc.loadStepFloors) || 20));
+
+    const card = el(
+      'div',
+      `stm-switch-card is-compact stm-turbo-card${isHelpOpen ? ' is-help-open' : ''}${turboFoldOpen ? ' is-fold-open' : ''}`,
+    );
+
+    const bar = el('div', 'stm-switch-bar');
+    const head = el('div', 'stm-switch-head');
+    head.append(
+      createIconNode(doc, 'zap', 'stm-row-icon'),
+      el('strong', 'stm-switch-title', '流畅渲染引擎（隐形加速）'),
+      makeHelpTriggerButton(
+        helpKey,
+        '流畅渲染引擎（隐形加速）',
+      ),
+    );
+
+    const foldBtnLabel = !windowOn
+      ? `楼层设置 ${turboFoldOpen ? '▴' : '▾'}`
+      : isAutoKeep
+        ? `智能楼层 ${turboFoldOpen ? '▴' : '▾'}`
+        : `保留 ${keepFloors} 楼 ${turboFoldOpen ? '▴' : '▾'}`;
+    const foldTriggerBtn = makeInlineActionBtn(
+      foldBtnLabel,
+      () => {
+        turboFoldOpen = !turboFoldOpen;
+        render();
+      },
+      'stm-turbo-fold-trigger',
+    );
+    head.append(foldTriggerBtn);
+
+    const toggleLabel = el('label', 'stm-switch-toggle-wrap');
+    const input = el('input', 'stm-switch-input');
+    input.type = 'checkbox';
+    input.checked = turboOn;
+    input.addEventListener('change', () => {
+      updateStoreFromDialog({ modules: { turbo: input.checked } });
+      if (input.checked) onForcePruneTurbo?.();
+    });
+    const slider = el('span', 'stm-switch-track');
+    toggleLabel.append(input, slider);
+
+    head.addEventListener('click', evt => {
+      const target = evt.target;
+      if (
+        target &&
+        typeof target.closest === 'function' &&
+        target.closest('.stm-help-btn, .stm-row-inline-btn')
+      ) {
+        return;
+      }
+      input.checked = !input.checked;
+      updateStoreFromDialog({ modules: { turbo: input.checked } });
+      if (input.checked) onForcePruneTurbo?.();
+    });
+
+    bar.append(head, toggleLabel);
+    card.append(bar);
+
+    if (isHelpOpen) {
+      card.append(
+        el(
+          'div',
+          'stm-switch-help-pop',
+          '分端无感加速：电脑端宽裕保留 60 楼且不限帧率，零限制感；手机端自动守护 24 楼（释放旧 DOM 与前端卡旧 iframe 内存防闪退）、温和平衡流式重排帧率、穿透休眠离屏前端卡动画、异步解码插图并卸除高耗电多层毛玻璃。',
+        ),
+      );
+    }
+
+    if (turboFoldOpen) {
+      const foldBox = el(
+        'div',
+        `stm-native-bar-fold stm-turbo-fold${!current.shellEnabled || !turboOn ? ' is-disabled' : ''}`,
+      );
+
+      const subToggleRow = el('div', 'stm-turbo-subrow');
+      const subLabel = el(
+        'span',
+        'stm-turbo-sublabel',
+        '动态收起更早旧楼层（物理减负，不改存档与记忆）',
+      );
+      const subSwitchWrap = el('label', 'stm-switch-toggle-wrap');
+      const subInput = el('input', 'stm-switch-input');
+      subInput.type = 'checkbox';
+      subInput.checked = windowOn;
+      subInput.disabled = !current.shellEnabled || !turboOn;
+      subInput.addEventListener('change', () => {
+        updateStoreFromDialog({ turboConfig: { floorWindowEnabled: subInput.checked } });
+        if (subInput.checked) onForcePruneTurbo?.();
+      });
+      subSwitchWrap.append(subInput, el('span', 'stm-switch-track'));
+      subToggleRow.append(subLabel, subSwitchWrap);
+      foldBox.append(subToggleRow);
+
+      if (windowOn) {
+        const buildFloorPresetRow = ({
+          label,
+          presets,
+          currentVal,
+          minVal,
+          maxVal,
+          allowAuto = false,
+          inputClass,
+          onApply,
+        }) => {
+          const row = el('div', 'stm-turbo-Config-row');
+          row.append(el('span', 'stm-turbo-row-title', label));
+
+          const ctrlBar = el('div', 'stm-turbo-ctrl-bar');
+          const pillWrap = el('div', 'stm-turbo-pills');
+          if (allowAuto) {
+            const autoPill = el(
+              'button',
+              `stm-turbo-pill${currentVal === 0 ? ' is-active' : ''}`,
+              '自动',
+            );
+            autoPill.type = 'button';
+            autoPill.title = '手机端自动保留 24 楼防发烫闪退，电脑端保留 60 楼不打断滚轮阅读';
+            autoPill.disabled = !current.shellEnabled || !turboOn;
+            autoPill.addEventListener('click', () => {
+              onApply(0);
+            });
+            pillWrap.append(autoPill);
+          }
+          for (const num of presets) {
+            const pill = el(
+              'button',
+              `stm-turbo-pill${currentVal === num ? ' is-active' : ''}`,
+              `${num}楼`,
+            );
+            pill.type = 'button';
+            pill.disabled = !current.shellEnabled || !turboOn;
+            pill.addEventListener('click', () => {
+              onApply(num);
+            });
+            pillWrap.append(pill);
+          }
+
+          const customWrap = el('label', 'stm-turbo-num-wrap');
+          const numInput = el('input', `stm-turbo-num-input ${inputClass}`);
+          numInput.type = 'number';
+          numInput.min = String(minVal);
+          numInput.max = String(maxVal);
+          numInput.step = '1';
+          numInput.placeholder = allowAuto ? '自动' : '';
+          numInput.value = currentVal === 0 && allowAuto ? '' : String(currentVal);
+          numInput.disabled = !current.shellEnabled || !turboOn;
+          const commitNum = () => {
+            const rawStr = String(numInput.value || '').trim();
+            if (!rawStr && allowAuto) {
+              onApply(0);
+              return;
+            }
+            const parsed = Math.round(Number(rawStr));
+            if (!Number.isFinite(parsed)) {
+              numInput.value = currentVal === 0 && allowAuto ? '' : String(currentVal);
+              return;
+            }
+            if (allowAuto && parsed <= 0) {
+              onApply(0);
+              return;
+            }
+            const clamped = Math.max(minVal, Math.min(maxVal, parsed));
+            onApply(clamped);
+          };
+          numInput.addEventListener('change', commitNum);
+          numInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitNum();
+            }
+          });
+          customWrap.append(numInput, el('span', 'stm-turbo-num-unit', '楼'));
+
+          ctrlBar.append(pillWrap, customWrap);
+          row.append(ctrlBar);
+          return row;
+        };
+
+        const hintDesc = isAutoKeep
+          ? `当前为智能自动模式（手机端保留 24 楼防卡闪退，电脑端保留 60 楼零限制感）。点「到顶」秒回当前窗口首楼，再点顶部横条或上翻球即可每次向前展开 ${loadStepFloors} 楼；回到底部继续对话时自动收起（第 0 楼美化样式始终常驻保留）。`
+          : `示例：保留 ${keepFloors} 楼时，玩到 88 楼点「到顶」将秒回第 ${Math.max(1, 88 - keepFloors)} 楼；点击顶部横条（或在顶部再点上翻球）可向前再展开 ${loadStepFloors} 楼，回到底部继续对话时自动收起（第 0 楼美化样式始终常驻保留）。`;
+
+        foldBox.append(
+          buildFloorPresetRow({
+            label: '平时屏幕保留最近',
+            presets: [20, 30, 50],
+            currentVal: keepFloors,
+            minVal: 8,
+            maxVal: 200,
+            allowAuto: true,
+            inputClass: 'stm-turbo-keep-input',
+            onApply: nextVal => {
+              updateStoreFromDialog({ turboConfig: { keepFloors: nextVal } });
+              onForcePruneTurbo?.();
+            },
+          }),
+          buildFloorPresetRow({
+            label: '回顶每次向前展开',
+            presets: [15, 20, 30, 50],
+            currentVal: loadStepFloors,
+            minVal: 5,
+            maxVal: 100,
+            allowAuto: false,
+            inputClass: 'stm-turbo-step-input',
+            onApply: nextVal => {
+              updateStoreFromDialog({ turboConfig: { loadStepFloors: nextVal } });
+            },
+          }),
+          el('div', 'stm-native-bar-fold-hint', hintDesc),
+        );
+      }
+
+      card.append(foldBox);
+    }
+
+    return card;
+  }
+
   function resolveCompanionBadge(moduleKey, current, suiteBusy) {
     const compInfo = suiteCoordinator?.getCompanionStatus?.(moduleKey) || null;
     if (!current.shellEnabled && current.modules?.[moduleKey]) {
@@ -717,16 +950,7 @@ export function createSettingsDialog({
           updateStoreFromDialog({ tapPureReading: val });
         },
       }),
-      makeSwitchRow({
-        helpKey: 'mod_turbo',
-        icon: 'zap',
-        title: '流畅渲染引擎（隐形加速）',
-        desc: '后台压缩缓存高清角色底图、自动休眠屏幕外长对话历史楼层，并在手机端卸除高耗电毛玻璃与弹键盘抖动。',
-        checked: Boolean(current.modules.turbo),
-        onChange: val => {
-          updateStoreFromDialog({ modules: { turbo: val } });
-        },
-      }),
+      makeTurboEngineCard(current),
     );
     container.append(expGroup);
 
