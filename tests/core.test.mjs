@@ -8844,3 +8844,314 @@ test('v0.8.8: 新增「汇文明朝」阅读字体（本地优先 + 双 CDN woff
     globalThis.document = prevDoc;
   }
 });
+
+test('v0.8.9: 对话侧边三键悬浮胶囊（默认关闭 / 单点翻5楼 / 连戳两下浮出到顶到底 / 底栏上方与两侧外挂按钮无损收纳）', async () => {
+  const prevDoc = globalThis.document;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const {
+      createDoubleTapTracker,
+      createFloatCapsule,
+      discoverInputClutterItems,
+      stepChatByFloors,
+    } = await import('../src/shell/float-capsule.js');
+    const { createSettingsDialog } = await import('../src/shell/settings-dialog.js');
+
+    // 1. 默认关闭校验
+    const def = normalizeSettings({});
+    assert.equal(def.floatCapsuleEnabled, false, '悬浮胶囊默认关闭');
+    assert.equal(def.floatCapsuleSide, 'right');
+    assert.equal(def.floatCapsuleTopPct, 62);
+
+    // 2. 构造真实 #chat（15 楼消息 + #show_more_messages）与 #form_sheld（含 #qr--bar 脚本按钮 + #leftSendForm 月亮按钮）
+    const sheld = doc.createElement('div');
+    sheld.id = 'sheld';
+    const chat = doc.createElement('div');
+    chat.id = 'chat';
+    chat.clientHeight = 500;
+    chat.scrollHeight = 3000;
+    chat.scrollTop = 2400;
+
+    let showMoreClicked = 0;
+    const showMoreEl = doc.createElement('div');
+    showMoreEl.id = 'show_more_messages';
+    showMoreEl.textContent = 'Show more messages';
+    showMoreEl.addEventListener('click', () => {
+      showMoreClicked += 1;
+    });
+    chat.append(showMoreEl);
+
+    for (let i = 0; i < 15; i += 1) {
+      const m = doc.createElement('div');
+      m.className = 'mes';
+      m.offsetTop = i * 200;
+      m.offsetHeight = 180;
+      chat.append(m);
+    }
+
+    const formSheld = doc.createElement('div');
+    formSheld.id = 'form_sheld';
+    const sendForm = doc.createElement('div');
+    sendForm.id = 'send_form';
+
+    const qrBar = doc.createElement('div');
+    qrBar.id = 'qr--bar';
+    const qrButtons = doc.createElement('div');
+    qrButtons.className = 'qr--buttons';
+
+    let greetingMgrClicks = 0;
+    const thBtn1 = doc.createElement('div');
+    thBtn1.className = 'qr--button menu_button';
+    thBtn1.textContent = '开场白管理';
+    thBtn1.addEventListener('click', () => {
+      greetingMgrClicks += 1;
+    });
+
+    let gazetteClicks = 0;
+    const thBtn2 = doc.createElement('div');
+    thBtn2.className = 'qr--button menu_button';
+    thBtn2.textContent = '显隐邸报';
+    thBtn2.addEventListener('click', () => {
+      gazetteClicks += 1;
+    });
+    qrButtons.append(thBtn1, thBtn2);
+    qrBar.append(qrButtons);
+
+    const nonQR = doc.createElement('div');
+    nonQR.id = 'nonQRFormItems';
+    const leftSend = doc.createElement('div');
+    leftSend.id = 'leftSendForm';
+
+    let moonSawClickingFlag = false;
+    let moonClicks = 0;
+    const moonBtn = doc.createElement('div');
+    moonBtn.id = 'sjm-moon-trigger';
+    moonBtn.className = 'fa-solid fa-moon interactable';
+    moonBtn.addEventListener('click', () => {
+      moonClicks += 1;
+      moonSawClickingFlag = moonBtn.dataset?.stmClicking === '1';
+    });
+
+    const optBtn = doc.createElement('div');
+    optBtn.id = 'options_button';
+    optBtn.className = 'fa-solid fa-bars interactable';
+    const wandBtn = doc.createElement('div');
+    wandBtn.id = 'extensionsMenuButton';
+    wandBtn.className = 'fa-solid fa-wand-magic-sparkles interactable';
+    leftSend.append(moonBtn, optBtn, wandBtn);
+
+    const textarea = doc.createElement('textarea');
+    textarea.id = 'send_textarea';
+    const visionBtn = doc.createElement('button');
+    visionBtn.id = 'stm-chat-vision-btn';
+    visionBtn.className = 'stm-chat-vision-btn';
+    const rightSend = doc.createElement('div');
+    rightSend.id = 'rightSendForm';
+    const sendBut = doc.createElement('div');
+    sendBut.id = 'send_but';
+    rightSend.append(sendBut);
+
+    nonQR.append(leftSend, textarea, visionBtn, rightSend);
+    sendForm.append(qrBar, nonQR);
+    formSheld.append(sendForm);
+    sheld.append(chat, formSheld);
+    doc.body.append(sheld);
+
+    // 3. 验证扫描器精准识别外挂项且零误伤核心按钮
+    const scanRes = discoverInputClutterItems(doc);
+    assert.equal(scanRes.items.length, 3, '应精准识别 2 个上方横条脚本钮 + 1 个左侧月亮图标');
+    assert.deepEqual(
+      scanRes.items.map(it => it.label),
+      ['开场白管理', '显隐邸报', '角色设置'],
+    );
+    assert.equal(scanRes.hostNodes.includes(optBtn), false, '三横菜单严禁被收纳');
+    assert.equal(scanRes.hostNodes.includes(wandBtn), false, '魔法棒严禁被收纳');
+    assert.equal(scanRes.hostNodes.includes(visionBtn), false, '伴侣发图键严禁被收纳');
+    assert.equal(scanRes.hostNodes.includes(sendBut), false, '发送纸飞机严禁被收纳');
+
+    // 4. 验证连戳追踪器纯状态机
+    const tracker = createDoubleTapTracker({ windowMs: 750 });
+    assert.equal(tracker.recordTap('up', 1000).showQuickJump, false, '第1次点击不弹到顶');
+    const secondUp = tracker.recordTap('up', 1350);
+    assert.equal(secondUp.showQuickJump, true, '750ms内连戳第2下弹出到顶');
+    assert.equal(secondUp.mode, 'top');
+    assert.equal(tracker.recordTap('down', 1500).showQuickJump, false, '换方向第1下重新计数');
+
+    // 5. 验证组件挂载、设置面板开启、翻 5 楼、连戳出到顶到底、点击收纳项触发原按钮
+    const ctx = {
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'sjm.png', name: '沈既明' }],
+      chat: [{ is_user: false, mes: '正文' }],
+      extensionSettings: {},
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    let homeCloaked = false;
+    const capsule = createFloatCapsule({
+      root: win,
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => homeCloaked,
+    });
+    capsule.refresh();
+    assert.equal(doc.getElementById('stm-float-capsule'), null, '默认关闭时不挂载 DOM 且不隐藏底栏');
+    assert.equal(qrBar.dataset?.stmClutterHidden, undefined);
+
+    // 验证设置弹窗「对话顶栏样式」卡片中包含该开关并点击开启
+    const dlg = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null, syncModuleEnabled: async () => {} },
+      stmVersion: '0.8.9',
+    });
+    dlg.open('modules');
+    const switchTitles = doc
+      .getElementById('stm-settings-dialog')
+      .querySelectorAll('.stm-switch-title')
+      .map(n => n.textContent);
+    assert.equal(
+      switchTitles.includes('对话侧边悬浮快捷与底栏收纳'),
+      true,
+      '对话顶栏样式卡片下展示悬浮胶囊开关',
+    );
+    dlg.close();
+
+    store.update({ floatCapsuleEnabled: true });
+    capsule.refresh();
+
+    const capNode = doc.getElementById('stm-float-capsule');
+    assert.ok(capNode && !capNode.hidden, '开启后在对话中显示悬浮圆球组');
+    assert.match(capNode.style.top, /^\d+px$/, '采用真实视口像素 top 定位，杜绝移动端 % 容器高度卡顶');
+    assert.ok(parseFloat(capNode.style.top) >= 58, '像素 top 严格避让顶栏安全区');
+    assert.equal(qrBar.dataset?.stmClutterHidden, '1', '#qr--bar 被无损标记折叠');
+    assert.equal(moonBtn.dataset?.stmClutterHidden, '1', '#leftSendForm 月亮钮被无损标记折叠');
+    assert.equal(optBtn.dataset?.stmClutterHidden, undefined, '三横按钮原位完好保留');
+    assert.equal(
+      capNode.querySelector('.stm-float-badge'),
+      null,
+      '外层圆球零数字红点角标，极致低存在感',
+    );
+
+    // 单点上箭头：从 scrollTop=2400（第 12 楼）向上翻 5 楼到第 7 楼（top=1400-8=1392），且不弹「到顶」
+    const upBtn = capNode.querySelector('.stm-float-up');
+    const downBtn = capNode.querySelector('.stm-float-down');
+    const bagBtn = capNode.querySelector('.stm-float-bag');
+    const quickJumpBtn = capNode.querySelector('.stm-float-quick-jump');
+
+    upBtn.click();
+    assert.equal(chat.scrollTop, 1392, '单点上翻精准上跳 5 楼');
+    assert.equal(quickJumpBtn.hidden, true, '单点不弹出到顶胶囊');
+
+    // 紧接着再戳一下上箭头：继续上翻 5 楼（第 2 楼 392），同时浮出「到顶」小胶囊！
+    upBtn.click();
+    assert.equal(chat.scrollTop, 392, '连戳第2下照常再翻 5 楼，绝不手快误飞');
+    assert.equal(quickJumpBtn.hidden, false, '连戳两下浮出「到顶」快捷胶囊');
+    assert.match(
+      [quickJumpBtn.textContent, ...quickJumpBtn.children.map(c => c.textContent)].join(''),
+      /到顶/,
+    );
+
+    // 点击「到顶」胶囊直达 scrollTop = 0；再在顶部点上翻自动触发 #show_more_messages
+    quickJumpBtn.click();
+    assert.equal(chat.scrollTop, 0, '点击「到顶」一键直达顶部');
+    assert.equal(quickJumpBtn.hidden, true, '跳顶后自动收起快捷胶囊');
+    stepChatByFloors(chat, -5, { smooth: false });
+    assert.equal(showMoreClicked, 1, '已处于顶部时继续上翻自动触发 #show_more_messages 加载历史');
+
+    // 连戳两下下箭头 -> 浮出「到底」并一键沉底
+    downBtn.click();
+    assert.equal(chat.scrollTop, 992, '从第0楼向下翻 5 楼至第 5 楼');
+    assert.equal(quickJumpBtn.hidden, true);
+    downBtn.click();
+    assert.equal(quickJumpBtn.hidden, false, '连戳两下下箭头浮出「到底」快捷胶囊');
+    quickJumpBtn.click();
+    assert.equal(chat.scrollTop, 3000, '点击「到底」一键沉底');
+
+    // 点中间收纳键展开面板，点击「角色设置」（月亮钮）与「显隐邸报」无损透传原按钮事件
+    bagBtn.click();
+    assert.equal(capsule.isOpen(), true);
+    const popItems = capNode.querySelector('.stm-float-popover').querySelectorAll('.stm-float-pop-item');
+    assert.equal(popItems.length, 3);
+    popItems[2].click(); // 角色设置 (moonBtn)
+    assert.equal(moonClicks, 1, '点击收纳项触发原月亮按钮 click');
+    assert.equal(
+      moonSawClickingFlag,
+      true,
+      '触发 click 瞬间挂载 data-stm-clicking="1" 保障 getBoundingClientRect 坐标有效',
+    );
+    assert.equal(capsule.isOpen(), false, '触发卡片功能后自动收起收纳气泡避免遮挡');
+
+    bagBtn.click();
+    capNode.querySelector('.stm-float-popover').querySelectorAll('.stm-float-pop-item')[0].click();
+    assert.equal(greetingMgrClicks, 1);
+
+    // 6. 验证野生悬浮球吸纳、按角色记忆与一键放出，以及无收纳项时自动隐去中间收纳球
+    let dlbaoBallClicks = 0;
+    const wildBall = doc.createElement('button');
+    wildBall.id = 'dlbao-ball';
+    wildBall.setAttribute('aria-label', '打开大梁邸报');
+    wildBall.style.position = 'fixed';
+    wildBall.style.width = '52px';
+    wildBall.style.height = '52px';
+    wildBall.offsetWidth = 52;
+    wildBall.offsetHeight = 52;
+    wildBall.textContent = '报';
+    wildBall.addEventListener('click', () => {
+      dlbaoBallClicks += 1;
+    });
+    doc.body.append(wildBall);
+
+    capsule.refresh();
+    bagBtn.click();
+    const absorbBtn = capNode.querySelector('.stm-float-absorb-btn');
+    assert.ok(absorbBtn, '收纳面板自动识别页面上的小型野生悬浮挂件并提供一键收起');
+    absorbBtn.click();
+
+    assert.equal(wildBall.dataset?.stmClutterHidden, '1', '野生悬浮球被收纳后立即隐去');
+    assert.deepEqual(store.get().floatTuckedSelectors['char:sjm.png'], ['id:dlbao-ball']);
+    assert.match(
+      capNode.querySelector('.stm-float-pop-title')?.textContent || '',
+      /已收纳 \(4\)/,
+      '数量仅在展开收纳面板后的标题内克制呈现',
+    );
+
+    const wildMainBtn = capNode.querySelector('.stm-float-tucked-chip').querySelector('.stm-float-pop-item');
+    wildMainBtn.click();
+    assert.equal(dlbaoBallClicks, 1, '点击收纳仓内的野生悬浮球正常触发其面板开关');
+
+    // 点右侧放出按钮还原野生悬浮球
+    bagBtn.click();
+    const releaseBtn = capNode.querySelector('.stm-float-item-release');
+    releaseBtn.click();
+    assert.equal(wildBall.dataset?.stmClutterHidden, undefined, '点放出后野生悬浮球恢复页面显示');
+    assert.equal(store.get().floatTuckedSelectors['char:sjm.png'], undefined);
+    capsule.close();
+
+    // 当卡片没有任何可收纳按钮时，中间收纳球自动隐去，只留上下两颗独立翻楼球
+    qrBar.remove();
+    moonBtn.remove();
+    wildBall.remove();
+    capsule.refresh();
+    assert.equal(bagBtn.hidden, true, '无任何可收纳项时自动隐藏中间收纳球');
+    assert.equal(upBtn.hidden, false, '上翻圆球保持显示');
+    assert.equal(downBtn.hidden, false, '下翻圆球保持显示');
+
+    // 退回书架首页时自动隐藏，关闭开关后 100% 无损还原所有底栏标记
+    homeCloaked = true;
+    capsule.refresh();
+    assert.equal(capNode.hidden, true, '书架首页净空态自动隐去悬浮胶囊');
+
+    homeCloaked = false;
+    store.update({ floatCapsuleEnabled: false });
+    capsule.refresh();
+    assert.equal(capNode.hidden, true);
+
+    dlg.destroy();
+    capsule.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});

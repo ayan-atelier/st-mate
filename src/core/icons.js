@@ -92,6 +92,16 @@ const PATHS = Object.freeze({
     '<line x1="4" y1="4" x2="20" y2="20"/>',
   arrowup: '<line x1="12" y1="19" x2="12" y2="5"/><polyline points="6.5 10.5 12 5 17.5 10.5"/>',
   arrowdown: '<line x1="12" y1="5" x2="12" y2="19"/><polyline points="6.5 13.5 12 19 17.5 13.5"/>',
+  chevronup: '<polyline points="6.5 14.5 12 9 17.5 14.5"/>',
+  more: '<circle cx="6.5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="17.5" cy="12" r="1"/>',
+  topjump: '<line x1="6.5" y1="6.5" x2="17.5" y2="6.5"/><polyline points="6.5 16 12 10.5 17.5 16"/>',
+  bottomjump: '<line x1="6.5" y1="17.5" x2="17.5" y2="17.5"/><polyline points="6.5 8 12 13.5 17.5 8"/>',
+  capsule:
+    '<rect x="7" y="2.8" width="10" height="18.4" rx="5"/>' +
+    '<polyline points="10.2 7.8 12 6 13.8 7.8"/>' +
+    '<circle cx="12" cy="12" r="1.2"/>' +
+    '<polyline points="10.2 16.2 12 18 13.8 16.2"/>',
+  moon: '<path d="M20.2 14.8A8.5 8.5 0 0 1 9.2 3.8a8.5 8.5 0 1 0 11 11z"/>',
   edit: '<path d="M15.8 4.2a2.1 2.1 0 0 1 3 3L8 18l-4.2 1.2L5 15l10.8-10.8z"/>',
   file:
     '<path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5L14 3.5z"/>' +

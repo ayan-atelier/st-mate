@@ -6,7 +6,7 @@
  * - 对玩家已上传至 /backgrounds/ 的自定义裁切底图直接原画直通，绝不二次压缩。
  */
 
-import { detectPlatform } from './env.js?v=0.8.8c';
+import { detectPlatform } from './env.js?v=0.8.9c';
 
 const IDB_NAME = 'st_mate_backdrop_cache_v2';
 const IDB_STORE = 'covers';

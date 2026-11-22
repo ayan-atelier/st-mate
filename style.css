@@ -3209,6 +3209,434 @@ body.stm-shell-active.stm-pure-reading .stm-pure-aa-pill:not([hidden]):active {
   border-color: var(--stm-accent);
 }
 
+/* ============================================================================
+ * 对话侧边一体联动独立圆球快捷组 & 底栏/野生悬浮物无损收纳 (.stm-float-capsule)
+ * ============================================================================ */
+body.stm-shell-active.stm-float-capsule-on:not(.stm-home-cloak)
+  [data-stm-clutter-hidden="1"]:not([data-stm-clicking="1"]):not([data-stm-host-popup-live="1"]) {
+  display: none !important;
+}
+
+body.stm-shell-active [data-stm-clicking="1"] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.stm-float-capsule {
+  position: fixed;
+  top: 380px;
+  right: 8px;
+  transform: none;
+  z-index: 3032;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  font-family: var(--mainFontFamily, system-ui, sans-serif);
+}
+
+.stm-float-capsule[hidden] {
+  display: none !important;
+}
+
+body.stm-pure-reading .stm-float-capsule,
+body.stm-home-cloak .stm-float-capsule {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 隐形联动底座：平时极低存在感静默融入侧边，指尖触碰或展开时柔和唤醒 */
+.stm-float-track {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 2px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  opacity: 0.42;
+  transition: opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1), transform 0.16s ease;
+}
+
+.stm-float-capsule:hover .stm-float-track,
+.stm-float-capsule.is-open .stm-float-track,
+.stm-float-capsule.has-quick-jump .stm-float-track,
+.stm-float-capsule.is-dragging .stm-float-track,
+.stm-float-capsule.is-drop-ready .stm-float-track,
+.stm-float-capsule.is-drop-hover .stm-float-track {
+  opacity: 0.94;
+}
+
+.stm-float-capsule.is-dragging .stm-float-track {
+  transform: scale(1.04);
+}
+
+/* Apple 冰透水滴微球：28px 纤巧尺寸 + 0.5px 顶缘玻璃内高光 + 极淡无边框感描边 */
+.stm-float-slot {
+  position: relative;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--stm-ink, #ffffff) 12%, transparent) !important;
+  border-radius: 50% !important;
+  background: color-mix(in srgb, var(--stm-surface, #18181b) 56%, transparent) !important;
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.16),
+    0 2px 8px rgba(0, 0, 0, 0.18);
+  color: color-mix(in srgb, var(--stm-ink, #f2efe9) 82%, transparent) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+body.stm-turbo-mobile .stm-float-slot {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in srgb, var(--stm-surface, #18181b) 62%, transparent) !important;
+}
+
+@media (pointer: coarse) {
+  .stm-float-slot {
+    width: 29px;
+    height: 29px;
+  }
+}
+
+.stm-float-slot[hidden] {
+  display: none !important;
+}
+
+.stm-float-slot svg {
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+}
+
+.stm-float-slot:hover,
+.stm-float-slot:active,
+.stm-float-slot.is-active {
+  border-color: color-mix(in srgb, var(--stm-ink, #ffffff) 26%, transparent) !important;
+  background: color-mix(in srgb, var(--stm-surface, #18181b) 82%, transparent) !important;
+  color: var(--stm-ink) !important;
+}
+
+/* 玩家拖动野生悬浮球靠近时的磁吸柔光环提示 */
+.stm-float-capsule.is-drop-ready .stm-float-bag {
+  border-color: var(--stm-accent) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--stm-accent) 28%, transparent);
+}
+
+.stm-float-capsule.is-drop-hover .stm-float-bag {
+  transform: scale(1.18);
+  border-color: var(--stm-accent) !important;
+  background: color-mix(in srgb, var(--stm-accent) 34%, var(--stm-surface, #18181b)) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--stm-accent) 34%, transparent), 0 6px 18px rgba(0, 0, 0, 0.32);
+}
+
+/* 连戳两下浮出的「到顶 / 到底」防误飞快捷小胶囊 */
+.stm-float-quick-jump {
+  position: absolute;
+  appearance: none;
+  height: 31px;
+  padding: 0 11px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--stm-accent) !important;
+  background: var(--stm-surface) !important;
+  color: var(--stm-ink) !important;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.34);
+}
+
+.stm-float-quick-jump[hidden] {
+  display: none !important;
+}
+
+.stm-float-quick-jump.is-top {
+  top: 2px;
+}
+
+.stm-float-quick-jump.is-bottom {
+  bottom: 2px;
+}
+
+.stm-float-capsule.is-right .stm-float-quick-jump {
+  right: calc(100% + 7px);
+}
+
+.stm-float-capsule.is-left .stm-float-quick-jump {
+  left: calc(100% + 7px);
+}
+
+.stm-float-quick-svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.stm-float-quick-jump:hover,
+.stm-float-quick-jump:active {
+  background: color-mix(in srgb, var(--stm-accent) 24%, var(--stm-surface)) !important;
+}
+
+/* 点击中间收纳球展开的微透收纳浮层 (.stm-float-popover) */
+.stm-float-popover {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 192px;
+  max-width: min(276px, calc(100vw - 58px));
+  max-height: min(340px, 56vh);
+  padding: 10px 11px;
+  border-radius: 13px;
+  border: 1px solid var(--stm-border);
+  background: var(--stm-surface);
+  color: var(--stm-ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  touch-action: pan-y;
+}
+
+.stm-float-popover[hidden] {
+  display: none !important;
+}
+
+.stm-float-capsule.is-right .stm-float-popover {
+  right: calc(100% + 8px);
+}
+
+.stm-float-capsule.is-left .stm-float-popover {
+  left: calc(100% + 8px);
+}
+
+.stm-float-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stm-float-pop-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--stm-ink);
+  white-space: nowrap;
+}
+
+.stm-float-raw-toggle {
+  appearance: none;
+  padding: 2px 7px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stm-float-raw-toggle:hover,
+.stm-float-raw-toggle.is-active {
+  border-color: var(--stm-accent) !important;
+  color: var(--stm-ink) !important;
+  background: color-mix(in srgb, var(--stm-accent) 18%, transparent) !important;
+}
+
+.stm-float-pop-empty {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--stm-muted);
+  padding: 4px 2px;
+}
+
+.stm-float-pop-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: 196px;
+  scrollbar-width: thin;
+}
+
+.stm-float-pop-item {
+  appearance: none;
+  min-height: 30px;
+  max-width: 100%;
+  padding: 4px 10px;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid var(--stm-border) !important;
+  background: rgba(128, 128, 128, 0.09) !important;
+  color: var(--stm-ink) !important;
+  font-size: 12px;
+  line-height: 1.25;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.stm-float-pop-item:hover,
+.stm-float-pop-item:active {
+  border-color: var(--stm-accent) !important;
+  background: color-mix(in srgb, var(--stm-accent) 20%, transparent) !important;
+}
+
+/* 被拖入收纳的野生悬浮球胶囊：左点打开，右侧 × 一键放出回页面 */
+.stm-float-tucked-chip {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 45%, var(--stm-border));
+  background: rgba(128, 128, 128, 0.1);
+  overflow: hidden;
+}
+
+.stm-float-pop-item.is-wild-main {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding-right: 7px;
+  min-width: 0;
+}
+
+.stm-float-item-release {
+  appearance: none;
+  width: 24px;
+  padding: 0;
+  margin: 0;
+  border: 0 !important;
+  border-left: 1px solid rgba(128, 128, 128, 0.2) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.stm-float-item-release svg {
+  width: 11px;
+  height: 11px;
+}
+
+.stm-float-item-release:hover {
+  color: var(--stm-ink) !important;
+  background: rgba(128, 128, 128, 0.16) !important;
+}
+
+.stm-float-wild-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.2);
+}
+
+.stm-float-wild-hint {
+  font-size: 10.5px;
+  color: var(--stm-muted);
+}
+
+.stm-float-absorb-btn {
+  appearance: none;
+  min-height: 27px;
+  max-width: 100%;
+  padding: 3px 9px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px dashed var(--stm-border) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.stm-float-absorb-btn:hover {
+  border-style: solid !important;
+  border-color: var(--stm-accent) !important;
+  color: var(--stm-ink) !important;
+}
+
+.stm-float-item-glyph {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.stm-float-item-svg {
+  width: 13.5px;
+  height: 13.5px;
+  flex-shrink: 0;
+}
+
+.stm-float-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stm-float-pop-foot {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+.stm-float-foot-btn {
+  appearance: none;
+  min-height: 28px;
+  padding: 3px 8px;
+  margin: 0;
+  border-radius: 7px;
+  border: 1px solid var(--stm-border) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  font-size: 11.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stm-float-foot-btn:hover,
+.stm-float-foot-btn:active {
+  border-color: var(--stm-accent) !important;
+  color: var(--stm-ink) !important;
+  background: color-mix(in srgb, var(--stm-accent) 16%, transparent) !important;
+}
+
 /* 图库导入自由拖拽裁切弹窗 (.stm-crop-dialog) */
 .stm-crop-dialog {
   width: min(380px, calc(100vw - 20px));

@@ -12,7 +12,7 @@ import {
   normalizeApiStation,
   resolveDefaultSecretKey,
   sanitizeEndpointUrl,
-} from '../core/schema.js?v=0.8.8c';
+} from '../core/schema.js?v=0.8.9c';
 
 export const PRIMARY_SOURCE_IDS = Object.freeze([
   'custom',

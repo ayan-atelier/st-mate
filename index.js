@@ -10,44 +10,45 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.8.8c';
+} from './src/core/env.js?v=0.8.9c';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.8.8c';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.8c';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.8c';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.8c';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.8c';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.8c';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.8c';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.8.8c';
-import { createTopbar } from './src/shell/topbar.js?v=0.8.8c';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.8c';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.8c';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.8c';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.8c';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.8c';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.8c';
+} from './src/core/file-saver.js?v=0.8.9c';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.9c';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.9c';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.9c';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.9c';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.9c';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.9c';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.8.9c';
+import { createFloatCapsule } from './src/shell/float-capsule.js?v=0.8.9c';
+import { createTopbar } from './src/shell/topbar.js?v=0.8.9c';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.9c';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.9c';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.9c';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.9c';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.9c';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.9c';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.8.8c';
-import { createApiDock } from './src/modules/api-dock.js?v=0.8.8c';
+} from './src/modules/assistant-core.js?v=0.8.9c';
+import { createApiDock } from './src/modules/api-dock.js?v=0.8.9c';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.8.8c';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.8c';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.8c';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.8c';
-import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.8.8c';
-import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.8c';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.8c';
+} from './src/modules/preset-backend.js?v=0.8.9c';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.9c';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.9c';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.9c';
+import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.8.9c';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.9c';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.9c';
 
-const STM_VERSION = '0.8.8';
-const STM_ASSET_REV = '0.8.8c';
+const STM_VERSION = '0.8.9';
+const STM_ASSET_REV = '0.8.9c';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -90,6 +91,7 @@ function createStMateRuntime() {
   let drawerBridge = null;
   let extensionsTidy = null;
   let chatVision = null;
+  let floatCapsule = null;
   let topbar = null;
   let atmosphere = null;
   let perfEngine = null;
@@ -159,6 +161,7 @@ function createStMateRuntime() {
       apiDock?.close();
       presetDock?.close();
       charWorldDock?.close();
+      floatCapsule?.close();
       globalThis.document?.getElementById?.('stm-portrait-lightbox')?.remove?.();
       tapImmersive?.exit();
       closeAllNativeDrawers();
@@ -189,6 +192,7 @@ function createStMateRuntime() {
       extensionsTidy?.sync();
     }
     chatVision?.refresh();
+    floatCapsule?.refresh();
     atmosphere?.refresh();
     readerDock?.refresh();
     apiDock?.refresh();
@@ -524,6 +528,7 @@ function createStMateRuntime() {
         Boolean(presetDock?.isOpen()) ||
         Boolean(apiDock?.isOpen()) ||
         Boolean(readerDock?.isOpen()) ||
+        Boolean(floatCapsule?.isOpen()) ||
         getOpenNativeDrawerIds().length > 0 ||
         Date.now() - lastDockDismissedAt < 320,
     });
@@ -543,6 +548,7 @@ function createStMateRuntime() {
           apiDock?.close();
           presetDock?.close();
           charWorldDock?.close();
+          floatCapsule?.close();
         } else {
           lastDockDismissedAt = Date.now();
         }
@@ -558,6 +564,7 @@ function createStMateRuntime() {
         readerDock?.close();
         presetDock?.close();
         charWorldDock?.close();
+        floatCapsule?.close();
       },
       onOpenStateChange: opened => {
         if (!opened) {
@@ -575,6 +582,7 @@ function createStMateRuntime() {
         readerDock?.close();
         apiDock?.close();
         charWorldDock?.close();
+        floatCapsule?.close();
       },
       onOpenStateChange: opened => {
         if (!opened) {
@@ -601,6 +609,7 @@ function createStMateRuntime() {
         readerDock?.close();
         apiDock?.close();
         presetDock?.close();
+        floatCapsule?.close();
       },
       onOpenStateChange: opened => {
         if (!opened) {
@@ -706,6 +715,19 @@ function createStMateRuntime() {
       notify: toastMessage,
     });
 
+    floatCapsule = createFloatCapsule({
+      root: globalThis,
+      getContext,
+      store,
+      isHomeCloaked: () => homeCloak.isHomeCloaked(),
+      onOpenStateChange: opened => {
+        if (!opened) {
+          lastDockDismissedAt = Date.now();
+        }
+        ttOverlayBackGuard?.sync();
+      },
+    });
+
     topbar = createTopbar({
       getContext,
       store,
@@ -743,6 +765,7 @@ function createStMateRuntime() {
         apiDock?.close();
         presetDock?.close();
         charWorldDock?.close();
+        floatCapsule?.close();
       },
       onNativeDrawerStateChange: opened => {
         if (!opened) {
@@ -769,6 +792,7 @@ function createStMateRuntime() {
           Boolean(apiDock?.isOpen?.()) ||
           Boolean(presetDock?.isOpen?.()) ||
           Boolean(charWorldDock?.isOpen?.()) ||
+          Boolean(floatCapsule?.isOpen?.()) ||
           Boolean(store.get().shellEnabled && getOpenNativeDrawerIds().length > 0),
         closeTopmostOverlay: () => {
           if (isExportFallbackDialogOpen(globalThis.document)) {
@@ -797,6 +821,10 @@ function createStMateRuntime() {
           }
           if (charWorldDock?.isOpen?.()) {
             charWorldDock.close();
+            return true;
+          }
+          if (floatCapsule?.isOpen?.()) {
+            floatCapsule.close();
             return true;
           }
           if (store.get().shellEnabled && getOpenNativeDrawerIds().length > 0) {
@@ -905,6 +933,7 @@ function createStMateRuntime() {
     atmosphere?.destroy();
     perfEngine?.destroy();
     topbar?.destroy();
+    floatCapsule?.destroy();
     chatVision?.destroy();
     extensionsTidy?.destroy();
     drawerBridge?.destroy();
@@ -920,6 +949,7 @@ function createStMateRuntime() {
     atmosphere = null;
     perfEngine = null;
     topbar = null;
+    floatCapsule = null;
     chatVision = null;
     extensionsTidy = null;
     drawerBridge = null;

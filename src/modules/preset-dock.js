@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.8.8c';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.8c';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.9c';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.9c';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.8.8c';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.8.8c';
+} from '../shell/host-actions.js?v=0.8.9c';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.8.9c';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -52,7 +52,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.8.8c';
+} from './preset-backend.js?v=0.8.9c';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 

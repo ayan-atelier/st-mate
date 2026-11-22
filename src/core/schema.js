@@ -8,6 +8,7 @@ export const STM_NAMESPACE = 'st_mate';
 export const STM_SCHEMA_VERSION = 6;
 
 export const TOPBAR_MODES = Object.freeze(['rp', 'native']);
+export const FLOAT_CAPSULE_SIDES = Object.freeze(['left', 'right']);
 export const NATIVE_TOPBAR_DRAWER_ITEMS = Object.freeze([
   { id: 'ai-config-button', label: '预设与参数', icon: 'sliders' },
   { id: 'sys-settings-button', label: 'API 连接', icon: 'plug' },
@@ -112,6 +113,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   topbarMode: 'rp',
   nativeTopbarHiddenIcons: Object.freeze([]), // 默认全部显示（含原生背景图图标），玩家可在原版顶栏下方按需勾选隐藏
   chatImageButton: true,
+  floatCapsuleEnabled: false, // 默认关闭：对话侧边独立圆球快捷组（上翻5楼 / 动态收纳球 / 下翻5楼，连戳两下浮出到顶到底）
+  floatCapsuleSide: 'right',
+  floatCapsuleTopPct: 62,
+  floatTuckedSelectors: Object.freeze({}), // 按角色/全局记忆被玩家拖入收纳球的野生悬浮挂件标识
   tapPureReading: false, // 新用户默认关闭防误触，已存储的老用户状态原样保留
   tapPureReadingScope: 'all',
   homeEntryMode: 'bookshelf-bar',
@@ -487,12 +492,34 @@ export function normalizeSettings(raw = {}) {
       ]
     : [];
 
+  const floatTuckedSelectors = {};
+  if (
+    src.floatTuckedSelectors &&
+    typeof src.floatTuckedSelectors === 'object' &&
+    !Array.isArray(src.floatTuckedSelectors)
+  ) {
+    let scopeCount = 0;
+    for (const [rawScope, rawKeys] of Object.entries(src.floatTuckedSelectors)) {
+      if (scopeCount >= 200) break;
+      const scope = typeof rawScope === 'string' ? rawScope.trim().slice(0, 260) : '';
+      if (!scope || (scope !== '__global__' && !/^(?:char|group):.+/.test(scope))) continue;
+      const cleanedKeys = cleanStringList(rawKeys, 24, 180);
+      if (cleanedKeys.length === 0) continue;
+      floatTuckedSelectors[scope] = cleanedKeys;
+      scopeCount += 1;
+    }
+  }
+
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
     topbarMode: pickEnum(src.topbarMode, TOPBAR_MODES, DEFAULT_SETTINGS.topbarMode),
     nativeTopbarHiddenIcons,
     chatImageButton: pickBool(src.chatImageButton, DEFAULT_SETTINGS.chatImageButton),
+    floatCapsuleEnabled: pickBool(src.floatCapsuleEnabled, DEFAULT_SETTINGS.floatCapsuleEnabled),
+    floatCapsuleSide: pickEnum(src.floatCapsuleSide, FLOAT_CAPSULE_SIDES, DEFAULT_SETTINGS.floatCapsuleSide),
+    floatCapsuleTopPct: clampInt(src.floatCapsuleTopPct, 0, 100, DEFAULT_SETTINGS.floatCapsuleTopPct),
+    floatTuckedSelectors,
     tapPureReading: pickBool(src.tapPureReading, DEFAULT_SETTINGS.tapPureReading),
     tapPureReadingScope: 'all',
     homeEntryMode: pickEnum(src.homeEntryMode, HOME_ENTRY_MODES, DEFAULT_SETTINGS.homeEntryMode),
