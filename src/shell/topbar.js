@@ -6,9 +6,14 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.0';
-import { svgMarkup } from '../core/icons.js?v=0.9.0';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
+import {
+  isQuietRoomActive,
+  isQuietRoomSidebarOpen,
+  toggleQuietRoomSidebar,
+} from '../core/compat-bridges.js?v=0.9.1';
+import { svgMarkup } from '../core/icons.js?v=0.9.1';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.1';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -17,7 +22,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.9.0';
+} from './host-actions.js?v=0.9.1';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -61,12 +66,15 @@ export function createTopbar({
   let nameSpan = null;
   let presetBtn = null;
   let presetTextSpan = null;
+  let btnQuietSide = null;
   let btnApi = null;
   let btnPersona = null;
   let btnReader = null;
   let btnSettings = null;
   let drawerObserver = null;
   let presetSelectObserver = null;
+  let bodyCompatObserver = null;
+  let topBarResizeObserver = null;
   let sheldResizeObserver = null;
   let sheldAttrObserver = null;
   let boundsRaf = 0;
@@ -670,6 +678,14 @@ export function createTopbar({
     const right = doc.createElement('div');
     right.className = 'stm-topbar-right';
 
+    btnQuietSide = makeIconBtn('heart', '展开 / 收起博客小站侧边栏', () => {
+      closeAllNativeDrawers();
+      toggleQuietRoomSidebar(globalThis.document);
+      syncQuietRoomTopbarBtn(globalThis.document);
+    });
+    btnQuietSide.classList.add('stm-topbar-qr-side');
+    btnQuietSide.hidden = true;
+
     btnApi = makeIconBtn('plug', 'API连接与模型配置', handleApiClick);
     btnApi.classList.add('stm-topbar-api-btn');
     btnPersona = makeIconBtn('user', '人设馆与用户设定', handlePersonaClick);
@@ -690,7 +706,7 @@ export function createTopbar({
     });
     btnSettings.classList.add('stm-topbar-settings-btn');
 
-    right.append(btnApi, btnPersona, btnReader, btnSettings);
+    right.append(btnQuietSide, btnApi, btnPersona, btnReader, btnSettings);
     inner.append(left, right);
     rootEl.append(inner);
 
@@ -704,11 +720,34 @@ export function createTopbar({
     observeNativeDrawersAndPresets();
   }
 
+  function syncQuietRoomTopbarBtn(doc = globalThis.document) {
+    if (!btnQuietSide || !doc) return;
+    const current = store.get();
+    const show = Boolean(
+      current?.shellEnabled &&
+        current?.topbarMode !== 'native' &&
+        isQuietRoomActive(doc),
+    );
+    btnQuietSide.hidden = !show;
+    if (show) {
+      const sideOpen = isQuietRoomSidebarOpen(doc);
+      btnQuietSide.classList.toggle('is-active', sideOpen);
+      btnQuietSide.setAttribute('aria-pressed', String(sideOpen));
+    } else {
+      btnQuietSide.classList.remove('is-active');
+      btnQuietSide.removeAttribute('aria-pressed');
+    }
+  }
+
   function observeNativeDrawersAndPresets() {
     drawerObserver?.disconnect();
     presetSelectObserver?.disconnect();
+    bodyCompatObserver?.disconnect();
+    topBarResizeObserver?.disconnect();
     sheldResizeObserver?.disconnect();
     sheldAttrObserver?.disconnect();
+    bodyCompatObserver = null;
+    topBarResizeObserver = null;
     desktopBoundsActive = false;
     globalThis.removeEventListener?.('resize', scheduleSheldBounds);
     if (boundHolder) {
@@ -719,6 +758,28 @@ export function createTopbar({
 
     const doc = globalThis.document;
     globalThis.addEventListener?.('resize', scheduleSheldBounds, { passive: true });
+
+    const topBarEl = doc?.getElementById?.('top-bar');
+    if (topBarEl && typeof globalThis.ResizeObserver === 'function') {
+      topBarResizeObserver = new globalThis.ResizeObserver(() => {
+        const cur = store.get();
+        if (cur?.shellEnabled && cur?.topbarMode === 'native') {
+          syncNativeBarOffsetNow(doc);
+        }
+      });
+      topBarResizeObserver.observe(topBarEl);
+    }
+
+    if (doc?.body && typeof globalThis.MutationObserver === 'function') {
+      bodyCompatObserver = new globalThis.MutationObserver(() => {
+        syncQuietRoomTopbarBtn(doc);
+        const cur = store.get();
+        if (cur?.shellEnabled && cur?.topbarMode === 'native') {
+          syncNativeBarOffsetNow(doc);
+        }
+      });
+      bodyCompatObserver.observe(doc.body, { attributes: true, attributeFilter: ['class'] });
+    }
 
     const holder = doc?.getElementById('top-settings-holder');
     if (!holder) return;
@@ -873,6 +934,7 @@ export function createTopbar({
       syncPresetBadge(ctx);
     }
 
+    syncQuietRoomTopbarBtn(doc);
     applySheldBoundsNow();
     syncActiveDrawerHighlights();
   }
@@ -890,10 +952,14 @@ export function createTopbar({
     lastHadOpenNativeDrawer = false;
     drawerObserver?.disconnect();
     presetSelectObserver?.disconnect();
+    bodyCompatObserver?.disconnect();
+    topBarResizeObserver?.disconnect();
     sheldResizeObserver?.disconnect();
     sheldAttrObserver?.disconnect();
     drawerObserver = null;
     presetSelectObserver = null;
+    bodyCompatObserver = null;
+    topBarResizeObserver = null;
     sheldResizeObserver = null;
     sheldAttrObserver = null;
     globalThis.removeEventListener?.('resize', scheduleSheldBounds);

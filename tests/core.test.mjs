@@ -17,6 +17,13 @@ import {
   saveExportBlob,
 } from '../src/core/file-saver.js';
 import { clarityToBlurPx, createLruMap } from '../src/core/backdrop-cache.js';
+import {
+  isQrAssistantActive,
+  isQuickBarActive,
+  isQuietRoomActive,
+  isQuietRoomSidebarOpen,
+  toggleQuietRoomSidebar,
+} from '../src/core/compat-bridges.js';
 import { ICON_NAMES, svgMarkup } from '../src/core/icons.js';
 import {
   CHAT_COMPLETION_SOURCE_IDS,
@@ -161,6 +168,7 @@ import {
   deleteHostWorldBooks,
   deleteWorldInfoBookEntry,
   enablePresetWorldInfoSlots,
+  ensureCharacterUnshallowed,
   exportActiveCharacterCard,
   filterWorldInfoEntries,
   formatWorldInfoKeywords,
@@ -6773,7 +6781,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
 
     const diskExtensions = new Map([
       ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
-      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.2', isUpToDate: false }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.3', isUpToDate: false }],
       ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.7', isUpToDate: true }],
       ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
       ['third-party/yantai-memory', { type: 'local', version: '0.4.1', isUpToDate: true }],
@@ -9417,6 +9425,309 @@ test('turbo engine 2.0: 88 楼长对话动态保留最近 20 楼 -> 一键回顶
 
     dlg.destroy();
     perf.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('v0.9.1 ecosystem compat, pure-reading bottom fill & hoarder shallow/chunked directory', async () => {
+  const [{ createTopbar }, { createHomeCloak }, { discoverInputClutterItems, inspectWildFloatingCandidate }, { createCharWorldDock }] =
+    await Promise.all([
+      import('../src/shell/topbar.js'),
+      import('../src/shell/home-cloak.js'),
+      import('../src/shell/float-capsule.js'),
+      import('../src/modules/char-world-dock.js'),
+    ]);
+
+  // 1. CSS 架构自检：全屏纯享阅读脱离 Flex 占位防黑边 + 博客小站 #hp-addr 零残影细线 + 头图标尺
+  const suiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const rawCss = fs.readFileSync(path.join(suiteRoot, 'style.css'), 'utf8');
+  const cssNoComments = rawCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(
+    cssNoComments.includes('html body.stm-shell-active.stm-pure-reading:not(.stm-home-cloak) #form_sheld#form_sheld') &&
+      cssNoComments.includes('html body.stm-shell-active.stm-pure-reading:not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home)'),
+    '全屏纯享阅读必须成套双 ID 接管 #chat#chat 与 #form_sheld#form_sheld，彻底消除 movingUI/主题下的底部黑框裁切',
+  );
+  assert.ok(
+    cssNoComments.includes('html body.stm-shell-active:not(.stm-native-topbar) #top-bar > :not(#top-settings-holder)'),
+    '伴侣顶栏模式必须隐藏 #top-bar 内附属地址栏（如 #hp-addr），杜绝压缩后遗留 1px 横线',
+  );
+  assert.ok(
+    cssNoComments.includes('body.stm-shell-active.stm-pure-reading .ih-floating-ball') &&
+      cssNoComments.includes('body.stm-shell-active.stm-pure-reading .ih-floating-panel'),
+    '全屏纯享阅读必须同步淡出 ST-QuickBar 悬浮条',
+  );
+  assert.ok(
+    cssNoComments.includes('body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .hp-image-banner'),
+    '书架首页必须兼容博客小站 .hp-image-banner 头图与轮播排序',
+  );
+  assert.ok(ICON_NAMES.includes('heart'), '图标库必须包含 1.5px 线性 heart 图标');
+
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    // 2. ST-QuickBar & QR助手 (uhhhh15/QR) 礼让与防误收验证
+    const formSheld = doc.createElement('div');
+    formSheld.id = 'form_sheld';
+    const sendForm = doc.createElement('form');
+    sendForm.id = 'send_form';
+
+    const ihToolbar = doc.createElement('div');
+    ihToolbar.id = 'input_helper_toolbar';
+    const ihUndoBtn = doc.createElement('button');
+    ihUndoBtn.className = 'input-helper-btn';
+    ihUndoBtn.textContent = '撤回';
+    ihToolbar.append(ihUndoBtn);
+
+    const qrBar = doc.createElement('div');
+    qrBar.id = 'qr--bar';
+    const hiddenByQra = doc.createElement('div');
+    hiddenByQra.className = 'qr--buttons qrq-hidden-by-plugin';
+    const qrBtnInside = doc.createElement('div');
+    qrBtnInside.className = 'qr--button';
+    qrBtnInside.textContent = '状态栏';
+    hiddenByQra.append(qrBtnInside);
+    qrBar.append(hiddenByQra);
+
+    const nonQr = doc.createElement('div');
+    nonQr.id = 'nonQRFormItems';
+    const leftSend = doc.createElement('div');
+    leftSend.id = 'leftSendForm';
+    const rocketBtn = doc.createElement('div');
+    rocketBtn.id = 'quick-reply-rocket-button';
+    rocketBtn.className = 'interactable';
+    rocketBtn.title = '快速回复菜单';
+    leftSend.append(rocketBtn);
+    nonQr.append(leftSend);
+
+    sendForm.append(ihToolbar, qrBar, nonQr);
+    formSheld.append(sendForm);
+    doc.body.append(formSheld);
+    doc.body.classList.add('qra-enabled');
+
+    assert.equal(isQrAssistantActive(doc), true);
+    assert.equal(isQuickBarActive(doc), true);
+
+    const clutter = discoverInputClutterItems(doc);
+    assert.equal(
+      clutter.items.length,
+      0,
+      '伴侣悬浮球绝不误收 ST-QuickBar 输入辅助条、不抢收 QR助手小火箭及已被 qrq-hidden-by-plugin 接管的容器',
+    );
+
+    const ihPanel = doc.createElement('div');
+    ihPanel.className = 'ih-floating-panel ih-fp-open';
+    ihPanel.style.position = 'fixed';
+    ihPanel.offsetWidth = 36;
+    ihPanel.offsetHeight = 120;
+    assert.equal(inspectWildFloatingCandidate(ihPanel, globalThis), null, '不误把 ST-QuickBar 展开悬浮面板当成野生小挂件');
+
+    // 3. 博客小站 (QuietRoom.org) 无感兼容验证（未安装时完全隐形，激活后伴侣顶栏与书架首页自动浮现 ♡ 侧栏开关）
+    const topBar = doc.createElement('div');
+    topBar.id = 'top-bar';
+    const topHolder = doc.createElement('div');
+    topHolder.id = 'top-settings-holder';
+    topBar.append(topHolder);
+
+    const sheld = doc.createElement('div');
+    sheld.id = 'sheld';
+    const chatEl = doc.createElement('div');
+    chatEl.id = 'chat';
+    sheld.append(chatEl);
+    doc.body.prepend(topBar, sheld);
+
+    let activeCharId = 0;
+    const extSettings = {};
+    const hostCtx = {
+      get characterId() {
+        return activeCharId;
+      },
+      characters: [{ name: '尤瑞星', avatar: 'yuruixing.png' }],
+      extensionSettings: extSettings,
+      saveSettingsDebounced: () => {},
+    };
+    const store = createSettingsStore({ getContext: () => hostCtx });
+    const bridge = createModuleBridge({ getContext: () => hostCtx, store });
+
+    const topbar = createTopbar({
+      getContext: () => hostCtx,
+      store,
+      moduleBridge: bridge,
+    });
+    topbar.refresh();
+
+    const qrTopBtn = doc.querySelector('.stm-topbar-qr-side');
+    assert.ok(qrTopBtn, '伴侣顶栏已预置博客小站桥接按钮节点');
+    assert.equal(qrTopBtn.hidden, true, '未启用博客小站时按钮 100% 隐藏零痕迹');
+
+    // 模拟博客小站挂载 (#hp-addr + #hp-side + body.hp-js)
+    const hpAddr = doc.createElement('div');
+    hpAddr.id = 'hp-addr';
+    const hpSideBtn = doc.createElement('button');
+    hpSideBtn.className = 'hp-side-btn';
+    let nativeSideClicks = 0;
+    hpSideBtn.addEventListener('click', () => {
+      nativeSideClicks += 1;
+      doc.body.classList.toggle('hp-side-open');
+    });
+    hpAddr.append(hpSideBtn);
+    topBar.append(hpAddr);
+
+    const hpSide = doc.createElement('aside');
+    hpSide.id = 'hp-side';
+    sheld.append(hpSide);
+    doc.body.classList.add('hp-js');
+
+    assert.equal(isQuietRoomActive(doc), true);
+    topbar.refresh();
+    assert.equal(qrTopBtn.hidden, false, '启用博客小站后伴侣顶栏自动亮出 ♡ 侧栏按钮');
+
+    qrTopBtn.click();
+    assert.equal(nativeSideClicks, 1, '点击伴侣顶栏 ♡ 优先复用博客小站原生 .hp-side-btn 逻辑');
+    assert.equal(isQuietRoomSidebarOpen(doc), true);
+    assert.equal(qrTopBtn.classList.contains('is-active'), true);
+
+    // 切回书架首页：验证书架右上角自动补齐 ♡ 侧栏入口
+    activeCharId = undefined;
+    const shelfRoot = doc.createElement('div');
+    shelfRoot.className = 'jd-bookshelf';
+    const shelfToolbar = doc.createElement('div');
+    shelfToolbar.className = 'jd-shelf-toolbar';
+    const nativeHomeBtn = doc.createElement('button');
+    nativeHomeBtn.className = 'jd-tab jd-native-home';
+    nativeHomeBtn.textContent = '原版首页';
+    shelfToolbar.append(nativeHomeBtn);
+    shelfRoot.append(shelfToolbar);
+    chatEl.append(shelfRoot);
+    doc.body.classList.add('jd-bookshelf-home-active');
+
+    const homeCloak = createHomeCloak({
+      getContext: () => hostCtx,
+      store,
+    });
+    homeCloak.refresh();
+    const shelfQrBtn = shelfToolbar.querySelector('.stm-shelf-qr-btn');
+    assert.ok(shelfQrBtn, '伴侣模式书架首页右上角自动提供博客小站 ♡ 侧栏按钮');
+    shelfQrBtn.click();
+    assert.equal(isQuietRoomSidebarOpen(doc), false, '在书架首页点击 ♡ 亦可直接收放博客左栏');
+
+    topbar.destroy();
+    homeCloak.destroy();
+
+    // 4. 大卡库 shallow 懒加载角色静默补全 + 防空字段覆盖护栏 + 60 张分批滚动名录
+    const shallowStub = {
+      shallow: true,
+      name: '沈清秋',
+      avatar: 'shen.png',
+      data: {
+        name: '沈清秋',
+        character_version: '1.0',
+        creator_notes: '清静峰峰主',
+        tags: ['古风'],
+        extensions: { world: '' },
+      },
+    };
+    assert.throws(
+      () => buildCharacterMergePayload(shallowStub, { world: '苍穹山派设定集' }),
+      /shallow/,
+      '未补全的 shallow 摘要卡严禁直接构造全量合并包，防止覆盖清空原始人设与开场白',
+    );
+
+    let getCharCalls = 0;
+    let savedPayload = null;
+    const manyChars = [shallowStub];
+    for (let i = 1; i < 135; i += 1) {
+      manyChars.push({
+        shallow: true,
+        name: `测试角色_${i}`,
+        avatar: `char_${i}.png`,
+        date_last_chat: 1700000000000 - i * 1000,
+        data: { name: `测试角色_${i}`, tags: ['大卡库'] },
+      });
+    }
+    const shallowCtx = {
+      characterId: 0,
+      characters: manyChars,
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+      getThumbnailUrl: (_type, file) => `/thumbnail?type=avatar&file=${encodeURIComponent(file)}`,
+      extensionSettings: extSettings,
+      saveSettingsDebounced: () => {},
+    };
+
+    const mockFetch = async (url, init) => {
+      const u = String(url);
+      if (u.includes('api/characters/get')) {
+        getCharCalls += 1;
+        return {
+          ok: true,
+          async json() {
+            return {
+              name: '沈清秋',
+              avatar: 'shen.png',
+              description: '修雅端方，手执折扇的清静峰峰主。',
+              personality: '外冷内热',
+              scenario: '竹舍晨雾',
+              first_mes: '师尊今日在竹舍煮茶。',
+              mes_example: '',
+              data: {
+                name: '沈清秋',
+                description: '修雅端方，手执折扇的清静峰峰主。',
+                personality: '外冷内热',
+                scenario: '竹舍晨雾',
+                first_mes: '师尊今日在竹舍煮茶。',
+                mes_example: '',
+                creator_notes: '清静峰峰主',
+                alternate_greetings: ['备用开场白二'],
+                extensions: { world: '' },
+              },
+            };
+          },
+        };
+      }
+      if (u.includes('api/characters/merge-attributes')) {
+        savedPayload = JSON.parse(init.body);
+        return { ok: true, async json() { return { ok: true }; } };
+      }
+      throw new Error(`Unexpected URL: ${u}`);
+    };
+
+    await saveCharacterProfilePatch(
+      { world: '苍穹山派设定集' },
+      { getContext: () => shallowCtx, fetchImpl: mockFetch, doc },
+    );
+    assert.equal(getCharCalls, 1, '保存 shallow 角色前自动无感调用 /api/characters/get 补全完整设定');
+    assert.equal(shallowStub.shallow, undefined, '补全后移除 shallow 标记');
+    assert.equal(
+      savedPayload.description,
+      '修雅端方，手执折扇的清静峰峰主。',
+      '补全后再提交合并，100% 保留角色原有描述与开场白不丢失',
+    );
+    assert.deepEqual(savedPayload.data.alternate_greetings, ['备用开场白二']);
+    assert.equal(savedPayload.data.extensions.world, '苍穹山派设定集');
+
+    // 验证未进卡时角色名录 60 张分批渲染与点击/滚动续载
+    shallowCtx.characterId = undefined;
+    const cwDock = createCharWorldDock({
+      getContext: () => shallowCtx,
+      store,
+    });
+    cwDock.open('char');
+    const dirRowsInitial = doc.querySelectorAll('.stm-cw-dir-row');
+    assert.equal(dirRowsInitial.length, 60, '135 张角色卡首次打开仅轻量渲染前 60 项秒开不卡');
+    assert.ok(
+      dirRowsInitial[0].querySelector('img')?.src.includes('/thumbnail?type=avatar'),
+      '名录头像优先走酒馆轻量缩略图接口',
+    );
+
+    const moreBtn = doc.querySelector('.stm-cw-dir-more-hint');
+    assert.ok(moreBtn, '底部提供续载提示按钮');
+    moreBtn.click();
+    assert.equal(doc.querySelectorAll('.stm-cw-dir-row').length, 120, '点击或滑到底部平滑续载下一批 60 项');
+    doc.querySelector('.stm-cw-dir-more-hint')?.click();
+    assert.equal(doc.querySelectorAll('.stm-cw-dir-row').length, 135, '全部 135 张卡完整加载无遗漏');
+    cwDock.destroy();
   } finally {
     globalThis.document = prevDoc;
   }

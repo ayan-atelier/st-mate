@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.0';
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.1';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.9.0';
+} from './preset-backend.js?v=0.9.1';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -645,6 +645,9 @@ export function readActiveCharacterProfile(ctx, { doc = globalThis.document } = 
  */
 export function buildCharacterMergePayload(char, patch = {}) {
   const srcChar = char && typeof char === 'object' ? char : {};
+  if (srcChar.shallow === true) {
+    throw new Error('角色卡尚处于懒加载摘要态 (shallow)，已拦截保存以防覆盖设定');
+  }
   const srcData = srcChar.data && typeof srcChar.data === 'object' ? srcChar.data : {};
   const avatar = String(patch.avatar ?? srcChar.avatar ?? '').trim();
   if (!avatar) {
@@ -760,6 +763,85 @@ function syncNativeCharacterFormDom(payload, doc = globalThis.document) {
 }
 
 /**
+ * 无感补全 `lazyLoadCharacters: true` 下的懒加载摘要态角色卡（`character.shallow === true`）：
+ * - 优先调用宿主原生 `unshallowCharacter(String(chid))`；
+ * - 若处于离线/独立上下文且仍为 `shallow === true`，自动请求 `POST /api/characters/get` 原地合并完整字段并清除 `shallow` 标记。
+ */
+export async function ensureCharacterUnshallowed({
+  getContext,
+  chid = null,
+  avatar = '',
+  fetchImpl = globalThis.fetch,
+  doc = globalThis.document,
+} = {}) {
+  const ctx = getContext?.();
+  const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+  let targetChid = chid !== null && chid !== undefined ? chid : ctx?.characterId;
+  let char = targetChid !== undefined && targetChid !== null ? characters[targetChid] : null;
+
+  if ((!char || (avatar && char.avatar !== avatar)) && avatar) {
+    const foundIdx = characters.findIndex(item => item && item.avatar === avatar);
+    if (foundIdx >= 0) {
+      targetChid = foundIdx;
+      char = characters[foundIdx];
+    }
+  }
+
+  if (!char || typeof char !== 'object' || char.shallow !== true) {
+    return char || null;
+  }
+
+  // 1. 优先尝试宿主 unshallowCharacter 接口
+  if (typeof ctx?.unshallowCharacter === 'function' && targetChid !== undefined && targetChid !== null) {
+    try {
+      await ctx.unshallowCharacter(String(targetChid));
+    } catch {
+      // fall through to API fallback
+    }
+  } else {
+    const base = doc?.baseURI || globalThis.location?.href || '';
+    if (/^https?:\/\//i.test(base) && targetChid !== undefined && targetChid !== null) {
+      try {
+        const scriptMod = await import(new URL('script.js', base).href);
+        if (typeof scriptMod?.unshallowCharacter === 'function') {
+          await scriptMod.unshallowCharacter(String(targetChid));
+        }
+      } catch {
+        // fall through to API fallback
+      }
+    }
+  }
+
+  char = targetChid !== undefined && targetChid !== null ? characters[targetChid] : char;
+  if (!char || char.shallow !== true) {
+    return char || null;
+  }
+
+  // 2. 兜底直连 /api/characters/get 拉取完整卡片数据
+  const targetAvatar = String(char.avatar || avatar || '').trim();
+  if (targetAvatar && typeof fetchImpl === 'function') {
+    const headers =
+      typeof ctx?.getRequestHeaders === 'function'
+        ? ctx.getRequestHeaders()
+        : { 'Content-Type': 'application/json' };
+    const res = await fetchImpl(resolveEndpointHref('api/characters/get', doc), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ avatar_url: targetAvatar }),
+    });
+    if (res?.ok) {
+      const fullCard = await res.json();
+      if (fullCard && typeof fullCard === 'object') {
+        Object.assign(char, fullCard);
+        delete char.shallow;
+      }
+    }
+  }
+
+  return char;
+}
+
+/**
  * 将角色属性补丁提交至 `/api/characters/merge-attributes` 落盘，并同步更新宿主内存 `ctx.characters[chid]`、原生表单与 `CHARACTER_EDITED` 事件。
  */
 export async function saveCharacterProfilePatch(
@@ -772,6 +854,7 @@ export async function saveCharacterProfilePatch(
     doc = globalThis.document,
   } = {},
 ) {
+  await ensureCharacterUnshallowed({ getContext, chid, avatar, fetchImpl, doc });
   const ctx = getContext?.();
   const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
   let targetChid = chid !== null && chid !== undefined ? chid : ctx?.characterId;
@@ -1311,6 +1394,7 @@ export async function exportActiveCharacterCard(
     await flushPendingSave();
   }
 
+  await ensureCharacterUnshallowed({ getContext, fetchImpl, doc });
   const ctx = getContext?.();
   const profile = readActiveCharacterProfile(ctx, { doc });
   if (profile.kind !== 'char' || !profile.avatar) {
@@ -2679,6 +2763,7 @@ export async function reimportEmbeddedCharacterBook({
   fetchImpl = globalThis.fetch,
   doc = globalThis.document,
 } = {}) {
+  await ensureCharacterUnshallowed({ getContext, fetchImpl, doc });
   const ctx = getContext?.();
   const info = inspectEmbeddedCharacterBook(ctx);
   if (!info.hasEmbedded) {

@@ -11,7 +11,7 @@ import {
   getHostPresetState,
   importPresetItems,
   selectHostPresetByName,
-} from '../modules/preset-backend.js?v=0.9.0';
+} from '../modules/preset-backend.js?v=0.9.1';
 
 export const COMPANION_THEME_NIGHT_NAME = '伴侣主题 · 静夜';
 export const COMPANION_THEME_DAY_NAME = '伴侣主题 · 浅昼';

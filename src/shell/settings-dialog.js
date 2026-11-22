@@ -13,12 +13,12 @@ import {
   findInstalledYantaiPresetName,
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
-} from '../core/companion-kit.js?v=0.9.0';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.0';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.0';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.0';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.0';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.0';
+} from '../core/companion-kit.js?v=0.9.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.1';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.1';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.1';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.1';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.1';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },

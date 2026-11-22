@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.0';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.0';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.0';
-import { toastMessage } from './host-actions.js?v=0.9.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.1';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.1';
+import { toastMessage } from './host-actions.js?v=0.9.1';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -29,6 +29,8 @@ const CORE_FORM_SHELD_IDS = new Set([
 const CORE_SEND_FORM_IDS = new Set([
   'file_form',
   'nonQRFormItems',
+  'input_helper_toolbar',
+  'custom_buttons_container',
 ]);
 
 const CORE_NON_QR_IDS = new Set([
@@ -37,11 +39,13 @@ const CORE_NON_QR_IDS = new Set([
   'rightSendForm',
   'stm-chat-vision-btn',
   'stm-chat-vision-picker',
+  'quick-reply-rocket-button',
 ]);
 
 const CORE_LEFT_SEND_IDS = new Set([
   'options_button',
   'extensionsMenuButton',
+  'quick-reply-rocket-button',
 ]);
 
 const CORE_RIGHT_SEND_IDS = new Set([
@@ -54,6 +58,7 @@ const CORE_RIGHT_SEND_IDS = new Set([
   'stscript_stop',
   'stm-chat-vision-btn',
   'stm-chat-vision-picker',
+  'quick-reply-rocket-button',
 ]);
 
 const CORE_BODY_EXCLUDED_IDS = new Set([
@@ -75,6 +80,14 @@ const CORE_BODY_EXCLUDED_IDS = new Set([
   'toast-container',
   'loader',
   'qr--popout',
+  'qr-assistant',
+  'quick-reply-backdrop',
+  'qr-assistant-modal-overlay',
+  'hp-gate',
+  'hp-side',
+  'hp-scrim',
+  'hp-lightbox',
+  'hp-backup-nudge',
 ]);
 
 const IGNORED_TAG_NAMES = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'LINK', 'META', 'INPUT', 'DIALOG']);
@@ -103,6 +116,7 @@ function isIntrinsicallyHidden(node) {
   if (
     cls?.contains?.('displayNone') ||
     cls?.contains?.('qr--hidden') ||
+    cls?.contains?.('qrq-hidden-by-plugin') ||
     cls?.contains?.('hidden')
   ) {
     return true;
@@ -326,7 +340,13 @@ export function inspectWildFloatingCandidate(node, root = globalThis) {
     cls?.contains?.('drawer') ||
     cls?.contains?.('drawer-content') ||
     cls?.contains?.('list-group') ||
-    cls?.contains?.('toast')
+    cls?.contains?.('toast') ||
+    cls?.contains?.('ih-floating-panel') ||
+    cls?.contains?.('ih-dialog-overlay') ||
+    cls?.contains?.('ih-find-bar') ||
+    cls?.contains?.('ih-color-picker-portal') ||
+    cls?.contains?.('ih-folder-dropdown-portal') ||
+    cls?.contains?.('hp-studio-overlay')
   ) {
     return null;
   }

@@ -6,8 +6,13 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.0';
-import { svgMarkup } from '../core/icons.js?v=0.9.0';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
+import {
+  isQuietRoomActive,
+  isQuietRoomSidebarOpen,
+  toggleQuietRoomSidebar,
+} from '../core/compat-bridges.js?v=0.9.1';
+import { svgMarkup } from '../core/icons.js?v=0.9.1';
 
 /**
  * 识别酒馆删除角色卡、群聊或最后一份存档后塞入的 `SAFETY_CHAT` 安全占位页
@@ -178,7 +183,37 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
       );
     }
 
-    const shellEnabled = Boolean(store.get().shellEnabled);
+    const curSettings = store.get();
+    const shellEnabled = Boolean(curSettings.shellEnabled);
+    const showQrHomeSideBtn = Boolean(
+      shellEnabled &&
+        curSettings.topbarMode !== 'native' &&
+        isQuietRoomActive(doc),
+    );
+    let qrSideBtn = actionWrap.querySelector('.stm-shelf-qr-btn');
+    if (showQrHomeSideBtn) {
+      if (!qrSideBtn) {
+        qrSideBtn = doc.createElement('button');
+        qrSideBtn.type = 'button';
+        qrSideBtn.className = 'jd-tab stm-shelf-qr-btn stm-shelf-icon-only';
+        qrSideBtn.innerHTML = `<span class="stm-shelf-btn-icon" aria-hidden="true">${svgMarkup('heart')}</span>`;
+        qrSideBtn.title = '展开 / 收起博客小站侧边栏';
+        qrSideBtn.setAttribute('aria-label', '展开 / 收起博客小站侧边栏');
+        qrSideBtn.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleQuietRoomSidebar(doc);
+          schedule();
+        });
+        actionWrap.prepend(qrSideBtn);
+      }
+      const qrOpen = isQuietRoomSidebarOpen(doc);
+      qrSideBtn.classList.toggle('is-active', qrOpen);
+      qrSideBtn.setAttribute('aria-pressed', String(qrOpen));
+    } else if (qrSideBtn) {
+      qrSideBtn.remove();
+    }
+
     const modeTag = shellEnabled ? 'active' : 'native';
     if (mateBtn.dataset.stmMode !== modeTag) {
       mateBtn.dataset.stmMode = modeTag;

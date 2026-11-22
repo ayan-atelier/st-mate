@@ -12,16 +12,16 @@
  *    - 酒馆助手脚本 (TavernHelper 全局脚本 JSON)
  */
 
-import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.9.0';
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.0';
+import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.9.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
 import {
   cleanWorldBookName,
   primeHostCoreModule,
   primeHostRegexModule,
   primeHostWorldInfoModule,
-} from './char-world-backend.js?v=0.9.0';
-import { importPresetItems } from './preset-backend.js?v=0.9.0';
-import { toastMessage } from '../shell/host-actions.js?v=0.9.0';
+} from './char-world-backend.js?v=0.9.1';
+import { importPresetItems } from './preset-backend.js?v=0.9.1';
+import { toastMessage } from '../shell/host-actions.js?v=0.9.1';
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 

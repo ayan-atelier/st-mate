@@ -82,6 +82,11 @@ html body.stm-shell-active:not(.stm-native-topbar).no-blur #top-bar {
   pointer-events: none !important;
 }
 
+/* 伴侣顶栏模式下收起第三方塞入 #top-bar 的附属顶栏（如博客小站 #hp-addr），消除被压缩成 1px 细线的残影，同时不改动父子连接关系 */
+html body.stm-shell-active:not(.stm-native-topbar) #top-bar > :not(#top-settings-holder) {
+  display: none !important;
+}
+
 html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder,
 html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder#top-settings-holder {
   top: 0 !important;
@@ -233,8 +238,10 @@ html body.stm-shell-active #top-settings-holder #persona-management-button #Pers
 }
 
 /* 对话态：#sheld 与 #chat 始终 100dvh 满视口静止不动（零 height 过渡重排），
-   顶栏与底栏悬浮于上下两端，轻触切换全屏纯享阅读时文字 0 像素跳动、满帧顺滑 */
-html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #sheld {
+   顶栏与底栏悬浮于上下两端，轻触切换全屏纯享阅读时文字 0 像素跳动、满帧顺滑；
+   采用双 ID 高权重锁死，防止第三方主题双 ID 选择器限制 #chat 高度或将 #form_sheld 退回 Flex 占位 */
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #sheld,
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #sheld#sheld {
   top: 0 !important;
   height: 100vh !important;
   height: 100dvh !important;
@@ -243,14 +250,18 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
   transition: none !important;
 }
 
-html body.stm-shell-active.PWA:not(.movingUI):not(.stm-home-cloak) #sheld {
+html body.stm-shell-active.PWA:not(.movingUI):not(.stm-home-cloak) #sheld,
+html body.stm-shell-active.PWA:not(.movingUI):not(.stm-home-cloak) #sheld#sheld {
   padding-bottom: 0 !important;
 }
 
-html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #chat {
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #chat,
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home) {
   height: 100% !important;
   max-height: 100% !important;
   flex: 1 1 auto !important;
+  bottom: 0 !important;
+  margin-bottom: 0 !important;
   padding-top: calc(var(--stm-active-top-offset) + 6px) !important;
   padding-bottom: calc(var(--stm-composer-space, 64px) + var(--stm-safe-bottom) + 10px) !important;
   scroll-padding-top: calc(var(--stm-active-top-offset) + 10px);
@@ -258,7 +269,8 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
   touch-action: manipulation;
 }
 
-html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #form_sheld {
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #form_sheld,
+html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #form_sheld#form_sheld {
   position: absolute !important;
   left: 0 !important;
   right: 0 !important;
@@ -269,6 +281,32 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
   transform: translate3d(0, 0, 0);
   will-change: transform, opacity;
   transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.14s ease;
+}
+
+/* 移动端/窄屏无视 PC 端遗留的 body.movingUI 类，确保连同一酒馆服务端的手机浏览器同样满屏沉浸 */
+@media screen and (max-width: 1000px) {
+  html body.stm-shell-active:not(.waifuMode):not(.stm-home-cloak) #sheld#sheld {
+    top: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  html body.stm-shell-active:not(.waifuMode):not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home) {
+    height: 100% !important;
+    max-height: 100% !important;
+    flex: 1 1 auto !important;
+    bottom: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  html body.stm-shell-active:not(.waifuMode):not(.stm-home-cloak) #form_sheld#form_sheld {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+  }
 }
 
 /* 首页书架态：伴侣顶栏下全视口净空，原版顶栏下自动让出原版顶栏高度零遮挡 */
@@ -327,11 +365,40 @@ body.stm-shell-active.stm-home-cloak #form_sheld {
   display: none !important;
 }
 
-/* 全屏纯享阅读：采用零越界合成层隐身（绝不向下超出 100dvh 视口底边，彻底杜绝触发根级垂直滚动条挤压正文宽度） */
-body.stm-shell-active.stm-pure-reading #form_sheld {
+/* 全屏纯享阅读：成套接管 #sheld / #chat / #form_sheld（即使勾选过 movingUI 或使用双 ID 美化主题，
+   底栏也立即脱离文档流占位，#chat 100% 向下铺满到底边，杜绝底部留出空白黑边截断正文） */
+html body.stm-shell-active.stm-pure-reading:not(.stm-home-cloak) #sheld#sheld:not([style*="height"]) {
+  top: 0 !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+}
+
+html body.stm-shell-active.stm-pure-reading:not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home) {
+  height: 100% !important;
+  max-height: 100% !important;
+  flex: 1 1 auto !important;
+  bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+body.stm-shell-active.stm-pure-reading #form_sheld,
+html body.stm-shell-active.stm-pure-reading:not(.stm-home-cloak) #form_sheld#form_sheld {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
   opacity: 0 !important;
   transform: scale(0.985) translateZ(0) !important;
   pointer-events: none !important;
+}
+
+/* 全屏纯享阅读态下同步淡出第三方快捷悬浮条（如 ST-QuickBar），退出纯享即刻恢复 */
+body.stm-shell-active.stm-pure-reading .ih-floating-ball,
+body.stm-shell-active.stm-pure-reading .ih-floating-panel {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.16s ease !important;
 }
 
 /* 移动端与触屏设备彻底隐藏占位滚动条，锁死正文排版宽度恒定不拉伸 */
@@ -371,6 +438,54 @@ html body.stm-shell-active.stm-home-cloak #chat#chat {
     padding-inline: 0 !important;
     margin-inline: 0 !important;
   }
+}
+
+/* 博客小站 (QuietRoom.org) 原生兼容桥接：
+   1) 书架首页保留 0 高度隐形宽度标尺，令原版 .hp-image-banner 头图与轮播自动对齐展示在书架正上方；
+   2) 桌面宽屏下保护首页 #hp-side 左栏高度不因 #form_sheld 收起而塌缩，并隐藏桌面端多余的书架侧栏开关钮 */
+body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .mes[mesid="0"]:is([type="welcome"], [type="welcome_prompt"], [type="assistant_message"], [type="assistant_note"]) {
+  display: block !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  order: -2 !important;
+  flex: 0 0 0px !important;
+  width: min(calc(100% - 40px), 1380px) !important;
+  max-width: calc(100% - 40px) !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+}
+
+body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .hp-image-banner {
+  order: -1 !important;
+  margin-top: calc(14px + var(--jd-home-inset-top, 0px)) !important;
+  margin-bottom: 2px !important;
+}
+
+body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home:has(> .hp-image-banner) > .jd-bookshelf {
+  padding-top: 10px !important;
+}
+
+@media screen and (min-width: 1001px) {
+  html body.stm-shell-active.stm-home-cloak.hp-js #hp-side#hp-side {
+    top: 12px !important;
+    bottom: 16px !important;
+    height: calc(100dvh - var(--stm-active-top-offset) - 28px) !important;
+  }
+
+  .jd-bookshelf .stm-shelf-actions .stm-shelf-qr-btn {
+    display: none !important;
+  }
+}
+
+.jd-bookshelf .stm-shelf-actions .stm-shelf-qr-btn.is-active {
+  color: var(--stm-accent) !important;
+  border-color: var(--stm-border) !important;
 }
 
 /* 通用极简纯色细线 SVG 容器 */
