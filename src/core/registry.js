@@ -4,7 +4,7 @@
  * 杜绝双份 DOM 挂载、重复事件监听与顶栏控制权打架。
  */
 
-import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.8.7';
+import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.8.8c';
 
 export const CONTROL_REGISTRY_KEY = Symbol.for('yantai.control.registry.v1');
 export const STM_RUNTIME_KEY = Symbol.for('yantai.st_mate.runtime.v1');
@@ -56,9 +56,9 @@ export const MODULE_DESCRIPTORS = Object.freeze([
     key: 'charWorld',
     registryId: 'yantai-char-world',
     settingsNamespace: 'st_mate_char_world',
-    label: '角色与清爽世界书页',
+    label: '角色与世界书页',
     icon: 'book',
-    summary: '点顶栏左侧角色头像与名称展开一体页：支持导出 PNG/JSON 角色卡、开局第1楼一键换开场白、专属预设与世界书绑定，以及防假生效的清爽蓝绿灯世界书管理（关闭后回退原生角色/世界书面板）。',
+    summary: '点顶栏左侧角色头像与名称展开一体页：支持角色名录速进、导出 PNG/JSON 角色卡、开局第1楼一键换开场白、专属预设与世界书绑定，以及防假生效的蓝绿灯世界书管理（关闭后回退原生角色/世界书面板）。',
   },
   {
     key: 'echoes',

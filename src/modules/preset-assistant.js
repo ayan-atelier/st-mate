@@ -7,12 +7,13 @@
  * 4. 零 Emoji、1.5px 纯色细线图标内嵌助手 UI（支持窄屏独立顺滑滚动、16px 输入框防缩放、Enter 发送与流中随时停止）。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.7';
-import { toastMessage } from '../shell/host-actions.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.8c';
+import { toastMessage } from '../shell/host-actions.js?v=0.8.8c';
 import {
   createAssistantSession,
   resolveAssistantRuntimeChannel,
-} from './assistant-core.js?v=0.8.7';
+} from './assistant-core.js?v=0.8.8c';
 import {
   PROMPT_ROLE_OPTIONS,
   UNLOCKED_MAX_CONTEXT,
@@ -33,7 +34,7 @@ import {
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.8.7';
+} from './preset-backend.js?v=0.8.8c';
 
 export const MAX_UNDO_STEPS = 10;
 export const DEFAULT_ENTRY_MAX_CHARS = 1800;
@@ -42,6 +43,7 @@ export const MAX_FOCUSED_LONG_ENTRIES = 6;
 
 export const PRESET_ASSISTANT_QUICK_PROMPTS = Object.freeze([
   '加一条防抢话规则（禁替 {{user}} 说话与心理描写）',
+  '加一个带折叠美化框的小剧场（自动配齐正则）',
   '排查当前预设是否有冲突或重复条目',
   '新增或润色文风控制条目',
   '按功能帮我理顺当前开启的条目与权重位置',
@@ -54,6 +56,7 @@ const OPERATION_TYPE_LABELS = Object.freeze({
   move_entry: '调整顺序',
   delete_entry: '删除条目',
   update_params: '调整参数',
+  upsert_regex: '配套正则',
 });
 
 const TRUNCATE_MARKER_TOKEN = '...(中略 ';
@@ -320,6 +323,39 @@ export function serializePresetContext({
     return base;
   });
 
+  const presetRegexRaw = Array.isArray(effectiveOai?.extensions?.regex_scripts)
+    ? effectiveOai.extensions.regex_scripts
+    : [];
+  const globalRegexRaw = Array.isArray(ctx?.extensionSettings?.regex)
+    ? ctx.extensionSettings.regex
+    : [];
+
+  const summarizeRegex = (item, includeSample = false) => {
+    const base = {
+      scriptName: String(item?.scriptName || '').trim().slice(0, 80),
+      disabled: Boolean(item?.disabled),
+      markdownOnly: Boolean(item?.markdownOnly),
+      promptOnly: Boolean(item?.promptOnly),
+      findRegex: compactSnippet(item?.findRegex || '', 110),
+    };
+    if (item?.minDepth !== null && item?.minDepth !== undefined) {
+      base.minDepth = item.minDepth;
+    }
+    if (includeSample && item?.markdownOnly && typeof item?.replaceString === 'string' && item.replaceString.trim()) {
+      base.styleSample = compactSnippet(item.replaceString, 180);
+    }
+    return base;
+  };
+
+  const serializedPresetRegex = presetRegexRaw
+    .filter(item => item && typeof item === 'object')
+    .slice(0, 24)
+    .map(item => summarizeRegex(item, true));
+  const serializedGlobalRegex = globalRegexRaw
+    .filter(item => item && typeof item === 'object' && !item.disabled)
+    .slice(0, 16)
+    .map(item => summarizeRegex(item, false));
+
   return {
     preset_name: activeName,
     params: {
@@ -331,7 +367,10 @@ export function serializePresetContext({
       total: ordered.totalCount,
       enabled: ordered.enabledCount,
       markers: ordered.markerCount,
+      preset_regex: presetRegexRaw.length,
     },
+    preset_regex_scripts: serializedPresetRegex,
+    global_regex_scripts: serializedGlobalRegex,
     entries: serializedEntries,
   };
 }
@@ -356,11 +395,11 @@ export function buildPresetAssistantSystemPrompt() {
     '{',
     '  "reply": "向玩家简明扼要说明你的排查结论或修改思路（纯文本分段，不用 Emoji）",',
     '  "operations": [',
-    '    // 若仅做纯诊断解答无需修改预设，传空数组 []；若需修改，按执行顺序列出以下 6 类原子操作：',
+    '    // 若仅做纯诊断解答无需修改预设，传空数组 []；若需修改，按执行顺序列出以下 7 类原子操作：',
     '  ]',
     '}',
     '',
-    '【支持的 6 类原子操作定义】',
+    '【支持的 7 类原子操作定义】',
     '1. 新增条目: { "type": "add_entry", "name": "条目名称", "role": "system|user|assistant", "enabled": true, "injection_position": 0, "injection_depth": 4, "position": "bottom|top", "afterIdentifier": "可选锚点identifier", "beforeIdentifier": "可选锚点identifier", "content": "完整提示词正文", "reason": "简短说明" }',
     '2. 修改条目（支持增量微调与全量重写）:',
     '   - 末尾追加（推荐用于长条目增补规则）: { "type": "update_entry", "identifier": "目标identifier", "appendContent": "要追加到末尾的新段落", "reason": "简短说明" }',
@@ -370,6 +409,18 @@ export function buildPresetAssistantSystemPrompt() {
     '4. 调整顺序: { "type": "move_entry", "identifier": "目标identifier", "position": "top|bottom", "afterIdentifier": "可选锚点identifier", "beforeIdentifier": "可选锚点identifier", "reason": "简短说明" }',
     '5. 删除条目: { "type": "delete_entry", "identifier": "目标自定义条目identifier", "reason": "简短说明" }（仅限 marker=false 且 system_prompt=false 的自定义条目）',
     '6. 调整参数: { "type": "update_params", "openai_max_context": 65536, "openai_max_tokens": 4096, "temperature": 0.95, "reason": "简短说明" }（仅填需修改的参数字段）',
+    '7. 配套预设正则（新增或同名更新绑定在本预设内的正则脚本）:',
+    '   { "type": "upsert_regex", "scriptName": "正则名称", "findRegex": "/正则字面量/g", "replaceString": "HTML美化模板或空串", "markdownOnly": true, "promptOnly": false, "minDepth": null, "placement": [2], "disabled": false, "reason": "简短说明" }',
+    '',
+    '【小剧场 / 动物塑 / 论坛体 / 状态面板的一站式配齐铁律】',
+    '当玩家要求增加小剧场、动物塑、平行番外、论坛体、备忘录、日记或状态栏等结构化副产物时，除编写预设提示词条目外，请务必同步配齐配套的 `upsert_regex` 正则（随预设保存、不污染其他预设）：',
+    '1. 提示词与标签呼应：在提示词条目中明确要求模型在正剧末尾使用成对闭合标签包裹（例如 `<动物塑小剧场>[角色动物塑 × {{user}}动物塑]\\n小剧场正文\\n</动物塑小剧场>`）。',
+    '2. 显示美化正则（`markdownOnly: true, promptOnly: false, placement: [2]`）：',
+    '   - `findRegex` 请用标准 `/.../g` 格式，末尾建议用 `(?:<\\/标签名>|$)` 兼容漏写闭合标签的历史楼层（如 `/<动物塑小剧场>\\s*(?:\\[([^\\]\\n]+)\\]\\s*)?([\\s\\S]*?)(?:<\\/动物塑小剧场>|$)/g`）。',
+    '   - 美化风格自适应：若上下文 `preset_regex_scripts` 中已有现成卡片美化 `styleSample`，请延续其视觉风格；若原预设无任何美化痕迹，请采用零外部依赖、100% 跟随酒馆深浅主题变量的「半透可折叠卡片」单行紧凑 HTML（严禁彩色 Emoji，严禁在 HTML 行首缩进 4 个空格以防触发 Markdown 代码块）：',
+    '     `<details open style="margin:12px 0 6px;border-radius:10px;border:1px solid color-mix(in srgb,var(--SmartThemeBodyColor,#ccc) 15%,transparent);background:color-mix(in srgb,var(--SmartThemeBlurTintColor,#18181c) 72%,transparent);overflow:hidden;font-size:0.93em;line-height:1.78;"><summary style="cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 13px;border-bottom:1px solid color-mix(in srgb,var(--SmartThemeBodyColor,#ccc) 9%,transparent);user-select:none;"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;"><strong style="color:var(--SmartThemeBodyColor,inherit);font-weight:600;letter-spacing:0.03em;">动物塑小剧场</strong><span style="color:var(--SmartThemeQuoteColor,inherit);font-size:0.86em;padding:1px 8px;border-radius:999px;border:1px solid color-mix(in srgb,var(--SmartThemeQuoteColor,#aaa) 28%,transparent);">$1</span></span><span style="opacity:0.5;font-size:0.8em;flex-shrink:0;">收起 / 展开</span></summary><div style="padding:10px 14px 12px;color:var(--SmartThemeBodyColor,inherit);white-space:pre-wrap;">$2</div></details>`',
+    '     （若剧场无副标题分组 `$1` 则省略副标题胶囊直接填正文分组；可按剧场题材如论坛楼层、机密档案、日记便签微调标题栏排版，但颜色一律绑定 `--SmartThemeBodyColor` / `--SmartThemeQuoteColor` / `--SmartThemeEmColor` / `--SmartThemeBlurTintColor`）。',
+    '3. 历史省流剥离正则（`markdownOnly: false, promptOnly: true, minDepth: 1, placement: [2], replaceString: ""`）：对场外小剧场/论坛体，建议额外附带一条 `promptOnly: true, minDepth: 1` 的剥离正则，发送时自动剔除历史轮次的场外副产物，既省 Token 又防比喻串味污染正剧。',
   ].join('\n');
 }
 
@@ -491,6 +542,72 @@ function joinWithSmartNewline(headText = '', tailText = '') {
   return headText.endsWith('\n') || tailText.startsWith('\n')
     ? `${headText}${tailText}`
     : `${headText}\n${tailText}`;
+}
+
+function generateRegexUuid() {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+    const r = Math.floor(Math.random() * 16);
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function normalizeSillyTavernFindRegex(rawFind = '') {
+  const trimmed = typeof rawFind === 'string' ? rawFind.trim() : '';
+  if (!trimmed) return { ok: false, reason: '正则匹配式 findRegex 为空' };
+
+  const slashMatch = trimmed.match(/^\/([\s\S]+)\/([dgimsuvy]*)$/);
+  if (slashMatch) {
+    const body = slashMatch[1];
+    const flags = [...new Set(slashMatch[2].split(''))].join('');
+    try {
+      new RegExp(body, flags);
+      return { ok: true, findRegex: `/${body}/${flags}` };
+    } catch (err) {
+      return { ok: false, reason: `正则语法无效 (${err?.message || '编译失败'})` };
+    }
+  }
+
+  try {
+    new RegExp(trimmed, 'g');
+    const escapedBody = trimmed.replace(/(?<!\\)\//g, '\\/');
+    return { ok: true, findRegex: `/${escapedBody}/g` };
+  } catch (err) {
+    return { ok: false, reason: `正则语法无效 (${err?.message || '编译失败'})` };
+  }
+}
+
+/**
+ * 清理美化正则 replaceString 中可能触发 Showdown Markdown 4 空格代码块误判的前导缩进。
+ */
+function sanitizeRegexReplaceHtml(rawReplace = '', markdownOnly = false) {
+  const str = typeof rawReplace === 'string' ? rawReplace : '';
+  if (!markdownOnly || !str.includes('<')) return str;
+  return str
+    .replace(/\r\n/g, '\n')
+    .replace(/^[ \t]+(?=<)/gm, '')
+    .replace(/^[ \t]{4,}/gm, '  ')
+    .trim();
+}
+
+function formatRegexPreviewDoc(script) {
+  if (!script) return '';
+  const mode =
+    script.markdownOnly && !script.promptOnly
+      ? '仅界面渲染美化 (markdownOnly)'
+      : script.promptOnly && !script.markdownOnly
+        ? `仅发送前省流剥离 (promptOnly${script.minDepth != null ? `, minDepth=${script.minDepth}` : ''})`
+        : '渲染与发送双端生效';
+  return [
+    `脚本名称: ${script.scriptName}`,
+    `生效范围: 随本预设生效 · ${mode}${script.disabled ? '（停用）' : '（启用）'}`,
+    `匹配正则: ${script.findRegex}`,
+    `替换内容:`,
+    script.replaceString ? script.replaceString : '（空字符串 · 匹配到的内容将被静默剥离）',
+  ].join('\n');
 }
 
 /**
@@ -1049,6 +1166,114 @@ export function validateAndPreviewPresetOperations(
       continue;
     }
 
+    // -------------------------------------------------------------------------
+    // 7. upsert_regex: 新增或更新随本预设携带的 SillyTavern 正则脚本
+    // -------------------------------------------------------------------------
+    if (rawType === 'upsert_regex' || rawType === 'add_regex' || rawType === 'update_regex') {
+      const scriptName = String(
+        rawOp.scriptName ?? rawOp.script_name ?? rawOp.name ?? '伴侣新增正则',
+      )
+        .trim()
+        .slice(0, 160);
+      const parsedFind = normalizeSillyTavernFindRegex(
+        rawOp.findRegex ?? rawOp.find_regex ?? rawOp.pattern ?? '',
+      );
+      if (!parsedFind.ok) {
+        rejected.push({
+          type: 'upsert_regex',
+          reason: `正则「${scriptName || '未命名'}」无效：${parsedFind.reason}`,
+        });
+        continue;
+      }
+
+      const markdownOnly =
+        rawOp.markdownOnly !== undefined
+          ? Boolean(rawOp.markdownOnly)
+          : rawOp.markdown_only !== undefined
+            ? Boolean(rawOp.markdown_only)
+            : !Boolean(rawOp.promptOnly ?? rawOp.prompt_only);
+      const promptOnly = Boolean(rawOp.promptOnly ?? rawOp.prompt_only ?? false);
+      const disabled = Boolean(rawOp.disabled ?? false);
+      const rawMinDepth = rawOp.minDepth ?? rawOp.min_depth ?? null;
+      const rawMaxDepth = rawOp.maxDepth ?? rawOp.max_depth ?? null;
+      const minDepth =
+        rawMinDepth !== null && rawMinDepth !== '' && Number.isFinite(Number(rawMinDepth))
+          ? clampInt(rawMinDepth, 0, 999, 0)
+          : null;
+      const maxDepth =
+        rawMaxDepth !== null && rawMaxDepth !== '' && Number.isFinite(Number(rawMaxDepth))
+          ? clampInt(rawMaxDepth, 0, 999, 999)
+          : null;
+      const placementRaw = Array.isArray(rawOp.placement) ? rawOp.placement : [2];
+      const placement = placementRaw
+        .map(n => Number(n))
+        .filter(n => Number.isInteger(n) && n >= 0 && n <= 6);
+      const safePlacement = placement.length > 0 ? [...new Set(placement)] : [2];
+
+      const rawReplace =
+        typeof (rawOp.replaceString ?? rawOp.replace_string ?? rawOp.replace) === 'string'
+          ? (rawOp.replaceString ?? rawOp.replace_string ?? rawOp.replace)
+          : '';
+      const replaceString = sanitizeRegexReplaceHtml(rawReplace, markdownOnly);
+
+      const normalizedScript = {
+        scriptName: scriptName || '伴侣新增正则',
+        findRegex: parsedFind.findRegex,
+        replaceString,
+        trimStrings: Array.isArray(rawOp.trimStrings)
+          ? rawOp.trimStrings.map(x => String(x))
+          : [],
+        placement: safePlacement,
+        disabled,
+        markdownOnly,
+        promptOnly,
+        runOnEdit: rawOp.runOnEdit !== undefined ? Boolean(rawOp.runOnEdit) : true,
+        substituteRegex: Number.isFinite(Number(rawOp.substituteRegex))
+          ? Number(rawOp.substituteRegex)
+          : 0,
+        minDepth,
+        maxDepth,
+      };
+
+      const existingPresetScripts = Array.isArray(oaiSettings?.extensions?.regex_scripts)
+        ? oaiSettings.extensions.regex_scripts
+        : [];
+      const existingHit = existingPresetScripts.find(
+        s =>
+          s &&
+          (String(s.scriptName || '').trim() === normalizedScript.scriptName ||
+            String(s.findRegex || '').trim() === normalizedScript.findRegex),
+      );
+
+      const modeBadge =
+        markdownOnly && !promptOnly
+          ? '显示美化卡片'
+          : promptOnly && !markdownOnly
+            ? `历史省流剥离${minDepth !== null ? ` (@D>=${minDepth})` : ''}`
+            : '双端正则';
+      const summaryParts = [
+        existingHit ? `更新预设正则 · ${modeBadge}` : `写入预设正则 · ${modeBadge}`,
+      ];
+      if (reasonNote) summaryParts.push(reasonNote);
+
+      pushValid({
+        type: 'upsert_regex',
+        typeLabel: OPERATION_TYPE_LABELS.upsert_regex,
+        targetName: normalizedScript.scriptName,
+        summary: summaryParts.join(' · '),
+        downgradedNote: '',
+        canViewDiff: true,
+        beforeContent: existingHit ? formatRegexPreviewDoc(existingHit) : '',
+        afterContent: formatRegexPreviewDoc(normalizedScript),
+        metaDiffSummary: '随本预设保存与导出（切换至其他预设时自动隔离），支持一键撤回',
+        normalizedOp: {
+          type: 'upsert_regex',
+          script: normalizedScript,
+        },
+      });
+      continue;
+    }
+
     rejected.push({
       type: rawType || 'unknown',
       reason: `未知的操作类型「${rawType || '空'}」，已自动忽略`,
@@ -1163,6 +1388,51 @@ function computeTargetIndexForMove(bucket, targetId, placement) {
   return -1;
 }
 
+async function syncHostPresetRegexRuntime(ctx, presetName, { isGuiPreset = false, doc = globalThis.document } = {}) {
+  if (!ctx) return;
+  if (ctx.extensionSettings && typeof ctx.extensionSettings === 'object') {
+    const pm = getHostPresetState({ getContext: () => ctx, doc }).presetManager;
+    const apiId = pm?.apiId || 'openai';
+    const allowMap =
+      ctx.extensionSettings.preset_allowed_regex &&
+      typeof ctx.extensionSettings.preset_allowed_regex === 'object'
+        ? ctx.extensionSettings.preset_allowed_regex
+        : (ctx.extensionSettings.preset_allowed_regex = {});
+    const list = Array.isArray(allowMap[apiId]) ? allowMap[apiId] : (allowMap[apiId] = []);
+    const targetNames = [];
+    if (presetName) targetNames.push(presetName);
+    if (isGuiPreset || !presetName) targetNames.push('gui');
+    let dirty = false;
+    for (const n of targetNames) {
+      if (n && !list.includes(n)) {
+        list.push(n);
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      ctx.saveSettingsDebounced?.();
+    }
+  }
+
+  try {
+    const base = doc?.baseURI || globalThis.location?.href;
+    if (base && /^https?:/i.test(String(base))) {
+      const rxMod = await import(new URL('scripts/extensions/regex/engine.js', base).href);
+      rxMod?.RegexProvider?.instance?.clear?.();
+    }
+  } catch {
+    // ignore in unit tests or older hosts
+  }
+
+  if (hasActiveChatSelection(ctx) && typeof ctx.reloadCurrentChat === 'function') {
+    try {
+      await ctx.reloadCurrentChat();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 /**
  * 按玩家勾选列表依次执行原子修改（应用前自动拍下当前预设完整快照推入 `undoStack`）。
  */
@@ -1236,6 +1506,7 @@ export async function applySelectedPresetOperations({
   // 2. 顺序执行已勾选的原子修改
   let appliedCount = 0;
   let structuralChange = false;
+  let touchedRegex = false;
   const createdIds = [];
 
   for (const item of chosen) {
@@ -1292,6 +1563,28 @@ export async function applySelectedPresetOperations({
     } else if (op.type === 'update_params') {
       applyGenerationParams(op.paramPatch, { getContext, doc });
       appliedCount += 1;
+    } else if (op.type === 'upsert_regex' && op.script) {
+      if (!oai.extensions || typeof oai.extensions !== 'object' || Array.isArray(oai.extensions)) {
+        oai.extensions = {};
+      }
+      if (!Array.isArray(oai.extensions.regex_scripts)) {
+        oai.extensions.regex_scripts = [];
+      }
+      const rxList = oai.extensions.regex_scripts;
+      const existingIdx = rxList.findIndex(
+        item =>
+          item &&
+          (String(item.scriptName || '').trim() === op.script.scriptName ||
+            String(item.findRegex || '').trim() === op.script.findRegex),
+      );
+      if (existingIdx >= 0) {
+        const keepId = rxList[existingIdx].id || generateRegexUuid();
+        rxList[existingIdx] = { ...op.script, id: keepId };
+      } else {
+        rxList.push({ ...op.script, id: generateRegexUuid() });
+      }
+      appliedCount += 1;
+      touchedRegex = true;
     }
   }
 
@@ -1326,6 +1619,13 @@ export async function applySelectedPresetOperations({
   }
 
   const isGui = Boolean(beforeSnapshot.isGuiPreset || !beforeSnapshot.presetName);
+  if (touchedRegex) {
+    await syncHostPresetRegexRuntime(ctx, beforeSnapshot.presetName || '', {
+      isGuiPreset: isGui,
+      doc,
+    });
+  }
+
   return {
     ok: true,
     appliedCount,
@@ -1404,6 +1704,10 @@ export async function undoLastPresetOperation({
   }
 
   const popped = undoStack.pop();
+  const prevRegexJson = JSON.stringify(
+    getContext?.()?.chatCompletionSettings?.extensions?.regex_scripts || [],
+  );
+  const nextRegexJson = JSON.stringify(popped.snapshot?.payload?.extensions?.regex_scripts || []);
   const res = await applyPresetSnapshotToHost(popped.snapshot, {
     getContext,
     persistToFile: Boolean(popped.presetName && !popped.isGuiPreset),
@@ -1419,6 +1723,13 @@ export async function undoLastPresetOperation({
       remainingSteps: undoStack.size(),
       message: '还原预设快照失败',
     };
+  }
+
+  if (prevRegexJson !== nextRegexJson) {
+    await syncHostPresetRegexRuntime(getContext?.(), popped.presetName || '', {
+      isGuiPreset: Boolean(popped.isGuiPreset || !popped.presetName),
+      doc,
+    });
   }
 
   const targetTitle = popped.presetName || '默认预设';
@@ -1443,8 +1754,13 @@ export async function undoLastPresetOperation({
 function summarizePresetOpsForHistory(operations = []) {
   if (!Array.isArray(operations) || operations.length === 0) return '';
   const brief = operations.slice(0, 8).map(op => {
-    const label = OPERATION_TYPE_LABELS[op?.type] || op?.type || '修改';
-    const target = op?.name || op?.identifier || (op?.type === 'update_params' ? '生成参数' : '');
+    const rawT = op?.type === 'add_regex' || op?.type === 'update_regex' ? 'upsert_regex' : op?.type;
+    const label = OPERATION_TYPE_LABELS[rawT] || op?.type || '修改';
+    const target =
+      op?.scriptName ||
+      op?.name ||
+      op?.identifier ||
+      (op?.type === 'update_params' ? '生成参数' : '');
     return target ? `${label}(${target})` : label;
   });
   return `[本轮提供方案: ${brief.join('、')}]`;
@@ -1681,12 +1997,18 @@ export function createPresetAssistantPanel({
               'stm-ast-diff-label',
               item.type === 'add_entry'
                 ? '修改前（原预设无此条目）'
-                : `修改前（${item.beforeContent.length} 字符）`,
+                : item.type === 'upsert_regex' && !item.beforeContent
+                  ? '修改前（原预设无此正则）'
+                  : `修改前（${item.beforeContent.length} 字符）`,
             ),
             el(
               'pre',
               'stm-ast-diff-pre',
-              item.type === 'add_entry' ? '（新建条目）' : item.beforeContent || '（空正文）',
+              item.type === 'add_entry'
+                ? '（新建条目）'
+                : item.type === 'upsert_regex' && !item.beforeContent
+                  ? '（新增预设正则脚本）'
+                  : item.beforeContent || '（空正文）',
             ),
           );
 

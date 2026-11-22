@@ -8,12 +8,24 @@ export const STM_NAMESPACE = 'st_mate';
 export const STM_SCHEMA_VERSION = 6;
 
 export const TOPBAR_MODES = Object.freeze(['rp', 'native']);
+export const NATIVE_TOPBAR_DRAWER_ITEMS = Object.freeze([
+  { id: 'ai-config-button', label: '预设与参数', icon: 'sliders' },
+  { id: 'sys-settings-button', label: 'API 连接', icon: 'plug' },
+  { id: 'advanced-formatting-button', label: '排版格式', icon: 'typography' },
+  { id: 'WI-SP-button', label: '世界书', icon: 'globe' },
+  { id: 'user-settings-button', label: '界面主题', icon: 'settings' },
+  { id: 'backgrounds-button', label: '背景图', icon: 'image' },
+  { id: 'extensions-settings-button', label: '扩展管理', icon: 'grid' },
+  { id: 'persona-management-button', label: '人设管理', icon: 'user' },
+  { id: 'rightNavHolder', label: '角色管理', icon: 'idcard' },
+]);
+const NATIVE_TOPBAR_DRAWER_ID_SET = new Set(NATIVE_TOPBAR_DRAWER_ITEMS.map(item => item.id));
 export const TAP_SCOPES = Object.freeze(['all']);
 export const HOME_ENTRY_MODES = Object.freeze(['bookshelf-bar', 'floating']);
 export const DRAWER_BRIDGE_MODES = Object.freeze(['inline-switch', 'popover']);
 export const BACKDROP_MODES = Object.freeze(['theme', 'character', 'custom']);
 export const PARAGRAPH_INDENTS = Object.freeze(['default', 'flush', 'indent']);
-export const FONT_CHOICES = Object.freeze(['default', 'serif', 'sans', 'kai', 'custom']);
+export const FONT_CHOICES = Object.freeze(['default', 'huiwen', 'serif', 'sans', 'kai', 'custom']);
 export const VERTEX_AUTH_MODES = Object.freeze(['express', 'full']);
 export const AUX_API_MODES = Object.freeze(['follow_main', 'station']);
 
@@ -98,6 +110,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: STM_SCHEMA_VERSION,
   shellEnabled: true,
   topbarMode: 'rp',
+  nativeTopbarHiddenIcons: Object.freeze([]), // 默认全部显示（含原生背景图图标），玩家可在原版顶栏下方按需勾选隐藏
   chatImageButton: true,
   tapPureReading: false, // 新用户默认关闭防误触，已存储的老用户状态原样保留
   tapPureReadingScope: 'all',
@@ -162,6 +175,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
     defaultPreset: '',
     charBindings: Object.freeze({}),
     archivedPresets: Object.freeze([]),
+    importedAt: Object.freeze({}),
   }),
   suiteProvisioned: Object.freeze([]),
   suiteSync: Object.freeze({
@@ -343,10 +357,25 @@ export function normalizePresetStudio(raw = {}) {
     }
   }
 
+  const importedAt = {};
+  if (src.importedAt && typeof src.importedAt === 'object' && !Array.isArray(src.importedAt)) {
+    let tsCount = 0;
+    for (const [rawName, rawTs] of Object.entries(src.importedAt)) {
+      if (tsCount >= 1000) break;
+      const cleaned = sanitizeStoredPresetName(rawName);
+      if (!cleaned) continue;
+      const num = Number(rawTs);
+      if (!Number.isFinite(num) || num <= 0) continue;
+      importedAt[cleaned] = Math.round(num);
+      tsCount += 1;
+    }
+  }
+
   return {
     defaultPreset,
     charBindings,
     archivedPresets,
+    importedAt,
   };
 }
 
@@ -448,10 +477,21 @@ export function normalizeSettings(raw = {}) {
   const normalizedSyncAt =
     Number.isFinite(rawSyncAt) && rawSyncAt >= 0 ? Math.round(rawSyncAt) : 0;
 
+  const nativeTopbarHiddenIcons = Array.isArray(src.nativeTopbarHiddenIcons)
+    ? [
+        ...new Set(
+          src.nativeTopbarHiddenIcons
+            .filter(id => typeof id === 'string' && NATIVE_TOPBAR_DRAWER_ID_SET.has(id.trim()))
+            .map(id => id.trim()),
+        ),
+      ]
+    : [];
+
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
     topbarMode: pickEnum(src.topbarMode, TOPBAR_MODES, DEFAULT_SETTINGS.topbarMode),
+    nativeTopbarHiddenIcons,
     chatImageButton: pickBool(src.chatImageButton, DEFAULT_SETTINGS.chatImageButton),
     tapPureReading: pickBool(src.tapPureReading, DEFAULT_SETTINGS.tapPureReading),
     tapPureReadingScope: 'all',

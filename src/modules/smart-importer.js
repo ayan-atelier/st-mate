@@ -12,16 +12,16 @@
  *    - 酒馆助手脚本 (TavernHelper 全局脚本 JSON)
  */
 
-import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.8.7';
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
+import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.8.8c';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
 import {
   cleanWorldBookName,
   primeHostCoreModule,
   primeHostRegexModule,
   primeHostWorldInfoModule,
-} from './char-world-backend.js?v=0.8.7';
-import { importPresetItems } from './preset-backend.js?v=0.8.7';
-import { toastMessage } from '../shell/host-actions.js?v=0.8.7';
+} from './char-world-backend.js?v=0.8.8c';
+import { importPresetItems } from './preset-backend.js?v=0.8.8c';
+import { toastMessage } from '../shell/host-actions.js?v=0.8.8c';
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -980,6 +980,9 @@ export function createSmartImporterController({
           doc,
           onAfterImport,
         });
+        if (result.counts.preset > 0) {
+          store?.hydrate?.();
+        }
 
         const nonCharImported =
           result.counts.preset +

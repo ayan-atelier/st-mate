@@ -7,21 +7,23 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.8c';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
+  resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.8.7';
+} from '../shell/host-actions.js?v=0.8.8c';
 import {
+  formatSubtleImportTime,
   getBoundPresetForEntity,
   getHostPresetState,
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.8.7';
+} from './preset-backend.js?v=0.8.8c';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -50,6 +52,7 @@ import {
   inspectPresetWorldInfoSlots,
   inspectWorldBookActivation,
   loadHostWorldBook,
+  parseCharacterAddedAt,
   primeHostWorldInfoModule,
   readActiveCharacterProfile,
   readCharacterCoverGallery,
@@ -65,7 +68,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.8.7';
+} from './char-world-backend.js?v=0.8.8c';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -141,7 +144,10 @@ export function createCharWorldDock({
   const openFieldSections = new Set(); // 核心设定默认全部折叠，保持角色画册感与防剧透
   const charDraftMap = new Map(); // avatar -> unsaved patch overlay
 
-  // 清爽世界书局部交互状态
+  // 世界书与未进卡角色名录局部交互状态
+  let homeDirQuery = '';
+  let homeDirScrollTop = 0;
+  let openingEntityBusy = false;
   let selectedWorldBook = '';
   let loadedBookName = '';
   let loadedBookData = null;
@@ -165,7 +171,7 @@ export function createCharWorldDock({
   let confirmDeleteEntryUid = null;
   const swipeSyncTimers = [];
 
-  let saveBadgeState = { tone: 'idle', text: '改动自动存盘' };
+  let saveBadgeState = { tone: 'idle', text: '自动保存' };
 
   const liveRefs = {
     saveBadgeEl: null,
@@ -619,7 +625,11 @@ export function createCharWorldDock({
     charTabBtn.setAttribute('aria-selected', String(activeTab === 'char'));
     charTabBtn.append(
       createIconNode(doc, profile.kind === 'group' ? 'users' : 'idcard', 'stm-tab-icon'),
-      el('span', '', profile.kind === 'group' ? '群聊档案' : '角色档案'),
+      el(
+        'span',
+        '',
+        profile.kind === 'group' ? '群聊档案' : profile.active ? '角色档案' : '角色名录',
+      ),
     );
     charTabBtn.addEventListener('click', async () => {
       if (!isTabTakeoverEnabled('char')) {
@@ -651,7 +661,7 @@ export function createCharWorldDock({
     liveRefs.worldCountPillEl = countPill;
     worldTabBtn.append(
       createIconNode(doc, 'globe', 'stm-tab-icon'),
-      el('span', '', '清爽世界书'),
+      el('span', '', '世界书'),
       countPill,
     );
     worldTabBtn.addEventListener('click', async () => {
@@ -1161,11 +1171,17 @@ export function createCharWorldDock({
       countUnicodeChars(profile.personality) +
       countUnicodeChars(profile.scenario) +
       countUnicodeChars(profile.mesExample);
+    const addedFmt = formatSubtleImportTime(profile.addedAt);
     const statSub = el(
       'p',
       'stm-cw-hero-sub',
-      `设定 ${totalSettingChars} 字 · 开场白 ${profile.greetings.length} 条`,
+      addedFmt.shortText
+        ? `设定 ${totalSettingChars} 字 · 开场白 ${profile.greetings.length} 条 · ${addedFmt.shortText} 导入`
+        : `设定 ${totalSettingChars} 字 · 开场白 ${profile.greetings.length} 条`,
     );
+    if (addedFmt.fullTitle) {
+      statSub.title = addedFmt.fullTitle;
+    }
     heroTopBlock.append(statSub);
 
     // 2. 轻量操作区：二合一「导出 ▾」（点开选 PNG 或 JSON）+ 原生面板入口
@@ -1831,31 +1847,316 @@ export function createCharWorldDock({
     container.append(sheetList);
   }
 
+  function buildHomeDirectoryItems(ctx, doc) {
+    const tagLookup = new Map();
+    if (Array.isArray(ctx?.tags)) {
+      for (const t of ctx.tags) {
+        if (t && t.id !== undefined && t.name) {
+          tagLookup.set(String(t.id), String(t.name).trim());
+        }
+      }
+    }
+    const tagMap = ctx?.tagMap && typeof ctx.tagMap === 'object' ? ctx.tagMap : {};
+    const items = [];
+
+    const characters = Array.isArray(ctx?.characters) ? ctx.characters : [];
+    for (let idx = 0; idx < characters.length; idx += 1) {
+      const ch = characters[idx];
+      if (!ch) continue;
+      const avatar = String(ch.avatar || '').trim();
+      const name = String(ch.name || avatar.replace(/\.[^.]+$/, '') || '未命名角色').trim();
+      let thumbUrl = avatar ? resolveAssetHref(`characters/${encodeURIComponent(avatar)}`, doc) : '';
+      if (avatar && typeof ctx?.getThumbnailUrl === 'function') {
+        try {
+          thumbUrl = ctx.getThumbnailUrl('avatar', avatar) || thumbUrl;
+        } catch {
+          // keep fallback portrait url
+        }
+      }
+      const mappedTagIds = avatar && Array.isArray(tagMap[avatar]) ? tagMap[avatar] : [];
+      const resolvedTags = mappedTagIds
+        .map(id => tagLookup.get(String(id)) || '')
+        .filter(Boolean);
+      const cardTags =
+        resolvedTags.length > 0
+          ? resolvedTags
+          : Array.isArray(ch.data?.tags)
+            ? ch.data.tags.map(x => String(x || '').trim()).filter(Boolean)
+            : [];
+      const version = String(ch.data?.character_version || '').trim().slice(0, 18);
+      const rawNote = String(ch.creatorcomment || ch.data?.creator_notes || '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const note = rawNote.length > 96 ? `${rawNote.slice(0, 96)}…` : rawNote;
+      const addedAt = parseCharacterAddedAt(ch);
+      const parsedLast =
+        Number(ch.date_last_chat) ||
+        Date.parse(String(ch.date_last_chat || '')) ||
+        addedAt ||
+        0;
+
+      items.push({
+        kind: 'char',
+        chid: idx,
+        orderIdx: idx,
+        key: `char:${avatar || idx}`,
+        name,
+        avatar,
+        thumbUrl,
+        tags: [...new Set(cardTags)],
+        version,
+        note,
+        addedAt,
+        lastTs: Number.isFinite(parsedLast) ? parsedLast : 0,
+      });
+    }
+
+    const groups = Array.isArray(ctx?.groups) ? ctx.groups : [];
+    for (let gIdx = 0; gIdx < groups.length; gIdx += 1) {
+      const grp = groups[gIdx];
+      if (!grp || grp.id === undefined || grp.id === null) continue;
+      const name = String(grp.name || '未命名群聊').trim();
+      const thumbUrl = grp.avatar_url ? resolveAssetHref(String(grp.avatar_url), doc) : '';
+      const memberCount = Array.isArray(grp.members) ? grp.members.length : 0;
+      const parsedLast = Number(grp.date_last_chat) || Date.parse(String(grp.date_last_chat || '')) || 0;
+      items.push({
+        kind: 'group',
+        groupId: grp.id,
+        orderIdx: 100000 + gIdx,
+        key: `group:${String(grp.id)}`,
+        name,
+        avatar: String(grp.avatar_url || ''),
+        thumbUrl,
+        tags: ['群聊', memberCount > 0 ? `${memberCount} 位成员` : ''].filter(Boolean),
+        version: '',
+        note: '',
+        lastTs: Number.isFinite(parsedLast) ? parsedLast : 0,
+      });
+    }
+
+    items.sort((a, b) => {
+      if (b.lastTs !== a.lastTs) return b.lastTs - a.lastTs;
+      return a.orderIdx - b.orderIdx;
+    });
+    return items;
+  }
+
+  function triggerHostCharacterImport(doc) {
+    const smartInput = doc?.getElementById?.('stm-smart-import-input');
+    if (smartInput && typeof smartInput.click === 'function') {
+      smartInput.click();
+      return;
+    }
+    const nativeBtn = doc?.getElementById?.('character_import_button');
+    const nativeInput = doc?.getElementById?.('character_import_file');
+    if (nativeBtn && typeof nativeBtn.click === 'function') nativeBtn.click();
+    else if (nativeInput && typeof nativeInput.click === 'function') nativeInput.click();
+    else toastMessage('未找到酒馆角色卡导入入口', 'warning');
+  }
+
+  function renderHomeCharDirectoryView(container, ctx) {
+    const doc = globalThis.document;
+    const allItems = buildHomeDirectoryItems(ctx, doc);
+    const sec = el('section', 'stm-dock-section stm-cw-dir-card');
+
+    const head = el('div', 'stm-cw-dir-head');
+    const headLeft = el('div', 'stm-cw-dir-head-left');
+    headLeft.append(
+      el('strong', 'stm-sec-title', '角色与群聊名录'),
+      el('span', 'stm-chip', `${allItems.length}`),
+    );
+
+    const headActions = el('div', 'stm-cw-dir-actions');
+    const importBtn = el('button', 'stm-pill-btn');
+    importBtn.type = 'button';
+    importBtn.title = '导入角色卡（支持 PNG / JSON / CHARX 等）';
+    importBtn.append(
+      createIconNode(doc, 'plus', 'stm-inline-svg'),
+      el('span', '', '导入角色卡'),
+    );
+    importBtn.addEventListener('click', () => triggerHostCharacterImport(doc));
+
+    const nativeLink = el('button', 'stm-ghost-link', '原生面板 ›');
+    nativeLink.type = 'button';
+    nativeLink.title = '打开酒馆原生角色管理抽屉（创建群聊或批量打标）';
+    nativeLink.addEventListener('click', () => {
+      close();
+      fallbackOpenNativeDrawer('char', false);
+    });
+
+    headActions.append(importBtn, nativeLink);
+    head.append(headLeft, headActions);
+    sec.append(head);
+
+    if (allItems.length === 0) {
+      const emptyBox = el('div', 'stm-cw-empty-card');
+      emptyBox.append(
+        el('strong', 'stm-cw-empty-title', '当前还没有导入任何角色卡'),
+        el('p', 'stm-cw-empty-desc', '点击上方「导入角色卡」即可直接添加 PNG / JSON 角色卡，或切换到右侧「世界书」管理全局世界书。'),
+      );
+      sec.append(emptyBox);
+      container.append(sec);
+      return;
+    }
+
+    const searchRow = el('div', 'stm-cw-dir-search-row');
+    const searchInput = el('input', 'stm-api-input stm-compact-input stm-cw-dir-search');
+    searchInput.type = 'text';
+    searchInput.placeholder = '搜索角色名、标签或作者备注…';
+    searchInput.value = homeDirQuery;
+    searchRow.append(searchInput);
+    sec.append(searchRow);
+
+    const listWrap = el('div', 'stm-cw-dir-list');
+    listWrap.addEventListener(
+      'scroll',
+      () => {
+        homeDirScrollTop = listWrap.scrollTop || 0;
+      },
+      { passive: true },
+    );
+
+    const renderDirRows = () => {
+      listWrap.replaceChildren();
+      const q = homeDirQuery.trim().toLowerCase();
+      const filtered = q
+        ? allItems.filter(
+            it =>
+              it.name.toLowerCase().includes(q) ||
+              it.note.toLowerCase().includes(q) ||
+              it.tags.some(t => t.toLowerCase().includes(q)),
+          )
+        : allItems;
+
+      if (filtered.length === 0) {
+        listWrap.append(
+          el('div', 'stm-cw-dir-empty', `没有匹配「${homeDirQuery.trim()}」的角色或群聊`),
+        );
+        return;
+      }
+
+      const limit = 80;
+      const shown = filtered.slice(0, limit);
+      for (const item of shown) {
+        const rowBtn = el('button', 'stm-cw-dir-row');
+        rowBtn.type = 'button';
+        rowBtn.dataset.entityKey = item.key;
+
+        const coverBox = el('div', 'stm-cw-dir-cover');
+        const firstChar = [...item.name][0] || '角';
+        coverBox.append(el('span', 'stm-cw-dir-letter', firstChar));
+        if (item.thumbUrl) {
+          const img = el('img', 'stm-cw-dir-img');
+          img.alt = '';
+          img.loading = 'lazy';
+          img.decoding = 'async';
+          img.src = item.thumbUrl;
+          img.addEventListener('error', () => img.remove());
+          coverBox.append(img);
+        }
+
+        const mainCol = el('div', 'stm-cw-dir-main');
+        const titleLine = el('div', 'stm-cw-dir-titleline');
+        titleLine.append(el('strong', 'stm-cw-dir-name', item.name));
+        if (item.version) {
+          titleLine.append(el('span', 'stm-cw-dir-ver', item.version));
+        }
+        if (item.addedAt > 0) {
+          const importFmt = formatSubtleImportTime(item.addedAt);
+          if (importFmt.shortText) {
+            const timeSpan = el('span', 'stm-subtle-import-time', importFmt.shortText);
+            timeSpan.title = importFmt.fullTitle;
+            titleLine.append(timeSpan);
+          }
+        }
+        mainCol.append(titleLine);
+
+        if (item.note) {
+          mainCol.append(el('div', 'stm-cw-dir-note', item.note));
+        }
+
+        if (item.tags.length > 0) {
+          const tagsLine = el('div', 'stm-cw-dir-tags');
+          for (const tg of item.tags.slice(0, 5)) {
+            tagsLine.append(el('span', 'stm-cw-dir-tag', tg));
+          }
+          if (item.tags.length > 5) {
+            tagsLine.append(el('span', 'stm-cw-dir-tag is-more', `+${item.tags.length - 5}`));
+          }
+          mainCol.append(tagsLine);
+        }
+
+        const goSpan = el('span', 'stm-cw-dir-go', '进入 ›');
+        rowBtn.append(coverBox, mainCol, goSpan);
+
+        rowBtn.addEventListener('click', async () => {
+          if (openingEntityBusy) return;
+          openingEntityBusy = true;
+          rowBtn.disabled = true;
+          try {
+            if (item.kind === 'group') {
+              const base = doc?.baseURI || globalThis.location?.href;
+              const grpMod = base ? await import(new URL('scripts/group-chats.js', base).href) : null;
+              if (typeof grpMod?.openGroupById === 'function') {
+                await grpMod.openGroupById(item.groupId);
+              } else {
+                throw new Error('未找到群聊打开接口');
+              }
+            } else if (typeof ctx?.selectCharacterById === 'function') {
+              await ctx.selectCharacterById(item.chid, { switchMenu: false });
+            } else {
+              throw new Error('当前酒馆未提供角色选择接口');
+            }
+            close();
+          } catch (err) {
+            toastMessage(err?.message || '打开角色失败，请稍后重试', 'warning');
+            rowBtn.disabled = false;
+          } finally {
+            openingEntityBusy = false;
+          }
+        });
+
+        listWrap.append(rowBtn);
+      }
+
+      if (filtered.length > shown.length) {
+        listWrap.append(
+          el(
+            'div',
+            'stm-cw-dir-more-hint',
+            `已展示最近游玩的 ${shown.length} / ${filtered.length} 项，输入关键词可即时检索全部角色`,
+          ),
+        );
+      }
+    };
+
+    searchInput.addEventListener('input', () => {
+      homeDirQuery = searchInput.value;
+      homeDirScrollTop = 0;
+      renderDirRows();
+    });
+
+    renderDirRows();
+    sec.append(listWrap);
+    container.append(sec);
+
+    if (homeDirScrollTop > 0) {
+      queueMicrotask(() => {
+        if (listWrap.isConnected) {
+          listWrap.scrollTop = homeDirScrollTop;
+        }
+      });
+    }
+  }
+
   function renderCharTab(container) {
     const ctx = getContext?.();
     const profile = readMergedCharProfile(ctx);
     const activation = resolveWorldInfoActivationState({ getContext });
 
     if (!profile.active || profile.kind === 'none') {
-      const emptyCard = el('div', 'stm-cw-empty-card');
-      emptyCard.append(
-        el('strong', 'stm-cw-empty-title', '当前尚未进入角色对话'),
-        el('p', 'stm-cw-empty-desc', '请先从书架打开任意角色卡或群聊，即可查看角色设定、导出角色卡或一键切换开场白；也可直接切到右侧「清爽世界书」管理全局世界书。'),
-      );
-      const goWorldBtn = el('button', 'stm-cw-primary-btn', '切换到清爽世界书 ›');
-      goWorldBtn.type = 'button';
-      goWorldBtn.addEventListener('click', () => {
-        if (!isTabTakeoverEnabled('world')) {
-          close();
-          fallbackOpenNativeDrawer('world', false);
-          return;
-        }
-        activeTab = 'world';
-        renderHeader();
-        renderBody();
-      });
-      emptyCard.append(goWorldBtn);
-      container.append(emptyCard);
+      renderHomeCharDirectoryView(container, ctx);
       return;
     }
 
@@ -3197,7 +3498,7 @@ export function createCharWorldDock({
     dockEl.id = 'stm-char-world-dock';
     dockEl.className = 'stm-char-world-dock';
     dockEl.setAttribute('role', 'dialog');
-    dockEl.setAttribute('aria-label', '角色档案与清爽世界书一体页');
+    dockEl.setAttribute('aria-label', '角色档案与世界书一体页');
     dockEl.hidden = true;
     dockEl.replaceChildren();
 
@@ -3296,7 +3597,7 @@ export function createCharWorldDock({
     confirmDeleteEntryUid = null;
 
     if (!charAutoSaver.hasPending() && !worldAutoSaver.hasPending()) {
-      saveBadgeState = { tone: 'idle', text: '改动自动存盘' };
+      saveBadgeState = { tone: 'idle', text: '自动保存' };
     }
 
     const activation = resolveWorldInfoActivationState({ getContext });

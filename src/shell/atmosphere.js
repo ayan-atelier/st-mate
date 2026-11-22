@@ -6,9 +6,9 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.8.7';
-import { sanitizeHexColor } from '../core/schema.js?v=0.8.7';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.8.7';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.8.8c';
+import { sanitizeHexColor } from '../core/schema.js?v=0.8.8c';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.8.8c';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -21,6 +21,7 @@ const LOW_FREQ_OPTION_IDS = Object.freeze([
 export const OPTIONS_MENU_PRIMARY_ORDER = Object.freeze([
   { id: 'option_regenerate', label: '重新生成', group: 'gen' },
   { id: 'option_continue', label: '续写', group: 'gen' },
+  { id: 'yt-memory-menu', label: '叙事记忆', group: 'chat' },
   { id: 'option_start_new_chat', label: '开启新对话', group: 'chat' },
   { id: 'option_new_bookmark', label: '保存', group: 'chat' },
   { id: 'option_select_chat', label: '存档管理', group: 'chat' },
@@ -29,7 +30,12 @@ export const OPTIONS_MENU_PRIMARY_ORDER = Object.freeze([
   { id: 'option_close_chat', label: '退出', group: 'chat' },
 ]);
 
+export const HUIWEN_FONT_FACE_CSS =
+  '@font-face{font-family:"StmHuiwenMincho";src:local("Huiwen-mincho"),local("汇文明朝体"),local("汇文明朝"),url("https://cdn.jsdelivr.net/npm/webfont-2@1.0.0/huiwen-mincho.woff") format("woff"),url("https://unpkg.com/webfont-2@1.0.0/huiwen-mincho.woff") format("woff");font-weight:400;font-style:normal;font-display:swap;}';
+
 export const FONT_STACKS = Object.freeze({
+  huiwen:
+    '"StmHuiwenMincho", "Huiwen-mincho", "汇文明朝体", "Songti SC", "STSong", "Noto Serif SC", serif',
   serif: '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif',
   sans: 'system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif',
   kai: '"LXGW WenKai", "Kaiti SC", "STKaiti", "KaiTi", serif',
@@ -451,6 +457,21 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
   }
 
   async function syncCustomFontFace(doc, readerActive, vibe) {
+    const wantHuiwen = Boolean(readerActive && vibe.fontChoice === 'huiwen');
+    if (wantHuiwen) {
+      customFontAbort?.abort?.();
+      customFontAbort = null;
+      if (loadedCustomFontUrl === 'builtin:huiwen' && fontStyleEl?.isConnected) return;
+      loadedCustomFontUrl = 'builtin:huiwen';
+      if (!fontStyleEl || !fontStyleEl.isConnected) {
+        fontStyleEl = doc.getElementById('stm-reader-fontface') || doc.createElement('style');
+        fontStyleEl.id = 'stm-reader-fontface';
+        doc.head.append(fontStyleEl);
+      }
+      fontStyleEl.textContent = HUIWEN_FONT_FACE_CSS;
+      return;
+    }
+
     const wantCustom = Boolean(readerActive && vibe.fontChoice === 'custom' && vibe.customFontUrl);
     if (!wantCustom) {
       customFontAbort?.abort?.();

@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
-import { normalizePresetStudio } from '../core/schema.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.8.8c';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 
@@ -570,7 +570,71 @@ export function resolveTargetPresetForEntity(presetStudio, ctxOrChar, availableP
 }
 
 /**
- * 当预设重命名时，同步迁移 `defaultPreset`、`charBindings` 与 `archivedPresets` 中的预设名引用，绝不断链。
+ * 将角色卡或预设的导入时间戳格式化为极简、不抢戏的微标文本：
+ * - 同年展示 `MM-DD`（如 `11-22`），跨年展示 `YY-MM-DD`（如 `25-12-08`）；
+ * - 悬停 `fullTitle` 展示精确到分钟的 `导入于 YYYY-MM-DD HH:mm`；
+ * - 无效或 0 时间戳返回空字符串（历史存量无时间戳预设保持留白，不伪造时间）。
+ */
+export function formatSubtleImportTime(rawTs, { nowMs = Date.now() } = {}) {
+  const num = Number(rawTs);
+  if (!Number.isFinite(num) || num <= 0) {
+    return { shortText: '', fullTitle: '' };
+  }
+  const ms = num < 1e11 ? Math.round(num * 1000) : Math.round(num);
+  const dt = new Date(ms);
+  if (Number.isNaN(dt.getTime())) {
+    return { shortText: '', fullTitle: '' };
+  }
+  const nowDt = new Date(Number.isFinite(Number(nowMs)) && Number(nowMs) > 0 ? Number(nowMs) : Date.now());
+  const yyyy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const hh = String(dt.getHours()).padStart(2, '0');
+  const mi = String(dt.getMinutes()).padStart(2, '0');
+  const shortText = yyyy === nowDt.getFullYear() ? `${mm}-${dd}` : `${String(yyyy).slice(-2)}-${mm}-${dd}`;
+  return {
+    shortText,
+    fullTitle: `导入于 ${yyyy}-${mm}-${dd} ${hh}:${mi}`,
+  };
+}
+
+/**
+ * 记录一个或多个新导入/另存预设的导入时间戳（纯函数，返回归一化后的新 `presetStudio`）。
+ */
+export function recordPresetImportedAt(presetStudio, presetNames, ts = Date.now()) {
+  const base = normalizePresetStudio(presetStudio);
+  const list = Array.isArray(presetNames) ? presetNames : [presetNames];
+  const validTs = Number.isFinite(Number(ts)) && Number(ts) > 0 ? Math.round(Number(ts)) : Date.now();
+  const nextImportedAt = { ...base.importedAt };
+  let changed = false;
+
+  for (const raw of list) {
+    const clean = cleanPresetName(raw);
+    if (!clean) continue;
+    nextImportedAt[clean] = validTs;
+    changed = true;
+  }
+
+  if (!changed) return base;
+  return normalizePresetStudio({
+    ...base,
+    importedAt: nextImportedAt,
+  });
+}
+
+function stampHostPresetImportedAt(ctx, presetNames, ts = Date.now()) {
+  const hostStore = ctx?.extensionSettings;
+  if (!hostStore || typeof hostStore !== 'object') return;
+  const current =
+    hostStore[STM_NAMESPACE] && typeof hostStore[STM_NAMESPACE] === 'object'
+      ? hostStore[STM_NAMESPACE]
+      : (hostStore[STM_NAMESPACE] = {});
+  current.presetStudio = recordPresetImportedAt(current.presetStudio, presetNames, ts);
+  ctx.saveSettingsDebounced?.();
+}
+
+/**
+ * 当预设重命名时，同步迁移 `defaultPreset`、`charBindings`、`archivedPresets` 与 `importedAt` 中的预设名引用，绝不断链。
  */
 export function renamePresetReferences(presetStudio, oldName, newName) {
   const base = normalizePresetStudio(presetStudio);
@@ -584,16 +648,21 @@ export function renamePresetReferences(presetStudio, oldName, newName) {
     nextBindings[k] = v === from ? to : v;
   }
   const nextArchived = base.archivedPresets.map(name => (name === from ? to : name));
+  const nextImportedAt = {};
+  for (const [name, ts] of Object.entries(base.importedAt || {})) {
+    nextImportedAt[name === from ? to : name] = ts;
+  }
 
   return normalizePresetStudio({
     defaultPreset: nextDefault,
     charBindings: nextBindings,
     archivedPresets: nextArchived,
+    importedAt: nextImportedAt,
   });
 }
 
 /**
- * 当预设被物理删除时，自动清理残留在 `defaultPreset`、`charBindings` 与 `archivedPresets` 中的死链。
+ * 当预设被物理删除时，自动清理残留在 `defaultPreset`、`charBindings`、`archivedPresets` 与 `importedAt` 中的死链。
  */
 export function cleanupDeletedPresetReferences(presetStudio, deletedName) {
   const base = normalizePresetStudio(presetStudio);
@@ -608,11 +677,14 @@ export function cleanupDeletedPresetReferences(presetStudio, deletedName) {
     }
   }
   const nextArchived = base.archivedPresets.filter(name => name !== target);
+  const nextImportedAt = { ...(base.importedAt || {}) };
+  delete nextImportedAt[target];
 
   return normalizePresetStudio({
     defaultPreset: nextDefault,
     charBindings: nextBindings,
     archivedPresets: nextArchived,
+    importedAt: nextImportedAt,
   });
 }
 
@@ -680,6 +752,7 @@ export function partitionPresetsByArchive(
       isArchived: archivedSet.has(name),
       boundCount: boundKeys.length,
       boundKeys,
+      importedAt: Number(ps.importedAt?.[name]) || 0,
     };
 
     if (item.isArchived) {
@@ -1355,7 +1428,7 @@ export function createPresetAutoSaver({
     activeSavingCount += 1;
     onStateChange?.({
       tone: 'warn',
-      text: '正在保存至预设…',
+      text: '保存中…',
       saving: true,
       presetName: record.presetName,
     });
@@ -1369,8 +1442,8 @@ export function createPresetAutoSaver({
           if (activeSavingCount <= 1 && !pendingRecord) {
             onStateChange?.(
               ok
-                ? { tone: 'ok', text: '已自动保存至预设', saving: false, presetName: record.presetName }
-                : { tone: 'idle', text: '改动自动存盘', saving: false, presetName: record.presetName },
+                ? { tone: 'ok', text: '已保存', saving: false, presetName: record.presetName }
+                : { tone: 'idle', text: '自动保存', saving: false, presetName: record.presetName },
             );
           }
           return ok;
@@ -1423,7 +1496,7 @@ export function createPresetAutoSaver({
 
     onStateChange?.({
       tone: 'warn',
-      text: '待自动保存…',
+      text: '待保存…',
       saving: activeSavingCount > 0,
       presetName: targetName,
     });
@@ -1492,6 +1565,8 @@ export async function applyPresetSnapshotToHost(
   for (const [presetKey, oaiKey] of OAI_PRESET_KEY_PAIRS) {
     if (p[presetKey] !== undefined) {
       oai[oaiKey] = structuredClone(p[presetKey]);
+    } else if (presetKey === 'extensions') {
+      oai[oaiKey] = {};
     }
   }
 
@@ -1702,6 +1777,10 @@ export async function importPresetItems(
     }
   }
 
+  if (imported.length > 0) {
+    stampHostPresetImportedAt(getContext?.(), imported);
+  }
+
   if (selectFirstImported && imported.length > 0) {
     await selectHostPresetByName(imported[0], { getContext, doc });
   }
@@ -1791,6 +1870,32 @@ export async function duplicateHostPreset(
     selectSaved: selectDuplicate,
     doc,
   });
+
+  if (
+    saved?.ok &&
+    saved.name &&
+    Array.isArray(payload?.extensions?.regex_scripts) &&
+    payload.extensions.regex_scripts.length > 0 &&
+    ctx?.extensionSettings &&
+    typeof ctx.extensionSettings === 'object'
+  ) {
+    const apiId = pm?.apiId || 'openai';
+    const allowMap =
+      ctx.extensionSettings.preset_allowed_regex &&
+      typeof ctx.extensionSettings.preset_allowed_regex === 'object'
+        ? ctx.extensionSettings.preset_allowed_regex
+        : (ctx.extensionSettings.preset_allowed_regex = {});
+    const list = Array.isArray(allowMap[apiId]) ? allowMap[apiId] : (allowMap[apiId] = []);
+    const srcAllowed = !srcName || list.includes(srcName) || list.includes('gui');
+    if (srcAllowed && !list.includes(saved.name)) {
+      list.push(saved.name);
+      ctx.saveSettingsDebounced?.();
+    }
+  }
+
+  if (saved?.ok && saved.name) {
+    stampHostPresetImportedAt(ctx, [saved.name]);
+  }
 
   return saved;
 }

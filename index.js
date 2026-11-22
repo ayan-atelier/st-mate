@@ -10,43 +10,44 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.8.7';
+} from './src/core/env.js?v=0.8.8c';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.8.7';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.7';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.7';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.7';
-import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.7';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.7';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.7';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.8.7';
-import { createTopbar } from './src/shell/topbar.js?v=0.8.7';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.7';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.7';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.7';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.7';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.7';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.7';
+} from './src/core/file-saver.js?v=0.8.8c';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.8.8c';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.8.8c';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.8.8c';
+import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.8.8c';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.8.8c';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.8.8c';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.8.8c';
+import { createTopbar } from './src/shell/topbar.js?v=0.8.8c';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.8.8c';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.8.8c';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.8.8c';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.8.8c';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.8.8c';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.8.8c';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.8.7';
-import { createApiDock } from './src/modules/api-dock.js?v=0.8.7';
+} from './src/modules/assistant-core.js?v=0.8.8c';
+import { createApiDock } from './src/modules/api-dock.js?v=0.8.8c';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.8.7';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.7';
-import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.7';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.7';
-import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.8.7';
-import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.7';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.7';
+} from './src/modules/preset-backend.js?v=0.8.8c';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.8.8c';
+import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=0.8.8c';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.8.8c';
+import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.8.8c';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.8.8c';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.8.8c';
 
-const STM_VERSION = '0.8.7';
+const STM_VERSION = '0.8.8';
+const STM_ASSET_REV = '0.8.8c';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -59,10 +60,10 @@ function ensureFreshStylesheet() {
     const href = link.getAttribute('href') || '';
     if (
       (href.includes('st-mate/style.css') || href.includes('yantai-bookshelf/style.css')) &&
-      !href.includes(`v=${STM_VERSION}`)
+      !href.includes(`v=${STM_ASSET_REV}`)
     ) {
       const baseHref = href.split('?')[0];
-      link.setAttribute('href', `${baseHref}?v=${STM_VERSION}`);
+      link.setAttribute('href', `${baseHref}?v=${STM_ASSET_REV}`);
     }
   }
 }
@@ -314,7 +315,7 @@ function createStMateRuntime() {
         SlashCommand.fromProps({
           name: 'stmate',
           helpString:
-            '打开 ST伴侣设置中心（传入 import 呼出万能自动分流导入，char 打开角色档案，world 打开清爽世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
+            '打开 ST伴侣设置中心（传入 import 呼出万能自动分流导入，char 打开角色档案，world 打开世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {

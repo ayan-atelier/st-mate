@@ -3,7 +3,7 @@
  * 封装返回首页、打开/关闭原生抽屉、读取当前角色/群聊头像与名称等标准动作。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
 
 let coreModulePromise = null;
 let groupModulePromise = null;
@@ -172,13 +172,19 @@ export function closeAllNativeDrawers() {
   const doc = globalThis.document;
   if (!doc) return;
   const openDrawers = doc.querySelectorAll('#top-settings-holder > .drawer');
-  for (const drawer of openDrawers) {
-    const content = drawer.querySelector(':scope > .drawer-content');
-    if (!content || !content.classList.contains('openDrawer') || content.classList.contains('pinnedOpen')) {
-      continue;
+  const prevBypass = globalThis.__stmBypassNativeCapture;
+  globalThis.__stmBypassNativeCapture = true;
+  try {
+    for (const drawer of openDrawers) {
+      const content = drawer.querySelector(':scope > .drawer-content');
+      if (!content || !content.classList.contains('openDrawer') || content.classList.contains('pinnedOpen')) {
+        continue;
+      }
+      const toggle = drawer.querySelector(':scope > .drawer-toggle');
+      toggle?.click();
     }
-    const toggle = drawer.querySelector(':scope > .drawer-toggle');
-    toggle?.click();
+  } finally {
+    globalThis.__stmBypassNativeCapture = prevBypass;
   }
 }
 
@@ -197,16 +203,22 @@ export function openNativeDrawer(drawerId, { toggleIfOpen = false, getContext = 
   const toggle = drawer.querySelector(':scope > .drawer-toggle');
   if (!content || !toggle) return false;
 
-  const alreadyOpen = content.classList.contains('openDrawer');
-  if (alreadyOpen) {
-    if (toggleIfOpen) {
-      toggle.click();
-      return false;
+  const prevBypass = globalThis.__stmBypassNativeCapture;
+  globalThis.__stmBypassNativeCapture = true;
+  try {
+    const alreadyOpen = content.classList.contains('openDrawer');
+    if (alreadyOpen) {
+      if (toggleIfOpen) {
+        toggle.click();
+        return false;
+      }
+      return true;
     }
-    return true;
-  }
 
-  toggle.click();
+    toggle.click();
+  } finally {
+    globalThis.__stmBypassNativeCapture = prevBypass;
+  }
 
   // 打开右侧角色抽屉时，若当前正在单人角色卡对话中，自动切到「当前角色详情」页签，省去二次点击
   if (drawerId === 'rightNavHolder') {

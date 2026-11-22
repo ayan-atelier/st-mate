@@ -13,11 +13,12 @@ import {
   findInstalledYantaiPresetName,
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
-} from '../core/companion-kit.js?v=0.8.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.7';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.8.7';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.8.7';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.8.7';
+} from '../core/companion-kit.js?v=0.8.8c';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.8c';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.8.8c';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.8.8c';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.8.8c';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.8.8c';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -64,7 +65,7 @@ const CORE_TAKEOVER_ROWS = Object.freeze([
     drawerId: 'WI-SP-button',
     icon: 'globe',
     title: '世界书',
-    desc: '开启时使用「清爽世界书」（四源防假生效自检、蓝绿灯一指秒切）；点左侧「进入原版」直达酒馆原生世界书配置高级递归或向量参数，关闭右侧开关则常驻使用原版。',
+    desc: '开启时使用伴侣「世界书」面板（四源防假生效自检、蓝绿灯一指秒切、批量清理与重导卡内书）；点左侧「进入原版」直达酒馆原生世界书配置高级递归或向量参数，关闭右侧开关则常驻使用原版。',
   },
 ]);
 
@@ -86,6 +87,7 @@ export function createSettingsDialog({
   let activeTab = 'modules';
   let activeSubView = ''; // '' | 'tidy'
   let expandedHelpKey = '';
+  let nativeBarFoldOpen = false;
   let themePickerOpen = false;
   let applyingThemeBusy = false;
   let importingPresetBusy = false;
@@ -383,6 +385,97 @@ export function createSettingsDialog({
     }
 
     card.append(choiceGrid);
+
+    if (current.topbarMode === 'native') {
+      const hiddenSet = new Set(
+        Array.isArray(current.nativeTopbarHiddenIcons) ? current.nativeTopbarHiddenIcons : [],
+      );
+      const totalIcons = NATIVE_TOPBAR_DRAWER_ITEMS.length;
+      const shownCount = Math.max(0, totalIcons - hiddenSet.size);
+
+      const foldWrap = el(
+        'div',
+        `stm-native-bar-fold${nativeBarFoldOpen ? ' is-open' : ''}${!current.shellEnabled ? ' is-disabled' : ''}`,
+      );
+
+      const foldHead = el('div', 'stm-native-bar-fold-head');
+      const foldToggle = el('button', 'stm-native-bar-fold-btn');
+      foldToggle.type = 'button';
+      foldToggle.disabled = !current.shellEnabled;
+      foldToggle.setAttribute('aria-expanded', String(nativeBarFoldOpen));
+      foldToggle.append(
+        el('span', 'stm-native-bar-fold-title', `原版顶栏图标显示设置（已显示 ${shownCount}/${totalIcons}）`),
+        el('span', 'stm-native-bar-fold-caret', nativeBarFoldOpen ? '▴' : '▾'),
+      );
+      foldToggle.addEventListener('click', () => {
+        if (!current.shellEnabled) return;
+        nativeBarFoldOpen = !nativeBarFoldOpen;
+        render();
+      });
+      foldHead.append(foldToggle);
+
+      if (hiddenSet.size > 0 && current.shellEnabled) {
+        const showAllBtn = el('button', 'stm-reset-link', '全部显示');
+        showAllBtn.type = 'button';
+        showAllBtn.addEventListener('click', () => {
+          updateStoreFromDialog({ nativeTopbarHiddenIcons: [] });
+        });
+        foldHead.append(showAllBtn);
+      }
+      foldWrap.append(foldHead);
+
+      if (nativeBarFoldOpen) {
+        const foldBody = el('div', 'stm-native-bar-fold-body');
+        foldBody.append(
+          el(
+            'div',
+            'stm-native-bar-fold-hint',
+            '默认保留全部原生顶栏图标（含「背景图」），取消勾选即可在原版顶栏中收起不常用的入口。',
+          ),
+        );
+        const iconGrid = el('div', 'stm-native-icon-grid');
+        for (const itemSpec of NATIVE_TOPBAR_DRAWER_ITEMS) {
+          const isVisible = !hiddenSet.has(itemSpec.id);
+          const pillBtn = el(
+            'button',
+            `stm-native-icon-pill${isVisible ? ' is-on' : ' is-off'}`,
+          );
+          pillBtn.type = 'button';
+          pillBtn.disabled = !current.shellEnabled;
+          pillBtn.setAttribute('aria-pressed', String(isVisible));
+          pillBtn.dataset.drawerId = itemSpec.id;
+
+          const checkBox = el('span', `stm-bind-checkbox${isVisible ? ' is-checked' : ''}`);
+          if (isVisible) {
+            checkBox.innerHTML = svgMarkup('check');
+          }
+          pillBtn.append(
+            checkBox,
+            createIconNode(doc, itemSpec.icon, 'stm-inline-svg'),
+            el('span', 'stm-native-icon-pill-label', itemSpec.label),
+          );
+          pillBtn.addEventListener('click', () => {
+            if (!current.shellEnabled) return;
+            const nextHidden = new Set(
+              Array.isArray(store.get().nativeTopbarHiddenIcons)
+                ? store.get().nativeTopbarHiddenIcons
+                : [],
+            );
+            if (nextHidden.has(itemSpec.id)) {
+              nextHidden.delete(itemSpec.id);
+            } else {
+              nextHidden.add(itemSpec.id);
+            }
+            updateStoreFromDialog({ nativeTopbarHiddenIcons: [...nextHidden] });
+          });
+          iconGrid.append(pillBtn);
+        }
+        foldBody.append(iconGrid);
+        foldWrap.append(foldBody);
+      }
+
+      card.append(foldWrap);
+    }
 
     if (isGuideOpen) {
       const guideBox = el('div', 'stm-switch-help-pop is-guide');

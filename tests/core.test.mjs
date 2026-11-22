@@ -226,6 +226,7 @@ test('schema: 默认设置严格符合产品约定，新用户轻触全屏默认
     defaultPreset: '',
     charBindings: {},
     archivedPresets: [],
+    importedAt: {},
   });
 });
 
@@ -2531,8 +2532,8 @@ test('assistant-core: 多轮会话控制器最近 8 轮滑动裁剪，剥离历�
   assert.equal(session.getTurnCount(), 0);
 });
 
-test('preset-assistant: 超长正文智能截断序列化 + 6 类安全原子操作校验与系统槽防误删降级', () => {
-  assert.equal(PRESET_ASSISTANT_QUICK_PROMPTS.length, 4);
+test('preset-assistant: 超长正文智能截断序列化 + 7 类安全原子操作校验与系统槽防误删降级', () => {
+  assert.equal(PRESET_ASSISTANT_QUICK_PROMPTS.length, 5);
   assert.ok(buildPresetAssistantSystemPrompt().includes('operations'));
 
   // 1. 验证 >1800 字单条正文智能截取前 1200 字 + 后 400 字并注明总字数
@@ -6772,10 +6773,10 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
 
     const diskExtensions = new Map([
       ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
-      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.1', isUpToDate: false }],
-      ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.6', isUpToDate: true }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.2', isUpToDate: false }],
+      ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.7', isUpToDate: true }],
       ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
-      ['third-party/yantai-memory', { type: 'local', version: '0.4.0', isUpToDate: true }],
+      ['third-party/yantai-memory', { type: 'local', version: '0.4.1', isUpToDate: true }],
     ]);
     const installCalls = [];
     const versionCalls = [];
@@ -6851,7 +6852,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
     let memoryPanelOpened = false;
     moduleBridge.registry.modules.set('yantai-memory', {
       id: 'yantai-memory',
-      version: '0.4.0',
+      version: '0.4.1',
       inspect: () => ({ enabled: store.get().modules.memory }),
       setEnabled: async () => true,
       open: () => {
@@ -8328,6 +8329,517 @@ test('v0.8.7: 书架删角色卡/删档后自动跳过酒馆 SAFETY_CHAT 安全�
     assert.equal(forcedWelcomeCount, 1, '强制唤起欢迎面板供书架无缝挂载');
     assert.equal(Boolean(chatEl.querySelector('.mes')), false, '移除残留的 #0 系统消息气泡');
     assert.ok(chatEl.querySelector('.welcomePanel'), '欢迎页节点已恢复就绪');
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('v0.8.8: 预设馆伴侣助手支持 upsert_regex 配齐半透折叠美化正则与省流剥离正则、消除 4 空格缩进并一键撤回', async () => {
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const presetSelect = doc.createElement('select');
+    presetSelect.id = 'settings_preset_openai';
+    const opt = doc.createElement('option');
+    opt.value = '0';
+    opt.textContent = '测试裸预设';
+    opt.selected = true;
+    presetSelect.append(opt);
+    doc.body.append(presetSelect);
+
+    let reloadedChatCount = 0;
+    const oai = {
+      openai_max_context: 32768,
+      openai_max_tokens: 4096,
+      temp_openai: 0.9,
+      prompts: [
+        { identifier: 'main', name: 'Main Prompt', system_prompt: true, role: 'system', content: '基础设定' },
+        { identifier: 'chatHistory', name: 'Chat History', marker: true },
+      ],
+      prompt_order: [
+        {
+          character_id: 100001,
+          order: [
+            { identifier: 'main', enabled: true },
+            { identifier: 'chatHistory', enabled: true },
+          ],
+        },
+      ],
+    };
+
+    const ctx = {
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'char.png', name: '宋仲庭' }],
+      chatCompletionSettings: oai,
+      extensionSettings: {},
+      saveSettingsDebounced() {},
+      getPresetManager: () => ({
+        apiId: 'openai',
+        getSelectedPresetName: () => '测试裸预设',
+        getPresetList: () => ({ settings: oai, presets: [oai], preset_names: ['测试裸预设'] }),
+        getCompletionPresetByName: () => oai,
+      }),
+      async reloadCurrentChat() {
+        reloadedChatCount += 1;
+      },
+    };
+
+    const sysPrompt = buildPresetAssistantSystemPrompt();
+    assert.ok(sysPrompt.includes('upsert_regex'), '系统提示词包含配套正则指令');
+    assert.ok(sysPrompt.includes('--SmartThemeBodyColor'), '系统提示词包含跟随酒馆主题变量半透卡片模板');
+
+    const rawOps = [
+      {
+        type: 'add_entry',
+        name: '动物塑小剧场',
+        role: 'system',
+        position: 'bottom',
+        content: '每次正剧结束后附带：<动物塑小剧场>[角色动物塑 × {{user}}动物塑]\n正文\n</动物塑小剧场>',
+        reason: '新增末尾小剧场指令',
+      },
+      {
+        type: 'upsert_regex',
+        scriptName: '动物塑小剧场·半透折叠面板',
+        findRegex: '<动物塑小剧场>\\s*(?:\\[([^\\]\\n]+)\\]\\s*)?([\\s\\S]*?)(?:<\\/动物塑小剧场>|$)',
+        replaceString:
+          '    <details open style="border-radius:10px;">\n      <summary>$1</summary>\n      <div>$2</div>\n    </details>',
+        markdownOnly: true,
+        promptOnly: false,
+        reason: '渲染为跟随主题的半透折叠卡片',
+      },
+      {
+        type: 'upsert_regex',
+        scriptName: '动物塑小剧场·历史省流剥离',
+        findRegex: '/<动物塑小剧场>[\\s\\S]*?(?:<\\/动物塑小剧场>|$)/g',
+        replaceString: '',
+        markdownOnly: false,
+        promptOnly: true,
+        minDepth: 1,
+        reason: '历史楼层剥离防比喻串味并省 Token',
+      },
+    ];
+
+    const plan = validateAndPreviewPresetOperations(rawOps, oai);
+    assert.equal(plan.rejected.length, 0);
+    assert.equal(plan.items.length, 3);
+    const displayRxItem = plan.items[1];
+    assert.equal(displayRxItem.type, 'upsert_regex');
+    assert.ok(
+      displayRxItem.normalizedOp.script.findRegex.startsWith('/') &&
+        displayRxItem.normalizedOp.script.findRegex.endsWith('/g'),
+      '无斜杠正则自动包裹为合法 /.../g',
+    );
+    assert.equal(
+      /^[ \t]{4,}/m.test(displayRxItem.normalizedOp.script.replaceString),
+      false,
+      '自动清除可能触发 Markdown 代码块的 4 空格前导缩进',
+    );
+
+    const undoStack = createPresetUndoStack();
+    const savedPayloads = [];
+    const fakeFetch = async (_url, init) => {
+      if (init?.body) savedPayloads.push(JSON.parse(init.body));
+      return { ok: true, json: async () => ({ name: '测试裸预设' }) };
+    };
+
+    const applied = await applySelectedPresetOperations({
+      previewItems: plan.items,
+      targetPresetName: '测试裸预设',
+      undoStack,
+      getContext: () => ctx,
+      persistImmediately: true,
+      fetchImpl: fakeFetch,
+      doc,
+    });
+
+    assert.equal(applied.ok, true);
+    assert.equal(applied.appliedCount, 3);
+    assert.equal(oai.extensions?.regex_scripts?.length, 2, '预设内成功写入 2 条配套正则');
+    assert.equal(
+      ctx.extensionSettings.preset_allowed_regex?.openai?.includes('测试裸预设'),
+      true,
+      '自动为当前预设放行预设正则执行权限',
+    );
+    assert.equal(reloadedChatCount, 1, '应用正则后立即重绘当前聊天楼层');
+
+    const serializedAfter = serializePresetContext({ getContext: () => ctx, doc });
+    assert.equal(serializedAfter.counts.preset_regex, 2);
+    assert.equal(serializedAfter.preset_regex_scripts.length, 2);
+
+    const undone = await undoLastPresetOperation({
+      undoStack,
+      getContext: () => ctx,
+      fetchImpl: fakeFetch,
+      doc,
+    });
+    assert.equal(undone.ok, true);
+    assert.equal(
+      Array.isArray(oai.extensions?.regex_scripts) ? oai.extensions.regex_scripts.length : 0,
+      0,
+      '一键撤回后预设内新增正则一并干净还原',
+    );
+    assert.equal(reloadedChatCount, 2, '撤回正则后同步刷新当前聊天渲染');
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('v0.8.8: 原版顶栏模式默认保留原生背景图图标，并支持在原版顶栏卡片下方展开图标显示自定义', async () => {
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const { createTopbar } = await import('../src/shell/topbar.js');
+    const { createSettingsDialog } = await import('../src/shell/settings-dialog.js');
+
+    const holder = doc.createElement('div');
+    holder.id = 'top-settings-holder';
+    const bgDrawer = doc.createElement('div');
+    bgDrawer.id = 'backgrounds-button';
+    bgDrawer.className = 'drawer';
+    const extDrawer = doc.createElement('div');
+    extDrawer.id = 'extensions-settings-button';
+    extDrawer.className = 'drawer';
+    holder.append(bgDrawer, extDrawer);
+    doc.body.append(holder);
+
+    const ctx = {
+      extensionSettings: {},
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.update({ topbarMode: 'native' });
+
+    assert.deepEqual(store.get().nativeTopbarHiddenIcons, [], '默认不隐藏任何原版顶栏图标');
+
+    const topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null },
+    });
+    topbar.refresh();
+
+    assert.equal(
+      bgDrawer.getAttribute('data-stm-native-hidden'),
+      null,
+      '原版顶栏下原生背景图图标默认完整保留显示',
+    );
+
+    const settingsDlg = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null, syncModuleEnabled: async () => {} },
+    });
+    settingsDlg.open('modules');
+
+    const foldWrap = doc.querySelector('.stm-native-bar-fold');
+    assert.ok(foldWrap, '选中原版顶栏时下方渲染折叠式图标自定义栏');
+    const foldBtn = foldWrap.querySelector('.stm-native-bar-fold-btn');
+    assert.ok(foldBtn);
+    foldBtn.dispatchEvent({ type: 'click' });
+
+    const openedFold = doc.querySelector('.stm-native-bar-fold');
+    const pills = openedFold.querySelectorAll('.stm-native-icon-pill');
+    assert.equal(pills.length, 9, '展示全部 9 枚原生顶栏抽屉开关');
+
+    const bgPill = pills.find(p => p.dataset.drawerId === 'backgrounds-button');
+    assert.ok(bgPill);
+    bgPill.dispatchEvent({ type: 'click' });
+
+    topbar.refresh();
+    assert.deepEqual(store.get().nativeTopbarHiddenIcons, ['backgrounds-button']);
+    assert.equal(bgDrawer.getAttribute('data-stm-native-hidden'), '1', '取消勾选后精确收起对应图标');
+    assert.equal(extDrawer.getAttribute('data-stm-native-hidden'), null, '其余图标不受影响');
+
+    topbar.destroy();
+    settingsDlg.destroy?.();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('v0.8.8: 原版顶栏未进卡点角色图标展开伴侣「角色名录」（支持搜索进卡与原生面板透传），且页签正名为「世界书」', async () => {
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const { createTopbar } = await import('../src/shell/topbar.js');
+    const { createCharWorldDock } = await import('../src/modules/char-world-dock.js');
+
+    const holder = doc.createElement('div');
+    holder.id = 'top-settings-holder';
+    const chrDrawer = doc.createElement('div');
+    chrDrawer.id = 'rightNavHolder';
+    chrDrawer.className = 'drawer';
+    const chrToggle = doc.createElement('div');
+    chrToggle.className = 'drawer-toggle';
+    const chrContent = doc.createElement('div');
+    chrContent.id = 'right-nav-panel';
+    chrContent.className = 'drawer-content closedDrawer';
+    chrToggle.addEventListener('click', () => {
+      const opening = !chrContent.classList.contains('openDrawer');
+      chrContent.classList.toggle('openDrawer', opening);
+      chrContent.classList.toggle('closedDrawer', !opening);
+    });
+    chrDrawer.append(chrToggle, chrContent);
+    holder.append(chrDrawer);
+    doc.body.append(holder);
+
+    let selectedChid = null;
+    const ctx = {
+      characterId: undefined,
+      groupId: null,
+      characters: [
+        {
+          avatar: 'song.png',
+          name: '宋仲庭',
+          creatorcomment: '终极高定焕新版·13剧目全收录',
+          date_last_chat: 2000,
+          data: { character_version: '3.0', tags: ['架空', '年上'] },
+        },
+        {
+          avatar: 'pei.png',
+          name: '裴敬之',
+          creatorcomment: '暗夜密室画报',
+          date_last_chat: 1000,
+          data: { character_version: '2.4', tags: ['民国'] },
+        },
+      ],
+      groups: [],
+      extensionSettings: {},
+      saveSettingsDebounced() {},
+      async selectCharacterById(chid) {
+        selectedChid = chid;
+        ctx.characterId = chid;
+      },
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.update({ topbarMode: 'native' });
+
+    const charWorldDock = createCharWorldDock({
+      getContext: () => ctx,
+      store,
+    });
+
+    const topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null },
+      onToggleCharWorldDock: () => charWorldDock.toggle(),
+      onOpenCharWorldTab: tab => charWorldDock.open(tab),
+      onCloseCharWorldDock: () => charWorldDock.close(),
+      getCharWorldActiveTab: () => charWorldDock.getActiveTab(),
+      isCharWorldDockOpen: () => charWorldDock.isOpen(),
+    });
+    topbar.refresh();
+
+    // 1. 在书架外面（未进任何角色卡）点击原版顶栏最右角色图标 -> 拦截原生抽屉，打开伴侣「角色名录」！
+    chrToggle.click();
+    assert.equal(chrContent.classList.contains('openDrawer'), false, '不直接弹出杂乱原生角色面板');
+    assert.equal(charWorldDock.isOpen(), true, '呼出伴侣角色与世界书一体页');
+    assert.equal(charWorldDock.getActiveTab(), 'char');
+
+    const dockNode = doc.getElementById('stm-char-world-dock');
+    const tabBtns = dockNode.querySelector('.stm-cw-tabs').querySelectorAll('.stm-cw-tab-btn');
+    const readDeepText = node =>
+      [node.textContent || '', ...(node.children || []).map(readDeepText)].join('');
+    assert.ok(readDeepText(tabBtns[0]).includes('角色名录'), '未进卡时左页签显示「角色名录」');
+    assert.ok(readDeepText(tabBtns[1]).includes('世界书'), '右页签显示「世界书」');
+    assert.equal(readDeepText(tabBtns[1]).includes('清爽世界书'), false, '移除「清爽世界书」旧称');
+
+    const rows = dockNode.querySelector('.stm-cw-dir-list').querySelectorAll('.stm-cw-dir-row');
+    assert.equal(rows.length, 2, '渲染全部角色卡片行');
+
+    // 2. 点击「原生面板 ›」可绕过捕获直达原生 #rightNavHolder 抽屉
+    const nativeBtn = dockNode.querySelector('.stm-cw-dir-actions').querySelector('.stm-ghost-link');
+    nativeBtn.click();
+    assert.equal(charWorldDock.isOpen(), false);
+    assert.equal(chrContent.classList.contains('openDrawer'), true, '点原生面板仍可无损打开原生抽屉');
+    chrToggle.click(); // re-open dock (will also close open native drawer cleanly!)
+    assert.equal(chrContent.classList.contains('openDrawer'), false, 'closeAllNativeDrawers 穿透关闭原生抽屉');
+    assert.equal(charWorldDock.isOpen(), true);
+
+    // 3. 点击角色行一键进入对应角色对话并收起下拉面板
+    const freshRow = dockNode.querySelector('.stm-cw-dir-list').querySelectorAll('.stm-cw-dir-row')[0];
+    await freshRow.click();
+    // wait microtasks for async click handler
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(selectedChid, 0, '点击第一行进入宋仲庭对话');
+    assert.equal(charWorldDock.isOpen(), false, '进入对话后自动收起名录面板');
+
+    topbar.destroy();
+    charWorldDock.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('v0.8.8: 新增「汇文明朝」阅读字体（本地优先 + 双 CDN woff 兜底）与角色名录/预设馆轻量导入时间微标', async () => {
+  const prevDoc = globalThis.document;
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  try {
+    const { FONT_CHOICES } = await import('../src/core/schema.js');
+    const { HUIWEN_FONT_FACE_CSS } = await import('../src/shell/atmosphere.js');
+    const { createReaderDock } = await import('../src/shell/reader-dock.js');
+    const { formatSubtleImportTime, recordPresetImportedAt } = await import(
+      '../src/modules/preset-backend.js'
+    );
+    const { parseCharacterAddedAt } = await import('../src/modules/char-world-backend.js');
+    const { createCharWorldDock } = await import('../src/modules/char-world-dock.js');
+    const { createPresetDock } = await import('../src/modules/preset-dock.js');
+
+    // 1. 汇文明朝枚举、@font-face 注入与排版抽屉按钮验证
+    assert.equal(FONT_CHOICES.includes('huiwen'), true, 'FONT_CHOICES 支持 huiwen');
+    assert.match(HUIWEN_FONT_FACE_CSS, /StmHuiwenMincho/);
+    assert.match(HUIWEN_FONT_FACE_CSS, /cdn\.jsdelivr\.net\/npm\/webfont-2@1\.0\.0\/huiwen-mincho\.woff/);
+    assert.match(HUIWEN_FONT_FACE_CSS, /unpkg\.com\/webfont-2@1\.0\.0\/huiwen-mincho\.woff/);
+
+    const norm = normalizeSettings({ vibe: { fontChoice: 'huiwen' } });
+    assert.equal(norm.vibe.fontChoice, 'huiwen');
+    const overrideCss = buildPageOverrideCss(norm.vibe, { readerActive: true });
+    assert.match(overrideCss, /StmHuiwenMincho/, '正文覆盖层应用汇文明朝字体栈');
+
+    const sheld = doc.createElement('div');
+    sheld.id = 'sheld';
+    const chat = doc.createElement('div');
+    chat.id = 'chat';
+    sheld.append(chat);
+    doc.body.append(sheld);
+
+    const activeCtx = {
+      characterId: 0,
+      groupId: null,
+      chat: [{ is_user: false, mes: '开场白' }],
+      characters: [
+        {
+          avatar: 'lu.png',
+          name: '陆承安',
+          date_added: new Date(2026, 10, 22, 16, 30).getTime(),
+          data: { character_version: '1.2' },
+        },
+      ],
+      groups: [],
+      extensionSettings: {},
+      chatCompletionSettings: {
+        preset_settings_openai: '砚台预设_V2.1',
+        openai_max_context: 65536,
+        openai_max_tokens: 4096,
+        temp_openai: 1.0,
+        prompts: [],
+        prompt_order: [],
+      },
+      getPresetManager: () => ({
+        apiId: 'openai',
+        getAllPresets: () => ['砚台预设_V2.1', '新导入预设'],
+        getSelectedPresetName: () => '砚台预设_V2.1',
+      }),
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => activeCtx });
+    store.update({ vibe: { fontChoice: 'huiwen' } });
+
+    const atmosphere = createAtmosphere({
+      getContext: () => activeCtx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    atmosphere.refresh();
+    const fontFaceEl = doc.getElementById('stm-reader-fontface');
+    assert.ok(fontFaceEl, '进入对话且选汇文明朝时挂载 #stm-reader-fontface');
+    assert.match(fontFaceEl.textContent, /huiwen-mincho\.woff/);
+
+    const readerDock = createReaderDock({ getContext: () => activeCtx, store });
+    readerDock.open();
+    const rDockNode = doc.getElementById('stm-reader-dock');
+    const fontCapBtn = rDockNode.querySelector('.stm-wr-capsules').querySelectorAll('.stm-wr-cap')[0];
+    assert.match(fontCapBtn.textContent, /字体·汇文/);
+    fontCapBtn.click();
+    const fontPillTexts = rDockNode
+      .querySelector('.stm-font-pills')
+      .querySelectorAll('.stm-dock-chip-btn')
+      .map(n => n.textContent);
+    assert.deepEqual(fontPillTexts, [
+      '跟随原美化',
+      '汇文明朝',
+      '书卷宋体',
+      '清爽黑体',
+      '温润楷体',
+      '自定义字体链接',
+    ]);
+
+    // 2. 轻量导入时间格式化与预设重命名/删除联动
+    const now2026 = new Date(2026, 10, 22, 18, 0).getTime();
+    const sameYear = formatSubtleImportTime(new Date(2026, 10, 22, 9, 5).getTime(), {
+      nowMs: now2026,
+    });
+    assert.equal(sameYear.shortText, '11-22');
+    assert.equal(sameYear.fullTitle, '导入于 2026-11-22 09:05');
+
+    const prevYear = formatSubtleImportTime(new Date(2025, 11, 8, 21, 30).getTime(), {
+      nowMs: now2026,
+    });
+    assert.equal(prevYear.shortText, '25-12-08');
+    assert.equal(formatSubtleImportTime(0).shortText, '', '无时间戳历史预设留白不伪造');
+
+    assert.equal(
+      parseCharacterAddedAt({ create_date: '2026-11-21 @20h 45m 07s 536ms' }),
+      new Date(2026, 10, 21, 20, 45, 7).getTime(),
+    );
+
+    const stampedPs = recordPresetImportedAt({}, ['古风慢热预设'], new Date(2026, 10, 22, 17, 15).getTime());
+    const renamedPs = renamePresetReferences(stampedPs, '古风慢热预设', '改名后预设');
+    assert.equal(Boolean(renamedPs.importedAt['古风慢热预设']), false);
+    assert.ok(renamedPs.importedAt['改名后预设'] > 0, '预设改名保留导入时间');
+    const cleanedPs = cleanupDeletedPresetReferences(renamedPs, '改名后预设');
+    assert.equal(Boolean(cleanedPs.importedAt['改名后预设']), false, '预设删除清理导入时间');
+
+    // 3. 验证预设馆列表：新导入预设展示 .stm-subtle-import-time，存量旧预设保持留白
+    store.update({ presetStudio: stampedPs });
+    const presetDock = createPresetDock({ getContext: () => activeCtx, store });
+    presetDock.open();
+    const pRows = doc
+      .getElementById('stm-preset-dock')
+      .querySelector('.stm-preset-list')
+      .querySelectorAll('.stm-preset-item-wrap');
+    assert.equal(pRows.length, 2);
+    assert.equal(
+      pRows[0].querySelector('.stm-subtle-import-time'),
+      null,
+      '无记录的历史存量预设不显示伪造时间',
+    );
+    assert.equal(
+      pRows[1].querySelector('.stm-subtle-import-time')?.textContent,
+      '11-22',
+      '记录了导入时间的预设展示轻量时间微标',
+    );
+
+    // 4. 验证未进卡「角色名录」与进卡后「角色档案」均展示导入时间
+    const cwDock = createCharWorldDock({ getContext: () => activeCtx, store });
+    cwDock.open('char');
+    const heroSub = doc.getElementById('stm-char-world-dock').querySelector('.stm-cw-hero-sub');
+    assert.match(heroSub.textContent, /导入$/, '角色档案副标题展示轻量导入日期');
+
+    activeCtx.characterId = undefined;
+    cwDock.refresh();
+    const dirTime = doc
+      .getElementById('stm-char-world-dock')
+      .querySelector('.stm-cw-dir-row')
+      .querySelector('.stm-subtle-import-time');
+    assert.ok(dirTime && dirTime.textContent.includes('11-22'), '角色名录标题行右侧展示导入日期');
+
+    cwDock.destroy();
+    presetDock.destroy();
+    readerDock.destroy();
+    atmosphere.destroy();
   } finally {
     globalThis.document = prevDoc;
   }

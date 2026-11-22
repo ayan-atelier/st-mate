@@ -7,20 +7,21 @@
  * 4. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
-import { svgMarkup } from '../core/icons.js?v=0.8.7';
-import { sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { svgMarkup } from '../core/icons.js?v=0.8.8c';
+import { sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.8.8c';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.8.7';
-import { openImageCropDialog } from './image-cropper.js?v=0.8.7';
+} from './host-actions.js?v=0.8.8c';
+import { openImageCropDialog } from './image-cropper.js?v=0.8.8c';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
+  { id: 'huiwen', shortLabel: '汇文', label: '汇文明朝' },
   { id: 'serif', shortLabel: '宋体', label: '书卷宋体' },
   { id: 'sans', shortLabel: '黑体', label: '清爽黑体' },
   { id: 'kai', shortLabel: '楷体', label: '温润楷体' },

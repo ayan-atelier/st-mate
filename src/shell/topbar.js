@@ -6,8 +6,9 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
-import { svgMarkup } from '../core/icons.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { svgMarkup } from '../core/icons.js?v=0.8.8c';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.8.8c';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -16,7 +17,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.8.7';
+} from './host-actions.js?v=0.8.8c';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -394,6 +395,27 @@ export function createTopbar({
     doc?.documentElement?.style?.removeProperty?.('--stm-native-bar-offset');
   }
 
+  function syncNativeTopbarHiddenDrawers(doc, current) {
+    if (!doc) return;
+    const isNativeBar = Boolean(current?.shellEnabled && current?.topbarMode === 'native');
+    const hiddenSet = new Set(
+      isNativeBar && Array.isArray(current?.nativeTopbarHiddenIcons)
+        ? current.nativeTopbarHiddenIcons
+        : [],
+    );
+    for (const item of NATIVE_TOPBAR_DRAWER_ITEMS) {
+      const drawerEl = doc.getElementById?.(item.id);
+      if (!drawerEl) continue;
+      if (hiddenSet.has(item.id)) {
+        if (drawerEl.dataset) drawerEl.dataset.stmNativeHidden = '1';
+        drawerEl.setAttribute?.('data-stm-native-hidden', '1');
+      } else {
+        if (drawerEl.dataset) delete drawerEl.dataset.stmNativeHidden;
+        drawerEl.removeAttribute?.('data-stm-native-hidden');
+      }
+    }
+  }
+
   function syncNativeFormatIconTitle(doc, useReaderTitle) {
     const icon = doc?.getElementById?.('advanced-formatting-button')?.querySelector?.('.drawer-icon');
     if (!icon) return;
@@ -468,6 +490,7 @@ export function createTopbar({
   }
 
   function onNativeHolderClickCapture(event) {
+    if (globalThis.__stmBypassNativeCapture) return;
     const current = store.get();
     if (!current.shellEnabled || current.topbarMode !== 'native') return;
     if (!boundHolder) return;
@@ -530,7 +553,7 @@ export function createTopbar({
     }
 
     const charEnabled = Boolean(current.modules.charCard ?? current.modules.charWorld);
-    if (drawerId === 'rightNavHolder' && charEnabled && hasActiveChatSelection(getContext?.())) {
+    if (drawerId === 'rightNavHolder' && charEnabled) {
       consume();
       closeAllNativeDrawers();
       const alreadyChar =
@@ -547,7 +570,7 @@ export function createTopbar({
       return;
     }
 
-    // 其余原生图标（齿轮美化主题、拼图扩展、人设馆或未进卡时的角色列表）：先收起伴侣下拉面板，再放行原生抽屉开合
+    // 其余原生图标（齿轮美化主题、背景图、拼图扩展、人设馆）：先收起伴侣下拉面板，再放行原生抽屉开合
     onExitPureReading?.();
     onNativeDrawerOpened?.();
     if (drawerId === 'persona-management-button' && current.modules.persona) {
@@ -795,6 +818,7 @@ export function createTopbar({
     if (!current.shellEnabled) {
       doc.body.classList.remove('stm-native-drawer-open', 'stm-native-topbar');
       clearNativeBarOffset(doc);
+      syncNativeTopbarHiddenDrawers(doc, current);
       syncNativeFormatIconTitle(doc, false);
       syncNativeTopbarIconHighlights(doc, current);
       syncPersonaTakeoverChrome(doc, false);
@@ -808,6 +832,7 @@ export function createTopbar({
     }
 
     syncPersonaTakeoverChrome(doc, Boolean(current.modules.persona));
+    syncNativeTopbarHiddenDrawers(doc, current);
     syncNativeFormatIconTitle(doc, Boolean(isNativeBar && current.modules.reader));
 
     mountDom();
@@ -879,6 +904,7 @@ export function createTopbar({
     }
     const doc = globalThis.document;
     clearNativeBarOffset(doc);
+    syncNativeTopbarHiddenDrawers(doc, { shellEnabled: false });
     syncNativeFormatIconTitle(doc, false);
     syncNativeTopbarIconHighlights(doc, { shellEnabled: false });
     syncPersonaTakeoverChrome(doc, false);

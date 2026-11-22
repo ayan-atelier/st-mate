@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.8.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.7';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.8c';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.8.8c';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.8.7';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.8.7';
+} from '../shell/host-actions.js?v=0.8.8c';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.8.8c';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -31,6 +31,7 @@ import {
   duplicatePromptEntry,
   exportPresetToJsonString,
   filterPromptEntries,
+  formatSubtleImportTime,
   getBoundPresetForEntity,
   getEntityBindingKey,
   getHostPresetState,
@@ -41,6 +42,7 @@ import {
   primeHostOpenAiModule,
   readGenerationParams,
   readOrderedPromptEntries,
+  recordPresetImportedAt,
   renameHostPreset,
   saveHostPreset,
   selectHostPresetByName,
@@ -50,7 +52,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.8.7';
+} from './preset-backend.js?v=0.8.8c';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -89,7 +91,7 @@ export function createPresetDock({
   let confirmDeletePromptId = '';
 
   // 防白改 & 防跨预设串写自动持久化状态机（绑定修改时刻的目标预设名与快照）
-  let saveState = { tone: 'idle', text: '改动自动存盘' };
+  let saveState = { tone: 'idle', text: '自动保存' };
   let lastRenderedActivePreset = '';
   let internalBusy = false;
 
@@ -204,7 +206,13 @@ export function createPresetDock({
     getContext,
     store,
     autoSaver,
-    onAppliedOrUndone: ({ result }) => {
+    onAppliedOrUndone: ({ type, result }) => {
+      if (type === 'save_as' && result?.presetName) {
+        updatePresetStudioInStore(
+          recordPresetImportedAt(store.get().presetStudio, [result.presetName]),
+          { silent: true },
+        );
+      }
       if (result?.isGuiPreset) {
         setSaveState('warn', '已内存生效 · 默认预设点「另存副本」防刷新丢失');
       } else if (result?.message) {
@@ -445,6 +453,14 @@ export function createPresetDock({
       }
       if (item.boundCount > 0) {
         rightMeta.append(el('span', 'stm-preset-badge is-bound', `绑${item.boundCount}卡`));
+      }
+      if (item.importedAt > 0) {
+        const importFmt = formatSubtleImportTime(item.importedAt);
+        if (importFmt.shortText) {
+          const timeSpan = el('span', 'stm-subtle-import-time', importFmt.shortText);
+          timeSpan.title = importFmt.fullTitle;
+          rightMeta.append(timeSpan);
+        }
       }
 
       if (!item.isActive) {
@@ -1283,6 +1299,10 @@ export function createPresetDock({
       try {
         const saved = await duplicateHostPreset(activePreset, { getContext, selectDuplicate: true });
         if (saved.ok) {
+          updatePresetStudioInStore(
+            recordPresetImportedAt(store.get().presetStudio, [saved.name]),
+            { silent: true },
+          );
           setSaveState('ok', `已另存并切至：${saved.name}`);
           toastMessage(`已创建预设副本：${saved.name}`, 'success');
           onPresetChanged?.();
@@ -1799,6 +1819,10 @@ export function createPresetDock({
       });
 
       if (imported.length > 0) {
+        updatePresetStudioInStore(
+          recordPresetImportedAt(store.get().presetStudio, imported),
+          { silent: true },
+        );
         activeVaultTab = 'common';
         presetSearchQuery = '';
         toastMessage(
@@ -1871,6 +1895,7 @@ export function createPresetDock({
     }
 
     onBeforeOpen?.();
+    store?.hydrate?.();
     closeAllNativeDrawers();
     ensureDom();
     isOpen = true;
@@ -1888,8 +1913,8 @@ export function createPresetDock({
     const hostState = getHostPresetState({ getContext });
     if (!autoSaver.hasPending()) {
       saveState = hostState.isGuiPreset
-        ? { tone: 'warn', text: '默认预设仅内存生效（点「另存副本」建档）' }
-        : { tone: 'idle', text: '改动自动存盘' };
+        ? { tone: 'warn', text: '仅内存（点另存建档）' }
+        : { tone: 'idle', text: '自动保存' };
     }
 
     if (dockEl) {

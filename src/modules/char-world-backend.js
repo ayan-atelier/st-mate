@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.8.7';
-import { saveExportBlob } from '../core/file-saver.js?v=0.8.7';
+import { hasActiveChatSelection } from '../core/env.js?v=0.8.8c';
+import { saveExportBlob } from '../core/file-saver.js?v=0.8.8c';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.8.7';
+} from './preset-backend.js?v=0.8.8c';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -282,6 +282,46 @@ export function substituteOpeningGreetingMacros(rawText, { ctx = null, charName 
 export function countUnicodeChars(text) {
   if (typeof text !== 'string' || !text) return 0;
   return Array.from(text).length;
+}
+
+/**
+ * 提取角色卡在本机的导入时间戳（毫秒）：
+ * - 优先读取酒馆服务端 `charStat.ctimeMs` 映射的 `char.date_added`；
+ * - 兼容回退 ISO 日期或酒馆 `YYYY-MM-DD @HHh MMm SSs` 形态的 `create_date`。
+ */
+export function parseCharacterAddedAt(char) {
+  if (!char || typeof char !== 'object') return 0;
+  const rawAdded = char.date_added;
+  if (rawAdded !== undefined && rawAdded !== null && rawAdded !== '') {
+    const num = Number(rawAdded);
+    if (Number.isFinite(num) && num > 0) {
+      return num < 1e11 ? Math.round(num * 1000) : Math.round(num);
+    }
+    const parsed = Date.parse(String(rawAdded));
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+
+  const rawCreate = String(char.create_date || char.data?.create_date || '').trim();
+  if (!rawCreate) return 0;
+  const direct = Date.parse(rawCreate);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const stMatch = rawCreate.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s*@?\s*(\d{1,2})h\s*(\d{1,2})m(?:\s*(\d{1,2})s)?)?/i,
+  );
+  if (stMatch) {
+    const dt = new Date(
+      Number(stMatch[1]),
+      Number(stMatch[2]) - 1,
+      Number(stMatch[3]),
+      Number(stMatch[4] || 0),
+      Number(stMatch[5] || 0),
+      Number(stMatch[6] || 0),
+    );
+    const ms = dt.getTime();
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 0;
 }
 
 export function cleanWorldBookName(rawName) {
@@ -587,6 +627,7 @@ export function readActiveCharacterProfile(ctx, { doc = globalThis.document } = 
     greetings,
     primaryWorld,
     tags,
+    addedAt: parseCharacterAddedAt(char),
     canExport: Boolean(avatar),
     canReplaceFirstFloor: firstFloorCheck.allowed,
     firstFloorReason: firstFloorCheck.reason,
@@ -861,7 +902,7 @@ export function createCharacterProfileAutoSaver({
     activeSavingCount += 1;
     onStateChange?.({
       tone: 'saving',
-      text: '正在保存角色档案…',
+      text: '保存中…',
       saving: true,
       avatar: record.avatar,
     });
@@ -874,7 +915,7 @@ export function createCharacterProfileAutoSaver({
           if (!pendingRecord && activeSavingCount <= 1) {
             onStateChange?.({
               tone: 'ok',
-              text: '角色档案已实时保存',
+              text: '已保存',
               saving: false,
               avatar: record.avatar,
             });
@@ -3114,7 +3155,7 @@ export function createWorldBookAutoSaver({
     activeSavingCount += 1;
     onStateChange?.({
       tone: 'saving',
-      text: '正在保存…',
+      text: '保存中…',
       saving: true,
       bookName: record.bookName,
     });
@@ -3127,7 +3168,7 @@ export function createWorldBookAutoSaver({
           if (!pendingRecord && activeSavingCount <= 1) {
             onStateChange?.({
               tone: 'ok',
-              text: '已实时保存生效',
+              text: '已保存',
               saving: false,
               bookName: record.bookName,
             });
@@ -3173,7 +3214,7 @@ export function createWorldBookAutoSaver({
 
     onStateChange?.({
       tone: 'warn',
-      text: '待自动保存…',
+      text: '待保存…',
       saving: activeSavingCount > 0,
       bookName: targetName,
     });
