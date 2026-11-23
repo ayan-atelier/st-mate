@@ -6,14 +6,14 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
 import {
   isQuietRoomActive,
   isQuietRoomSidebarOpen,
   toggleQuietRoomSidebar,
-} from '../core/compat-bridges.js?v=0.9.1';
-import { svgMarkup } from '../core/icons.js?v=0.9.1';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.1';
+} from '../core/compat-bridges.js?v=0.9.2.1';
+import { svgMarkup } from '../core/icons.js?v=0.9.2.1';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.2.1';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -22,7 +22,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.9.1';
+} from './host-actions.js?v=0.9.2.1';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -381,8 +381,32 @@ export function createTopbar({
     }
   }
 
+  function isBarElementPaintingBox(win, node) {
+    if (!node || typeof win?.getComputedStyle !== 'function') return false;
+    try {
+      const cs = win.getComputedStyle(node);
+      if (!cs || cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) {
+        return false;
+      }
+      const bg = String(cs.backgroundColor || '')
+        .replace(/\s+/g, '')
+        .toLowerCase();
+      const hasBgColor =
+        Boolean(bg) &&
+        bg !== 'transparent' &&
+        bg !== 'rgba(0,0,0,0)' &&
+        !bg.endsWith(',0)');
+      const hasBgImg = Boolean(cs.backgroundImage && cs.backgroundImage !== 'none');
+      const hasBorderBottom = parseFloat(cs.borderBottomWidth || '0') > 0;
+      return hasBgColor || hasBgImg || hasBorderBottom;
+    } catch {
+      return false;
+    }
+  }
+
   function syncNativeBarOffsetNow(doc) {
     if (!doc?.documentElement?.style) return;
+    const win = globalThis.window || globalThis;
     const holder = doc.getElementById?.('top-settings-holder');
     const topBar = doc.getElementById?.('top-bar');
     const holderBottom =
@@ -393,14 +417,26 @@ export function createTopbar({
       typeof topBar?.getBoundingClientRect === 'function'
         ? Number(topBar.getBoundingClientRect()?.bottom || 0)
         : 0;
-    const bottomPx = Math.round(Math.max(holderBottom, barBottom));
-    if (bottomPx >= 28 && bottomPx <= 180) {
-      doc.documentElement.style.setProperty('--stm-native-bar-offset', `${bottomPx}px`);
+    const clearancePx = Math.round(Math.max(holderBottom, barBottom));
+    const topBarPaints = isBarElementPaintingBox(win, topBar);
+    const visibleBarBottom = topBarPaints
+      ? Math.max(holderBottom, barBottom)
+      : holderBottom > 0
+        ? holderBottom
+        : barBottom;
+    const drawerTopPx = Math.round(visibleBarBottom);
+
+    if (clearancePx >= 28 && clearancePx <= 180) {
+      doc.documentElement.style.setProperty('--stm-native-bar-offset', `${clearancePx}px`);
+    }
+    if (drawerTopPx >= 28 && drawerTopPx <= 180) {
+      doc.documentElement.style.setProperty('--stm-native-drawer-top', `${drawerTopPx}px`);
     }
   }
 
   function clearNativeBarOffset(doc) {
     doc?.documentElement?.style?.removeProperty?.('--stm-native-bar-offset');
+    doc?.documentElement?.style?.removeProperty?.('--stm-native-drawer-top');
   }
 
   function syncNativeTopbarHiddenDrawers(doc, current) {

@@ -7,13 +7,13 @@
  * 4. 零 Emoji、1.5px 纯色细线图标内嵌助手 UI（支持窄屏独立顺滑滚动、16px 输入框防缩放、Enter 发送与流中随时停止）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.1';
-import { toastMessage } from '../shell/host-actions.js?v=0.9.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.2.1';
+import { toastMessage } from '../shell/host-actions.js?v=0.9.2.1';
 import {
   createAssistantSession,
   resolveAssistantRuntimeChannel,
-} from './assistant-core.js?v=0.9.1';
+} from './assistant-core.js?v=0.9.2.1';
 import {
   PROMPT_ROLE_OPTIONS,
   UNLOCKED_MAX_CONTEXT,
@@ -34,9 +34,11 @@ import {
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.1';
+} from './preset-backend.js?v=0.9.2.1';
 
 export const MAX_UNDO_STEPS = 10;
+export const MAX_PERSISTED_ASSISTANT_ROUNDS = 6;
+export const PRESET_ASSISTANT_STORAGE_KEY = 'stm_preset_assistant_cache_v1';
 export const DEFAULT_ENTRY_MAX_CHARS = 1800;
 export const FOCUSED_ENTRY_MAX_CHARS = 8000;
 export const MAX_FOCUSED_LONG_ENTRIES = 6;
@@ -1766,15 +1768,109 @@ function summarizePresetOpsForHistory(operations = []) {
   return `[本轮提供方案: ${brief.join('、')}]`;
 }
 
+function resolveAssistantStorage(explicitStorage = undefined) {
+  if (explicitStorage !== undefined) return explicitStorage;
+  try {
+    return globalThis.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeUiMessagesForStorage(messages = []) {
+  const clean = messages.filter(m => m && !m.isPending);
+  return clean.slice(-MAX_PERSISTED_ASSISTANT_ROUNDS * 2).map(m => {
+    if (m.role === 'user') {
+      return {
+        id: String(m.id || `ui_${Date.now()}_u`),
+        role: 'user',
+        text: String(m.text || ''),
+        isPending: false,
+        isError: false,
+      };
+    }
+    return {
+      id: String(m.id || `ui_${Date.now()}_a`),
+      role: 'assistant',
+      turnId: String(m.turnId || ''),
+      text: String(m.text || ''),
+      isPending: false,
+      isError: Boolean(m.isError),
+      targetPresetName: String(m.targetPresetName || ''),
+      targetIsGuiPreset: Boolean(m.targetIsGuiPreset),
+      applied: Boolean(m.applied),
+      appliedCount: Number(m.appliedCount) || 0,
+      appliedOnGuiPreset: Boolean(m.appliedOnGuiPreset),
+      selectedIds: m.selectedIds ? [...m.selectedIds] : [],
+      expandedDiffIds: m.expandedDiffIds ? [...m.expandedDiffIds] : [],
+      plan:
+        m.plan && typeof m.plan === 'object'
+          ? {
+              items: Array.isArray(m.plan.items) ? m.plan.items : [],
+              rejected: Array.isArray(m.plan.rejected) ? m.plan.rejected : [],
+            }
+          : null,
+    };
+  });
+}
+
+function deserializeUiMessagesFromStorage(rawList = []) {
+  if (!Array.isArray(rawList)) return [];
+  const out = [];
+  for (const item of rawList.slice(-MAX_PERSISTED_ASSISTANT_ROUNDS * 2)) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.role === 'user') {
+      const text = String(item.text || '').trim();
+      if (!text) continue;
+      out.push({
+        id: String(item.id || `ui_${Date.now()}_u`),
+        role: 'user',
+        text,
+        isPending: false,
+        isError: false,
+      });
+      continue;
+    }
+    if (item.role === 'assistant') {
+      const plan =
+        item.plan && typeof item.plan === 'object'
+          ? {
+              items: Array.isArray(item.plan.items) ? item.plan.items : [],
+              rejected: Array.isArray(item.plan.rejected) ? item.plan.rejected : [],
+            }
+          : null;
+      out.push({
+        id: String(item.id || `ui_${Date.now()}_a`),
+        role: 'assistant',
+        turnId: String(item.turnId || ''),
+        text: String(item.text || ''),
+        isPending: false,
+        isError: Boolean(item.isError),
+        targetPresetName: String(item.targetPresetName || ''),
+        targetIsGuiPreset: Boolean(item.targetIsGuiPreset),
+        applied: Boolean(item.applied),
+        appliedCount: Number(item.appliedCount) || 0,
+        appliedOnGuiPreset: Boolean(item.appliedOnGuiPreset),
+        selectedIds: new Set(Array.isArray(item.selectedIds) ? item.selectedIds : []),
+        expandedDiffIds: new Set(Array.isArray(item.expandedDiffIds) ? item.expandedDiffIds : []),
+        plan,
+      });
+    }
+  }
+  return out;
+}
+
 export function createPresetAssistantPanel({
   getContext,
   store,
   autoSaver = null,
+  storage = undefined,
   onAppliedOrUndone = null,
   onRequestCollapse = null,
   onOpenApiDock = null,
 } = {}) {
   const undoStack = createPresetUndoStack({ maxSteps: MAX_UNDO_STEPS });
+  const backingStorage = resolveAssistantStorage(storage);
 
   const session = createAssistantSession({
     domainId: 'preset',
@@ -1786,11 +1882,68 @@ export function createPresetAssistantPanel({
     getContext,
   });
 
-  // UI 消息流状态（与 session 协同保留预览勾选、Diff 折叠与已应用锁死态）
+  // UI 消息流状态（与 session 协同保留预览勾选、Diff 折叠与已应用锁死态，并自动持久化最近 6 轮防刷新丢失）
   let uiMessages = [];
   let draftInput = '';
   let confirmClear = false;
   let destroyed = false;
+
+  function persistState() {
+    if (!backingStorage || typeof backingStorage.setItem !== 'function') return;
+    try {
+      const serializedMsgs = serializeUiMessagesForStorage(uiMessages);
+      const turns = session.getHistoryTurns().slice(-MAX_PERSISTED_ASSISTANT_ROUNDS);
+      const cleanDraft = String(draftInput || '').slice(0, 4000);
+      if (serializedMsgs.length === 0 && turns.length === 0 && !cleanDraft.trim()) {
+        backingStorage.removeItem?.(PRESET_ASSISTANT_STORAGE_KEY);
+        return;
+      }
+      backingStorage.setItem(
+        PRESET_ASSISTANT_STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          updatedAt: Date.now(),
+          draftInput: cleanDraft,
+          turns,
+          uiMessages: serializedMsgs,
+        }),
+      );
+    } catch {
+      // 存储配额受限时保留内存副本即可
+    }
+  }
+
+  function clearPersistedState() {
+    if (!backingStorage || typeof backingStorage.removeItem !== 'function') return;
+    try {
+      backingStorage.removeItem(PRESET_ASSISTANT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  function hydratePersistedState() {
+    if (!backingStorage || typeof backingStorage.getItem !== 'function') return;
+    try {
+      const raw = backingStorage.getItem(PRESET_ASSISTANT_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      if (Array.isArray(parsed.turns)) {
+        session.restoreHistory(parsed.turns.slice(-MAX_PERSISTED_ASSISTANT_ROUNDS));
+      }
+      if (Array.isArray(parsed.uiMessages)) {
+        uiMessages = deserializeUiMessagesFromStorage(parsed.uiMessages);
+      }
+      if (typeof parsed.draftInput === 'string') {
+        draftInput = parsed.draftInput.slice(0, 4000);
+      }
+    } catch {
+      // 损坏缓存静默忽略
+    }
+  }
+
+  hydratePersistedState();
 
   let rootEl = null;
   let channelBadgeBtn = null;
@@ -1907,6 +2060,7 @@ export function createPresetAssistantPanel({
           } else {
             for (const it of plan.items) msg.selectedIds.add(it.opId);
           }
+          persistState();
           renderLogOnly({ stickBottom: false });
         });
         cardHead.append(toggleAllBtn);
@@ -1929,6 +2083,7 @@ export function createPresetAssistantPanel({
           } else {
             msg.selectedIds.add(item.opId);
           }
+          persistState();
           renderLogOnly({ stickBottom: false });
         };
 
@@ -1974,6 +2129,7 @@ export function createPresetAssistantPanel({
             } else {
               msg.expandedDiffIds.add(item.opId);
             }
+            persistState();
             renderLogOnly({ stickBottom: false });
           });
           opMain.append(diffBtn);
@@ -2074,6 +2230,7 @@ export function createPresetAssistantPanel({
               if (saved.ok) {
                 msg.appliedOnGuiPreset = false;
                 msg.targetPresetName = saved.name;
+                persistState();
                 toastMessage(`已保存并切换至新预设：${saved.name}`, 'success');
                 renderLogOnly({ stickBottom: false });
                 onAppliedOrUndone?.({
@@ -2128,6 +2285,7 @@ export function createPresetAssistantPanel({
           if (msg.turnId) {
             session.markTurnApplied(msg.turnId, `用户已采纳并应用 ${res.appliedCount} 项修改`);
           }
+          persistState();
           toastMessage(
             res.isGuiPreset
               ? res.message
@@ -2266,6 +2424,7 @@ export function createPresetAssistantPanel({
       pendingAssistantMsg.isPending = false;
       pendingAssistantMsg.isError = !res.aborted;
       pendingAssistantMsg.text = res.message || '请求未成功';
+      persistState();
       renderLogOnly({ stickBottom: true });
       syncToolbarStatus();
       return;
@@ -2294,8 +2453,16 @@ export function createPresetAssistantPanel({
     pendingAssistantMsg.applied = false;
     pendingAssistantMsg.appliedCount = 0;
 
+    if (uiMessages.length > MAX_PERSISTED_ASSISTANT_ROUNDS * 2) {
+      uiMessages = uiMessages.slice(-MAX_PERSISTED_ASSISTANT_ROUNDS * 2);
+    }
+    persistState();
+
     renderLogOnly({ stickBottom: true });
     syncToolbarStatus();
+    if (validatedPlan.items.length > 0 && (!rootEl?.isConnected || rootEl.closest?.('[hidden]'))) {
+      toastMessage('伴侣助手已生成预设方案，打开预设馆即可查看应用', 'info');
+    }
   }
 
   async function handleUndoClick() {
@@ -2318,6 +2485,7 @@ export function createPresetAssistantPanel({
       if (res.undoneTurnId) {
         session.markTurnApplied(res.undoneTurnId, '用户已撤回本轮修改');
       }
+      persistState();
       renderLogOnly({ stickBottom: false });
     }
 
@@ -2373,6 +2541,12 @@ export function createPresetAssistantPanel({
       confirmClear = false;
       session.clearHistory();
       uiMessages = [];
+      draftInput = '';
+      if (textareaEl) {
+        textareaEl.value = '';
+        autoResizeInput();
+      }
+      clearPersistedState();
       renderLogOnly({ stickBottom: false });
       syncToolbarStatus();
     });
@@ -2397,6 +2571,7 @@ export function createPresetAssistantPanel({
         if (!textareaEl) return;
         draftInput = promptChipText;
         textareaEl.value = promptChipText;
+        persistState();
         autoResizeInput();
         syncToolbarStatus();
         textareaEl.focus();
@@ -2421,6 +2596,7 @@ export function createPresetAssistantPanel({
     textareaEl.addEventListener('input', () => {
       draftInput = textareaEl.value;
       if (confirmClear) confirmClear = false;
+      persistState();
       autoResizeInput();
       syncToolbarStatus();
     });
@@ -2477,6 +2653,17 @@ export function createPresetAssistantPanel({
     },
     isBusy: () => session.isBusy(),
     getUndoCount: () => undoStack.size(),
+    getMessageCount: () => uiMessages.filter(m => m && !m.isPending).length,
+    hasPendingPlan: () =>
+      uiMessages.some(
+        m =>
+          m &&
+          m.role === 'assistant' &&
+          !m.isPending &&
+          !m.applied &&
+          Array.isArray(m.plan?.items) &&
+          m.plan.items.length > 0,
+      ),
     abort() {
       const didAbort = session.abort();
       if (didAbort) {

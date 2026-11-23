@@ -13,12 +13,12 @@ import {
   findInstalledYantaiPresetName,
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
-} from '../core/companion-kit.js?v=0.9.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.1';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.1';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.1';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.1';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.1';
+} from '../core/companion-kit.js?v=0.9.2.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.2.1';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.2.1';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.2.1';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.2.1';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.2.1';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -933,7 +933,7 @@ export function createSettingsDialog({
       makeSwitchRow({
         helpKey: 'float_capsule',
         icon: 'capsule',
-        title: '对话侧边悬浮快捷与底栏收纳',
+        title: '悬浮快捷栏与底栏收纳',
         desc: '默认关闭；开启后在侧边展示一体拖动、视觉独立的轻盈小圆球（上翻 5 楼 · 动态收纳球 · 下翻 5 楼；无外挂按钮时自动隐去收纳球，连戳两下浮出「到顶 / 到底」），自动收起底栏外挂按钮，还支持把角色卡自带的野生悬浮球直接拖进来收纳！',
         checked: Boolean(current.floatCapsuleEnabled),
         onChange: val => {

@@ -27,6 +27,8 @@ export const DRAWER_BRIDGE_MODES = Object.freeze(['inline-switch', 'popover']);
 export const BACKDROP_MODES = Object.freeze(['theme', 'character', 'custom']);
 export const PARAGRAPH_INDENTS = Object.freeze(['default', 'flush', 'indent']);
 export const FONT_CHOICES = Object.freeze(['default', 'huiwen', 'serif', 'sans', 'kai', 'custom']);
+export const TEXT_DECO_STYLES = Object.freeze(['none', 'marker', 'dashed', 'solid', 'wavy', 'mist']);
+export const EM_ITALIC_MODES = Object.freeze(['default', 'normal', 'italic']);
 export const VERTEX_AUTH_MODES = Object.freeze(['express', 'full']);
 export const AUX_API_MODES = Object.freeze(['follow_main', 'station']);
 
@@ -159,7 +161,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
     customFontUrl: '',
     bodyColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖叙述正文颜色
     quoteColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖引号对话颜色
+    quoteStyle: 'none', // 'none' | 'marker' | 'dashed' | 'solid' | 'wavy' | 'mist'
+    quoteMarkColor: '', // '' 跟随字色自动柔化，或 '#rrggbb' 自定义荧光笔/柔雾底纹色
     emColor: '', // '' 跟随原美化主题，或 '#rrggbb' 覆盖内心独白/斜体颜色
+    emStyle: 'none', // 'none' | 'marker' | 'dashed' | 'solid' | 'wavy' | 'mist'
+    emMarkColor: '', // '' 跟随字色自动柔化，或 '#rrggbb' 自定义内心底纹色
+    emItalic: 'default', // 'default' (跟随原美化) | 'normal' (正体) | 'italic' (斜体)
   }),
   tidy: Object.freeze({
     enabled: true,
@@ -252,6 +259,15 @@ export function sanitizeHexColor(rawColor) {
     return trimmed.toLowerCase();
   }
   return '';
+}
+
+export function hexLuminance(rawColor) {
+  const safe = sanitizeHexColor(rawColor);
+  if (!safe) return -1;
+  const r = parseInt(safe.slice(1, 3), 16);
+  const g = parseInt(safe.slice(3, 5), 16);
+  const b = parseInt(safe.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
 export function sanitizeAssetUrl(rawUrl) {
@@ -585,7 +601,12 @@ export function normalizeSettings(raw = {}) {
       customFontUrl: sanitizeAssetUrl(rawVibe.customFontUrl),
       bodyColor: sanitizeHexColor(rawVibe.bodyColor),
       quoteColor: sanitizeHexColor(rawVibe.quoteColor),
+      quoteStyle: pickEnum(rawVibe.quoteStyle, TEXT_DECO_STYLES, DEFAULT_SETTINGS.vibe.quoteStyle),
+      quoteMarkColor: sanitizeHexColor(rawVibe.quoteMarkColor),
       emColor: sanitizeHexColor(rawVibe.emColor),
+      emStyle: pickEnum(rawVibe.emStyle, TEXT_DECO_STYLES, DEFAULT_SETTINGS.vibe.emStyle),
+      emMarkColor: sanitizeHexColor(rawVibe.emMarkColor),
+      emItalic: pickEnum(rawVibe.emItalic, EM_ITALIC_MODES, DEFAULT_SETTINGS.vibe.emItalic),
     },
     tidy: {
       enabled: pickBool(rawTidy.enabled, DEFAULT_SETTINGS.tidy.enabled),

@@ -7419,48 +7419,111 @@ test('v0.8.3: 预设提示词条目一键复制（紧随下方自动展开且防
     const defaultCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: false });
     assert.equal(defaultCss.includes('--SmartThemeBodyColor'), false, '未设颜色时不生成任何颜色覆盖规则');
 
-    // 3. 验证阅读抽屉中「文字颜色」严格位于「背景图」下方、「其它」上方，且支持一键预设、单点恢复与总重置
+    // 3. 验证阅读抽屉中「文字样式」严格位于「背景图」下方、「其它」上方，背景滑杆无框扁平化，且经典搭配/内联调色/荧光笔底纹/智能深浅联动闭环
     const readerDock = createReaderDock({ getContext: () => ctx, store });
     readerDock.open();
     const rRoot = doc.getElementById('stm-reader-dock');
     const secTitles = rRoot.findAll(n => n.classList.contains('stm-sec-title')).map(n => n.textContent);
     assert.deepEqual(
       secTitles,
-      ['文字排版', '背景图', '文字颜色', '其它'],
-      '文字颜色分区严格置于「背景图」下方、「其它」上方',
+      ['文字排版', '背景图', '文字样式', '其它'],
+      '文字样式分区严格置于「背景图」下方、「其它」上方',
     );
 
     const colorLabels = rRoot.findAll(n => n.classList.contains('stm-color-label')).map(n => n.textContent);
     assert.deepEqual(colorLabels, ['正文', '对话', '内心']);
+    assert.equal(rRoot.findAll(n => n.classList.contains('stm-color-input')).length, 0, '主胶囊不再直接裸挂系统原生取色弹窗');
 
-    // 点击「浅色字」一键配比
-    const lightPresetBtn = rRoot
-      .findAll(n => n.classList.contains('stm-color-preset-btn'))
-      .find(b => b.textContent === '浅色字');
-    lightPresetBtn.click();
-    assert.equal(store.get().vibe.bodyColor, '#f0ede6');
-    assert.equal(store.get().vibe.quoteColor, '#e6cfa8');
-    assert.equal(store.get().vibe.emColor, '#a8b0bd');
+    // 先开启角色背景图并拉高亮度到 82%，验证无框扁平滑杆 + 下方色盘超自然联动默认翻到「浅底色」
+    const charBgBtn = rRoot
+      .findAll(n => n.classList.contains('stm-dock-mode-btn'))
+      .find(b => b.textContent === '角色图');
+    charBgBtn.click();
+    store.update({ vibe: { backdropBrightness: 82, backdropClarity: 92 } });
+    readerDock.refresh();
+    assert.equal(rRoot.findAll(n => n.classList.contains('stm-flat-slider')).length, 2, '亮度与清晰度采用无外框单行扁平滑杆');
 
-    const activeColorCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: true });
-    assert.match(activeColorCss, /--SmartThemeBodyColor:\s*#f0ede6\s*!important/);
-    assert.match(activeColorCss, /--SmartThemeQuoteColor:\s*#e6cfa8\s*!important/);
-    assert.match(activeColorCss, /--SmartThemeEmColor:\s*#a8b0bd\s*!important/);
+    // 点击展开「经典搭配 ▾」并套用「晴空梦幻」（蓝字配凝脂白荧光笔），严格断言绝不篡改背景模式、亮度与清晰度
+    const recipesBtn = rRoot.querySelector('.stm-recipes-toggle');
+    assert.ok(recipesBtn, '标题栏右侧提供经典搭配折叠钮');
+    recipesBtn.click();
+    const dreamChip = rRoot
+      .findAll(n => n.classList.contains('stm-recipe-chip'))
+      .find(b => b.dataset?.recipe === 'dream_sky');
+    assert.ok(dreamChip, '包含晴空梦幻（蓝字白底）经典搭配');
+    dreamChip.click();
+
+    assert.equal(store.get().vibe.backdropMode, 'character', '切换经典搭配绝不篡改背景模式');
+    assert.equal(store.get().vibe.backdropBrightness, 82, '切换经典搭配绝不篡改背景亮度');
+    assert.equal(store.get().vibe.backdropClarity, 92, '切换经典搭配绝不篡改背景清晰度');
+    assert.equal(store.get().vibe.bodyColor, '#262422');
+    assert.equal(store.get().vibe.quoteColor, '#3d6082');
+    assert.equal(store.get().vibe.quoteStyle, 'marker');
+    assert.equal(store.get().vibe.quoteMarkColor, '#ffffff');
+    assert.equal(store.get().vibe.emColor, '#6b655e');
+    assert.equal(store.get().vibe.emItalic, 'normal');
+
+    const activeColorCss = buildPageOverrideCss(store.get().vibe, {
+      readerActive: true,
+      backdropLive: true,
+      isLightSurface: true,
+    });
+    assert.match(activeColorCss, /--SmartThemeBodyColor:\s*#262422\s*!important/);
+    assert.match(activeColorCss, /--SmartThemeQuoteColor:\s*#3d6082\s*!important/);
+    assert.match(activeColorCss, /--SmartThemeEmColor:\s*#6b655e\s*!important/);
+    assert.match(
+      activeColorCss,
+      /linear-gradient\(to top,\s*color-mix\(in srgb,\s*#ffffff 86%,\s*transparent\)/,
+      '蓝字白底半截荧光笔生成高透亮凝脂白半高底纹',
+    );
+    assert.match(activeColorCss, /box-decoration-break:\s*clone\s*!important/, '多行荧光笔跨行不断裂');
+    assert.match(activeColorCss, /font-style:\s*normal\s*!important/, '内心正体覆盖生效');
     assert.match(activeColorCss, /:not\(\[style\*="color"\]\)/, '保护角色卡自定义内联颜色状态栏不被误染');
+    assert.match(activeColorCss, /:not\(\[style\*="background"\]\)/, '保护角色卡内联背景元素不被误加荧光笔');
+
+    // 点击「对话」胶囊：互斥收起经典搭配，展开单点调色托盘，且因上方亮度 82% 自动默认停在「浅底色 ⇄」
+    const slotTriggers = rRoot.findAll(n => n.classList.contains('stm-color-trigger'));
+    slotTriggers[1].click();
+    assert.equal(rRoot.findAll(n => n.classList.contains('stm-recipe-chip')).length, 0, '互斥收起经典搭配面板');
+    const toneBtnBright = rRoot.querySelector('.stm-palette-tone-btn');
+    assert.match(toneBtnBright.textContent, /浅底色/, '上方高亮度底图自动联动停在浅底色盘');
+
+    // 将上方背景亮度调暗至 18%，验证色盘自动自然联动切回「深底色 ⇄」
+    store.update({ vibe: { backdropBrightness: 18 } });
+    readerDock.refresh();
+    const toneBtnDark = rRoot.querySelector('.stm-palette-tone-btn');
+    assert.match(toneBtnDark.textContent, /深底色/, '上方暗调底图自动联动切回深底色盘');
+
+    // 切换对话装饰款式为「细虚线」，底纹行自动收起，且生成 dashed 下划线规则
+    const dashedChip = rRoot
+      .findAll(n => n.classList.contains('stm-deco-chip'))
+      .find(b => b.textContent === '细虚线');
+    dashedChip.click();
+    assert.equal(store.get().vibe.quoteStyle, 'dashed');
+    const dashedCss = buildPageOverrideCss(store.get().vibe, { readerActive: true, backdropLive: true });
+    assert.match(dashedCss, /text-decoration-style:\s*dashed\s*!important/);
+    assert.match(dashedCss, /text-decoration-skip-ink:\s*none\s*!important/);
 
     // 单独恢复「对话」一项为默认，其余两项保持不变
     const clearBtns = rRoot.findAll(n => n.classList.contains('stm-color-reset'));
     assert.equal(clearBtns.length, 3);
     clearBtns[1].click();
-    assert.equal(store.get().vibe.bodyColor, '#f0ede6');
+    assert.equal(store.get().vibe.bodyColor, '#262422');
     assert.equal(store.get().vibe.quoteColor, '');
-    assert.equal(store.get().vibe.emColor, '#a8b0bd');
+    assert.equal(store.get().vibe.quoteStyle, 'none');
+    assert.equal(store.get().vibe.quoteMarkColor, '');
+    assert.equal(store.get().vibe.emColor, '#6b655e');
 
-    // 点击顶部总「重置」一并清空三项文字颜色
+    // 点击顶部总「重置」一并清空所有文字颜色、装饰款式、底纹色与内心正斜体
     rRoot.querySelector('.stm-reset-link').click();
     assert.equal(store.get().vibe.bodyColor, '');
     assert.equal(store.get().vibe.quoteColor, '');
+    assert.equal(store.get().vibe.quoteStyle, 'none');
+    assert.equal(store.get().vibe.quoteMarkColor, '');
     assert.equal(store.get().vibe.emColor, '');
+    assert.equal(store.get().vibe.emStyle, 'none');
+    assert.equal(store.get().vibe.emMarkColor, '');
+    assert.equal(store.get().vibe.emItalic, 'default');
 
     // 4. 验证预设提示词条目一键复制：系统槽禁复制、普通/内置条目正下方生成副本、防叠词命名且自动展开编辑
     const markerDup = duplicatePromptEntry(ctx.chatCompletionSettings, 'charDescription');
@@ -9021,7 +9084,7 @@ test('v0.8.9: 对话侧边三键悬浮胶囊（默认关闭 / 单点翻5楼 / �
       .querySelectorAll('.stm-switch-title')
       .map(n => n.textContent);
     assert.equal(
-      switchTitles.includes('对话侧边悬浮快捷与底栏收纳'),
+      switchTitles.includes('悬浮快捷栏与底栏收纳'),
       true,
       '对话顶栏样式卡片下展示悬浮胶囊开关',
     );
@@ -9730,5 +9793,186 @@ test('v0.9.1 ecosystem compat, pure-reading bottom fill & hoarder shallow/chunke
     cwDock.destroy();
   } finally {
     globalThis.document = prevDoc;
+  }
+});
+
+test('v0.9.2: 悬浮原版顶栏零底透/零抽屉顶缝 + 搜索图标防重叠 + 智能楼层对称内边距 + 伴侣助手跨刷新持久化与手工清空', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevGetCs = globalThis.getComputedStyle;
+  const prevFetch = globalThis.fetch;
+  const { doc } = createMiniDomHarness();
+  const win = { innerWidth: 390, innerHeight: 844, addEventListener() {}, removeEventListener() {} };
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    const suiteCss = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'style.css'),
+      'utf8',
+    );
+    assert.match(
+      suiteCss,
+      /\.stm-model-combo-input\s*\{\s*padding-left:\s*30px\s*!important;/,
+      'API 与预设搜索输入框必须加 !important 防止宿主 input[type="text"] 覆盖导致文字叠在放大镜图标上',
+    );
+    assert.match(
+      suiteCss,
+      /\.stm-turbo-fold\s*\{[\s\S]*?padding:\s*10px\s+12px\s+12px;/,
+      '智能楼层展开区必须带对称内边距，严禁贴死卡片左边框',
+    );
+    assert.match(
+      suiteCss,
+      /html body\.stm-shell-active\.stm-home-cloak:not\(\.movingUI\)\s+#sheld\s*\{[\s\S]*?top:\s*0\s*!important;[\s\S]*?--jd-home-inset-top:\s*var\(--stm-active-top-offset\);/,
+      '书架首页 #sheld 从 0px 连续铺底防透明 #top-bar 漏出 #bg1 壁纸',
+    );
+
+    // 1. 验证悬浮胶囊顶栏（如《观月札记》：#top-bar 透明 64px，#top-settings-holder 可见底边 56px）下，抽屉紧贴 56px 零缝隙
+    const topBar = doc.createElement('div');
+    topBar.id = 'top-bar';
+    topBar.getBoundingClientRect = () => ({ top: 0, bottom: 64, left: 0, right: 390, width: 390, height: 64 });
+    const holder = doc.createElement('div');
+    holder.id = 'top-settings-holder';
+    holder.getBoundingClientRect = () => ({ top: 8, bottom: 56, left: 8, right: 382, width: 374, height: 48 });
+    topBar.append(holder);
+    doc.body.append(topBar);
+    win.getComputedStyle = node =>
+      node === topBar
+        ? { display: 'block', visibility: 'visible', opacity: '1', backgroundColor: 'rgba(0, 0, 0, 0)', backgroundImage: 'none', borderBottomWidth: '0px' }
+        : { display: 'flex', visibility: 'visible', opacity: '1', backgroundColor: 'rgb(28, 28, 30)', backgroundImage: 'none', borderBottomWidth: '1px' };
+    globalThis.getComputedStyle = win.getComputedStyle;
+
+    const ctx = {
+      extensionSettings: { st_mate: { topbarMode: 'native' } },
+      mainApi: 'openai',
+      chatCompletionSources: { openai: 'custom' },
+      oai_settings: {
+        chat_completion_source: 'custom',
+        custom_url: 'https://api.example.com/v1',
+        custom_model: 'gemini-4-flash',
+      },
+      characterId: 0,
+      characters: [{ avatar: 'song.png', name: '宋仲庭' }],
+      chat: [{ name: '宋仲庭', mes: '测试' }],
+      chatCompletionSettings: {
+        chat_completion_source: 'custom',
+        custom_url: 'https://api.example.com/v1',
+        custom_model: 'gemini-4-flash',
+        prompts: [{ identifier: 'main', name: '主提示词', system_prompt: true, role: 'system', content: '基础规则' }],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }] }],
+      },
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null },
+    });
+    topbar.refresh();
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--stm-native-bar-offset'),
+      '64px',
+      '正文与书架避让高度保持完整 64px',
+    );
+    assert.equal(
+      doc.documentElement.style.getPropertyValue('--stm-native-drawer-top'),
+      '56px',
+      '下拉面板顶边精准贴合可见顶栏底边 56px，消除 8px 空缝',
+    );
+    topbar.destroy();
+
+    // 2. 验证预设馆伴侣助手生成方案后跨刷新完整保留（含待应用方案卡片与多轮上下文），仅手工点「清空对话」才清除
+    const memMap = new Map();
+    const mockStorage = {
+      getItem: k => (memMap.has(k) ? memMap.get(k) : null),
+      setItem: (k, v) => memMap.set(k, String(v)),
+      removeItem: k => memMap.delete(k),
+    };
+
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/secrets/read')) {
+        return { ok: true, status: 200, json: async () => ({ api_key_custom: true }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  reply: '已为你配好折叠小剧场条目与美化正则。',
+                  operations: [
+                    {
+                      type: 'add_entry',
+                      name: '小剧场生成规则',
+                      role: 'system',
+                      content: '每轮末尾输出 <theater>...</theater>',
+                      enabled: true,
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      };
+    };
+
+    const { PRESET_ASSISTANT_STORAGE_KEY, createPresetAssistantPanel } = await import(
+      '../src/modules/preset-assistant.js?v=0.9.2.1'
+    );
+
+    const panel1 = createPresetAssistantPanel({
+      getContext: () => ctx,
+      store,
+      storage: mockStorage,
+    });
+    const el1 = panel1.getElement();
+    doc.body.append(el1);
+    const textarea1 = el1.querySelector('.stm-ast-input');
+    textarea1.value = '给我小剧场加个美化';
+    textarea1.dispatchEvent({ type: 'input' });
+    el1.querySelector('.stm-ast-send-btn').click();
+    await new Promise(r => setTimeout(r, 30));
+
+    assert.equal(panel1.hasPendingPlan(), true, '首次生成后存在待应用美化方案');
+    assert.ok(mockStorage.getItem(PRESET_ASSISTANT_STORAGE_KEY), '方案自动落入本地持久化缓存');
+
+    // 模拟用户没看/没点应用就直接刷新浏览器（销毁旧实例，新建全新实例）
+    panel1.destroy();
+    assert.ok(mockStorage.getItem(PRESET_ASSISTANT_STORAGE_KEY), '页面刷新卸载绝不误删未清空记录');
+
+    const panel2 = createPresetAssistantPanel({
+      getContext: () => ctx,
+      store,
+      storage: mockStorage,
+    });
+    assert.equal(panel2.getMessageCount(), 2, '刷新后完整恢复上一轮问答消息');
+    assert.equal(panel2.hasPendingPlan(), true, '刷新后未应用的小剧场美化方案依然完整待命');
+    const el2 = panel2.getElement();
+    doc.body.append(el2);
+    assert.equal(
+      el2.findAll(n => n.classList.contains('stm-ast-plan-card')).length,
+      1,
+      '刷新重开直接渲染出上一轮修改方案预览卡片',
+    );
+
+    // 手工连点两次「清空对话 -> 确认清空?」后彻底清空内存与本地缓存
+    const clearBtn2 = el2.findAll(n => n.classList.contains('stm-ghost-link'))[0];
+    clearBtn2.click();
+    clearBtn2.click();
+    assert.equal(panel2.getMessageCount(), 0, '确认清空后消息列表归零');
+    assert.equal(mockStorage.getItem(PRESET_ASSISTANT_STORAGE_KEY), null, '手工清空同步移除本地缓存');
+    panel2.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.getComputedStyle = prevGetCs;
+    globalThis.fetch = prevFetch;
   }
 });

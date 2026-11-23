@@ -6,9 +6,14 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.1';
-import { sanitizeHexColor } from '../core/schema.js?v=0.9.1';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.1';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.2.1';
+import {
+  EM_ITALIC_MODES,
+  TEXT_DECO_STYLES,
+  hexLuminance,
+  sanitizeHexColor,
+} from '../core/schema.js?v=0.9.2.1';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.2.1';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -44,9 +49,67 @@ export const FONT_STACKS = Object.freeze({
 
 const CHAT_OVERRIDE_SCOPE = 'html body:not(.stm-home-cloak) #chat#chat:not(.jd-bookshelf-home)';
 
+function buildInlineDecoDecls({ styleId, markColor, textColor, isLightSurface = false }) {
+  const style = TEXT_DECO_STYLES.includes(styleId) ? styleId : 'none';
+  if (style === 'none') return '';
+
+  const textLum = hexLuminance(textColor);
+  const textIsDark = textLum >= 0 ? textLum < 0.52 : Boolean(isLightSurface);
+
+  if (style === 'marker' || style === 'mist') {
+    const safeMark = sanitizeHexColor(markColor);
+    let fillCss = '';
+    if (!safeMark) {
+      const pct = style === 'marker' ? (textIsDark ? '22%' : '28%') : textIsDark ? '14%' : '18%';
+      fillCss = `color-mix(in srgb, currentColor ${pct}, transparent)`;
+    } else {
+      const markLum = hexLuminance(safeMark);
+      if (textIsDark && markLum >= 0.68) {
+        fillCss = `color-mix(in srgb, ${safeMark} ${style === 'marker' ? '86%' : '76%'}, transparent)`;
+      } else {
+        const pct = style === 'marker' ? (textIsDark ? '30%' : '26%') : textIsDark ? '20%' : '18%';
+        fillCss = `color-mix(in srgb, ${safeMark} ${pct}, transparent)`;
+      }
+    }
+
+    if (style === 'marker') {
+      return [
+        '  background-color: transparent !important;',
+        `  background-image: linear-gradient(to top, ${fillCss} 0% 45%, transparent 45%) !important;`,
+        '  -webkit-box-decoration-break: clone !important;',
+        '  box-decoration-break: clone !important;',
+        '  padding-inline: 2px !important;',
+        '  border-radius: 2px !important;',
+        '  text-decoration-line: none !important;',
+      ].join('\n');
+    }
+
+    return [
+      `  background-color: ${fillCss} !important;`,
+      '  background-image: none !important;',
+      '  -webkit-box-decoration-break: clone !important;',
+      '  box-decoration-break: clone !important;',
+      '  padding: 1px 4px !important;',
+      '  border-radius: 4px !important;',
+      '  text-decoration-line: none !important;',
+    ].join('\n');
+  }
+
+  return [
+    '  background-color: transparent !important;',
+    '  background-image: none !important;',
+    '  text-decoration-line: underline !important;',
+    `  text-decoration-style: ${style} !important;`,
+    '  text-decoration-thickness: 1px !important;',
+    `  text-underline-offset: ${style === 'wavy' ? '3px' : '4px'} !important;`,
+    '  text-decoration-skip-ink: none !important;',
+    '  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent) !important;',
+  ].join('\n');
+}
+
 export function buildPageOverrideCss(
   vibe,
-  { readerActive = false, backdropLive = false, isNotionTheme = false } = {},
+  { readerActive = false, backdropLive = false, isNotionTheme = false, isLightSurface = false } = {},
 ) {
   if (!readerActive) return '';
   const rules = [];
@@ -305,6 +368,40 @@ ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text q:not([style*="color"]
     rules.push(`
 ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :is(em, i):not(q *):not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab):not([style*="color"]):not([style*="color"] *):not(font[color] *) {
   color: ${emColor} !important;
+}`);
+  }
+
+  const quoteDecoDecls = buildInlineDecoDecls({
+    styleId: vibe.quoteStyle,
+    markColor: vibe.quoteMarkColor,
+    textColor: quoteColor,
+    isLightSurface,
+  });
+  if (quoteDecoDecls) {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text q:not([style*="color"]):not([style*="background"]):not([style*="color"] *):not(font[color] *) {
+${quoteDecoDecls}
+}`);
+  }
+
+  const emDecoDecls = buildInlineDecoDecls({
+    styleId: vibe.emStyle,
+    markColor: vibe.emMarkColor,
+    textColor: emColor,
+    isLightSurface,
+  });
+  if (emDecoDecls) {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :is(em, i):not(q *):not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab):not([style*="color"]):not([style*="background"]):not([style*="color"] *):not(font[color] *) {
+${emDecoDecls}
+}`);
+  }
+
+  const emItalic = EM_ITALIC_MODES.includes(vibe.emItalic) ? vibe.emItalic : 'default';
+  if (emItalic !== 'default') {
+    rules.push(`
+${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text :is(em, i):not(q *):not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab):not([style*="font-style"]):not([style*="color"]):not([style*="color"] *):not(font[color] *) {
+  font-style: ${emItalic} !important;
 }`);
   }
 
@@ -570,10 +667,14 @@ export function createAtmosphere({ getContext, store, isHomeCloaked }) {
     const inChatReaderActive = Boolean(readerActive && inChat);
     void syncCustomFontFace(doc, inChatReaderActive, vibe);
     const isNotionTheme = inChatReaderActive ? detectNotionTheme(doc) : false;
+    const isLightTheme = inChatReaderActive ? detectLightInkTheme(doc) : false;
+    const isLightSurface =
+      isLightTheme || Boolean(backdropLive && Number(vibe.backdropBrightness) >= 68);
     const overrideCss = buildPageOverrideCss(vibe, {
       readerActive: inChatReaderActive,
       backdropLive,
       isNotionTheme,
+      isLightSurface,
     });
     syncOverrideStyleSheet(doc, overrideCss);
   }

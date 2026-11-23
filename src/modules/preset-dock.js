@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.1';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.2.1';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.2.1';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.1';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.1';
+} from '../shell/host-actions.js?v=0.9.2.1';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.2.1';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -52,7 +52,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.1';
+} from './preset-backend.js?v=0.9.2.1';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -234,6 +234,10 @@ export function createPresetDock({
       onOpenApiDock?.();
     },
   });
+
+  if (assistantPanel.hasPendingPlan()) {
+    assistantOpen = true;
+  }
 
   function computePinnedKeysForBindingDrawer(targetPresetName) {
     const pinned = [];
@@ -1251,9 +1255,19 @@ export function createPresetDock({
     astToggleBtn.title = assistantOpen
       ? '收起伴侣预设助手'
       : '展开伴侣预设助手（防抢话、冲突排查、文风润色、一键预览与多步撤回）';
+    const hasPendingPlan = assistantPanel.hasPendingPlan();
+    const astMsgCount = assistantPanel.getMessageCount();
+    const astBtnText =
+      !assistantOpen && hasPendingPlan
+        ? '伴侣助手 · 待应用'
+        : !assistantOpen && undoCount > 0
+          ? `伴侣助手 (${undoCount})`
+          : !assistantOpen && astMsgCount > 0
+            ? '伴侣助手 · 有记录'
+            : '伴侣助手';
     astToggleBtn.append(
       createIconNode(doc, 'spark', 'stm-inline-svg'),
-      el('span', '', !assistantOpen && undoCount > 0 ? `伴侣助手 (${undoCount})` : '伴侣助手'),
+      el('span', '', astBtnText),
     );
     astToggleBtn.addEventListener('click', () => {
       assistantOpen = !assistantOpen;
@@ -1927,9 +1941,6 @@ export function createPresetDock({
 
   function close() {
     if (!isOpen) return;
-    if (assistantPanel.isBusy()) {
-      assistantPanel.abort();
-    }
     void flushPendingPersistIfAny();
     isOpen = false;
     renamingPresetName = '';

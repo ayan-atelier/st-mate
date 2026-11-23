@@ -9,7 +9,7 @@
  * 4. 多轮精简会话控制器：维护最近 8 轮精简问答摘要（剥离历史巨型 JSON 防 Token 膨胀），支持一键清空与流中取消。
  */
 
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.1';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.2.1';
 import {
   buildHostProxyPresetName,
   buildProbeGenerateBody,
@@ -22,7 +22,7 @@ import {
   needsV1Suffix,
   resolveAuxApiChannel,
   resolveSecretKeyForStation,
-} from './api-backend.js?v=0.9.1';
+} from './api-backend.js?v=0.9.2.1';
 
 export const DEFAULT_ASSISTANT_TIMEOUT_MS = 90000;
 export const DEFAULT_MAX_HISTORY_TURNS = 8;
@@ -1100,11 +1100,32 @@ export function createAssistantSession({
     completedTurns.length = 0;
   }
 
+  function restoreHistory(rawTurns = []) {
+    if (!Array.isArray(rawTurns)) return 0;
+    completedTurns.length = 0;
+    for (const item of rawTurns.slice(-maxTurns * 2)) {
+      if (!item || typeof item !== 'object') continue;
+      const userText = String(item.userText || '').trim();
+      if (!userText) continue;
+      completedTurns.push({
+        id: typeof item.id === 'string' && item.id ? item.id : createTurnId(),
+        userText,
+        reply: typeof item.reply === 'string' ? item.reply : '',
+        operations: Array.isArray(item.operations) ? item.operations : [],
+        hasStructuredPlan: Boolean(item.hasStructuredPlan),
+        appliedSummary: typeof item.appliedSummary === 'string' ? item.appliedSummary : '',
+        createdAt: Number(item.createdAt) || Date.now(),
+      });
+    }
+    return completedTurns.length;
+  }
+
   return {
     domainId,
     send,
     abort,
     clearHistory,
+    restoreHistory,
     markTurnApplied,
     buildRequestMessages,
     isBusy: () => Boolean(inFlightController),

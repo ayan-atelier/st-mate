@@ -4,7 +4,7 @@
  * 杜绝双份 DOM 挂载、重复事件监听与顶栏控制权打架。
  */
 
-import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.9.1';
+import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.9.2.1';
 
 export const CONTROL_REGISTRY_KEY = Symbol.for('yantai.control.registry.v1');
 export const STM_RUNTIME_KEY = Symbol.for('yantai.st_mate.runtime.v1');
