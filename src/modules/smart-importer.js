@@ -12,16 +12,18 @@
  *    - 酒馆助手脚本 (TavernHelper 全局脚本 JSON)
  */
 
-import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.9.2.1';
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
+import { applySmartThemeVarsImmediate } from '../core/companion-kit.js?v=0.9.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.4';
 import {
   cleanWorldBookName,
   primeHostCoreModule,
   primeHostRegexModule,
   primeHostWorldInfoModule,
-} from './char-world-backend.js?v=0.9.2.1';
-import { importPresetItems } from './preset-backend.js?v=0.9.2.1';
-import { toastMessage } from '../shell/host-actions.js?v=0.9.2.1';
+  refreshHostWorldInfoList,
+  sanitizeHostWorldBookName,
+} from './char-world-backend.js?v=0.9.4';
+import { importPresetItems } from './preset-backend.js?v=0.9.4';
+import { toastMessage } from '../shell/host-actions.js?v=0.9.4';
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -521,7 +523,9 @@ async function importWorldBookFileToHost(
     throw new Error(`导入世界书失败 (HTTP ${res?.status || 0})`);
   }
   const data = (await res.json?.().catch(() => null)) || {};
-  const finalName = cleanWorldBookName(data.name || getFileStem(file?.name, '世界书'));
+  const finalName =
+    sanitizeHostWorldBookName(data.name || getFileStem(file?.name, '世界书')) ||
+    cleanWorldBookName(data.name || getFileStem(file?.name, '世界书'));
 
   if (finalName && Array.isArray(wiMod?.world_names) && !wiMod.world_names.includes(finalName)) {
     wiMod.world_names.push(finalName);
@@ -575,6 +579,7 @@ async function importCharacterFilesToHost(
 
   if (typeof hostCore?.processDroppedFiles === 'function') {
     await hostCore.processDroppedFiles(normalized);
+    await refreshHostWorldInfoList({ getContext, doc });
     return { count: normalized.length };
   }
 
@@ -609,6 +614,9 @@ async function importCharacterFilesToHost(
 
   if (imported > 0 && typeof hostCore?.getCharacters === 'function') {
     await hostCore.getCharacters();
+  }
+  if (imported > 0) {
+    await refreshHostWorldInfoList({ getContext, doc });
   }
   return { count: imported };
 }

@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.2.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.4';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.4';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.9.2.1';
+} from './preset-backend.js?v=0.9.4';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -336,6 +336,111 @@ export function cleanWorldBookName(rawName) {
     .slice(0, 180);
   if (!cleaned || /^\.+$/.test(cleaned)) return '';
   return cleaned;
+}
+
+/**
+ * 与 SillyTavern 服务端 `sanitize-filename` 严格对齐的世界书文件名归一化：
+ * 服务端在 `/api/worldinfo/get`、`/api/worldinfo/edit` 及角色卡导入落盘时直接删除 `[\\/:*?"<>|]` 与控制字符
+ * （而非替换为下划线 `_`），因此含 `<` 等特殊符号的卡名（如 `人偶之家ᯠ.｡◡<„`）在磁盘与 `world_names` 中会成为 `人偶之家ᯠ.｡◡„`。
+ */
+export function sanitizeHostWorldBookName(rawName) {
+  if (typeof rawName !== 'string') return '';
+  const cleaned = rawName
+    .trim()
+    .replace(/\.json$/i, '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u0080-\u009f]/g, '')
+    .replace(/[.\s]+$/g, '')
+    .trim()
+    .slice(0, 180);
+  if (!cleaned || /^\.+$/.test(cleaned)) return '';
+  return cleaned;
+}
+
+/**
+ * 将角色卡/聊天记录里保存的原始世界书名匹配回酒馆 `world_names` 中的真实磁盘书名：
+ * 依次尝试：精确匹配 -> 去除 .json -> 服务端 `sanitize-filename` 等价匹配 -> 旧版 `_` 替换等价匹配 -> 忽略大小写匹配。
+ */
+export function matchExistingWorldBookName(rawName, worldNames = []) {
+  const clean = typeof rawName === 'string' ? rawName.trim() : '';
+  if (!clean || !Array.isArray(worldNames) || worldNames.length === 0) return '';
+
+  const list = worldNames
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+  if (list.length === 0) return '';
+
+  if (list.includes(clean)) return clean;
+
+  const noExt = clean.replace(/\.json$/i, '').trim();
+  if (noExt && list.includes(noExt)) return noExt;
+
+  const hostSanitized = sanitizeHostWorldBookName(clean);
+  if (hostSanitized) {
+    const exactSanitized = list.find(
+      name => name === hostSanitized || sanitizeHostWorldBookName(name) === hostSanitized,
+    );
+    if (exactSanitized) return exactSanitized;
+  }
+
+  const underscoreCleaned = cleanWorldBookName(clean);
+  if (underscoreCleaned) {
+    const exactUnderscore = list.find(
+      name => name === underscoreCleaned || cleanWorldBookName(name) === underscoreCleaned,
+    );
+    if (exactUnderscore) return exactUnderscore;
+  }
+
+  const lowerTarget = (hostSanitized || noExt || clean).toLowerCase();
+  const ciHit = list.find(name => {
+    const lowerName = name.toLowerCase();
+    return (
+      lowerName === lowerTarget ||
+      sanitizeHostWorldBookName(name).toLowerCase() === lowerTarget
+    );
+  });
+  return ciHit || '';
+}
+
+let inFlightWorldListRefresh = null;
+
+/**
+ * 主动刷新宿主 `world_names` 名录（防止刚导入的新角色卡在未打开过原生世界书面板时内存名录滞后）。
+ */
+export async function refreshHostWorldInfoList({
+  getContext,
+  worldInfoModule = null,
+  doc = globalThis.document,
+} = {}) {
+  if (inFlightWorldListRefresh) {
+    return inFlightWorldListRefresh;
+  }
+  const run = (async () => {
+    const ctx = getContext?.();
+    const wiMod =
+      worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
+    const updateListFn =
+      typeof wiMod?.updateWorldInfoList === 'function'
+        ? wiMod.updateWorldInfoList.bind(wiMod)
+        : typeof ctx?.updateWorldInfoList === 'function'
+          ? ctx.updateWorldInfoList.bind(ctx)
+          : null;
+    if (!updateListFn) return false;
+    try {
+      await updateListFn();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  inFlightWorldListRefresh = run;
+  try {
+    return await run;
+  } finally {
+    if (inFlightWorldListRefresh === run) {
+      inFlightWorldListRefresh = null;
+    }
+  }
 }
 
 export function sanitizeExportFileStem(rawName, fallback = 'character') {
@@ -1603,29 +1708,44 @@ export function resolveWorldInfoActivationState({
   const chatBook = String(ctx?.chatMetadata?.world_info || '').trim();
 
   // 4. 聚合生效世界书映射表（保留多来源徽章与最高优先级主标签）
+  // 关键兼容：当角色卡/聊天记录里的书名含 `<`、`>`、`:` 等非法文件名字符时，服务端落盘与 `world_names`
+  // 会按 `sanitize-filename` 自动剥离特殊符号，此处通过 `matchExistingWorldBookName` 归一化到真实磁盘名，
+  // 杜绝原生面板可见而伴侣面板误判“缺失书目”不显示条目的问题。
   const activeMap = new Map();
   const hasKnownLibrary = seenNames.size > 0;
+  const resolveCanonicalName = rawBookName => {
+    const clean = typeof rawBookName === 'string' ? rawBookName.trim() : '';
+    if (!clean) return '';
+    if (!hasKnownLibrary) return clean;
+    return matchExistingWorldBookName(clean, worldNames);
+  };
+
+  const rawPrimaryCharBook = primaryCharBook;
+  const matchedPrimaryCharBook = rawPrimaryCharBook ? resolveCanonicalName(rawPrimaryCharBook) : '';
+  primaryCharBook = matchedPrimaryCharBook || rawPrimaryCharBook;
 
   const recordActive = (bookName, sourceKey) => {
     const clean = typeof bookName === 'string' ? bookName.trim() : '';
     if (!clean) return;
+    const canonical = resolveCanonicalName(clean);
     // 若世界书名录已加载且磁盘上根本不存在该书，不计入真生效列表（避免死链误导）
-    if (hasKnownLibrary && !seenNames.has(clean)) return;
+    if (hasKnownLibrary && !canonical) return;
+    const finalName = canonical || clean;
 
-    let item = activeMap.get(clean);
+    let item = activeMap.get(finalName);
     if (!item) {
       item = {
-        name: clean,
+        name: finalName,
         sources: [],
       };
-      activeMap.set(clean, item);
+      activeMap.set(finalName, item);
     }
     if (!item.sources.includes(sourceKey)) {
       item.sources.push(sourceKey);
     }
   };
 
-  if (primaryCharBook) recordActive(primaryCharBook, 'char_primary');
+  if (rawPrimaryCharBook) recordActive(rawPrimaryCharBook, 'char_primary');
   for (const b of extraCharBooks) recordActive(b, 'char_extra');
   if (chatBook) recordActive(chatBook, 'chat');
   for (const b of globalBooks) recordActive(b, 'global');
@@ -1650,15 +1770,17 @@ export function resolveWorldInfoActivationState({
 
   // 默认选中策略：角色主书（且存在于书库）> 第一本正在生效的世界书 > 空
   let defaultBookName = '';
-  if (primaryCharBook && (!hasKnownLibrary || seenNames.has(primaryCharBook))) {
+  if (matchedPrimaryCharBook) {
+    defaultBookName = matchedPrimaryCharBook;
+  } else if (primaryCharBook && !hasKnownLibrary) {
     defaultBookName = primaryCharBook;
   } else if (activeBooks.length > 0) {
     defaultBookName = activeBooks[0].name;
   }
 
   const missingPrimaryCharBook =
-    Boolean(primaryCharBook) && hasKnownLibrary && !seenNames.has(primaryCharBook)
-      ? primaryCharBook
+    Boolean(rawPrimaryCharBook) && hasKnownLibrary && !matchedPrimaryCharBook
+      ? rawPrimaryCharBook
       : '';
 
   return {
@@ -1667,6 +1789,7 @@ export function resolveWorldInfoActivationState({
     worldNames,
     globalBooks,
     primaryCharBook,
+    rawPrimaryCharBook,
     missingPrimaryCharBook,
     extraCharBooks,
     chatBook,
@@ -2058,6 +2181,16 @@ export async function loadHostWorldBook(
   const wiMod =
     worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
 
+  const knownWorldNames = Array.isArray(wiMod?.world_names) ? wiMod.world_names : [];
+  const matchedTarget = matchExistingWorldBookName(target, knownWorldNames);
+  const sanitizedTarget = sanitizeHostWorldBookName(target);
+  const loadCandidates = [];
+  for (const cand of [matchedTarget, target, sanitizedTarget]) {
+    if (cand && !loadCandidates.includes(cand)) {
+      loadCandidates.push(cand);
+    }
+  }
+
   const hostLoadFn =
     typeof wiMod?.loadWorldInfo === 'function'
       ? wiMod.loadWorldInfo.bind(wiMod)
@@ -2066,13 +2199,15 @@ export async function loadHostWorldBook(
         : null;
 
   if (hostLoadFn) {
-    const loaded = await hostLoadFn(target);
-    if (loaded && typeof loaded === 'object') {
-      const cloned = structuredClone(loaded);
-      if (!cloned.entries || typeof cloned.entries !== 'object') {
-        cloned.entries = {};
+    for (const cand of loadCandidates) {
+      const loaded = await hostLoadFn(cand);
+      if (loaded && typeof loaded === 'object') {
+        const cloned = structuredClone(loaded);
+        if (!cloned.entries || typeof cloned.entries !== 'object') {
+          cloned.entries = {};
+        }
+        return cloned;
       }
-      return cloned;
     }
   }
 
@@ -2085,10 +2220,11 @@ export async function loadHostWorldBook(
       ? ctx.getRequestHeaders()
       : { 'Content-Type': 'application/json' };
 
+  const fetchTarget = matchedTarget || sanitizedTarget || target;
   const res = await fetchImpl(resolveEndpointHref('api/worldinfo/get', doc), {
     method: 'POST',
     headers,
-    body: JSON.stringify({ name: target }),
+    body: JSON.stringify({ name: fetchTarget }),
   });
 
   if (!res?.ok) {
@@ -2100,7 +2236,7 @@ export async function loadHostWorldBook(
   if (!data.entries || typeof data.entries !== 'object') {
     data.entries = {};
   }
-  wiMod?.worldInfoCache?.set?.(target, structuredClone(data));
+  wiMod?.worldInfoCache?.set?.(fetchTarget, structuredClone(data));
   return structuredClone(data);
 }
 
@@ -2580,7 +2716,10 @@ export async function deleteHostWorldBook(bookName, options = {}) {
  * 检测当前打开的单人角色卡 PNG/JSON 是否带有内嵌世界书 (`data.character_book`)。
  * 供 UI 提供「强制从角色卡内嵌数据重导覆盖」能力（根治酒馆遇到同名世界书静默跳过更新导致新条目打不开的痛点）。
  */
-export function inspectEmbeddedCharacterBook(ctx) {
+export function inspectEmbeddedCharacterBook(
+  ctx,
+  { worldNames = null, worldInfoModule = null, doc = globalThis.document } = {},
+) {
   const isGroup =
     ctx?.groupId !== undefined && ctx?.groupId !== null && String(ctx.groupId).trim() !== '';
   if (isGroup || !hasActiveChatSelection(ctx)) {
@@ -2589,6 +2728,7 @@ export function inspectEmbeddedCharacterBook(ctx) {
       bookName: '',
       charName: '',
       entryCount: 0,
+      matchesExisting: false,
     };
   }
 
@@ -2600,6 +2740,7 @@ export function inspectEmbeddedCharacterBook(ctx) {
       bookName: '',
       charName: String(char?.name || '').trim(),
       entryCount: 0,
+      matchesExisting: false,
     };
   }
 
@@ -2615,19 +2756,48 @@ export function inspectEmbeddedCharacterBook(ctx) {
       bookName: '',
       charName: String(char?.name || '').trim(),
       entryCount: 0,
+      matchesExisting: false,
     };
   }
 
   const charName = String(char?.data?.name || char?.name || '角色').trim() || '角色';
-  const fallbackName =
-    String(char?.data?.extensions?.world || '').trim() || `${charName}'s Lorebook`;
-  const bookName = cleanWorldBookName(rawBook.name || fallbackName) || `${charName}设定集`;
+  const linkedWorld = String(char?.data?.extensions?.world || '').trim();
+  const rawEmbeddedName = String(rawBook.name || '').trim();
+  const fallbackName = linkedWorld || `${charName}'s Lorebook`;
+
+  // 优先匹配书库中已存在的对应世界书（含 `<` 等特殊符号被酒馆 `sanitize-filename` 剥离后的磁盘名），
+  // 确保点击「重导卡内书」时原地覆盖已有世界书，绝不会再生成多出一本的 `_` 重复副本！
+  const knownWorldNames = Array.isArray(worldNames)
+    ? worldNames
+    : resolveWorldInfoActivationState({
+        getContext: () => ctx,
+        worldInfoModule,
+        doc,
+      }).worldNames;
+
+  let matchedExisting = '';
+  for (const cand of [linkedWorld, rawEmbeddedName, fallbackName]) {
+    if (!cand) continue;
+    const hit = matchExistingWorldBookName(cand, knownWorldNames);
+    if (hit) {
+      matchedExisting = hit;
+      break;
+    }
+  }
+
+  const preferredRaw = rawEmbeddedName || fallbackName;
+  const bookName =
+    matchedExisting ||
+    sanitizeHostWorldBookName(preferredRaw) ||
+    cleanWorldBookName(preferredRaw) ||
+    `${charName}设定集`;
 
   return {
     hasEmbedded: true,
     bookName,
     charName,
     entryCount: rawEntries.length,
+    matchesExisting: Boolean(matchedExisting),
   };
 }
 
@@ -2765,13 +2935,20 @@ export async function reimportEmbeddedCharacterBook({
 } = {}) {
   await ensureCharacterUnshallowed({ getContext, fetchImpl, doc });
   const ctx = getContext?.();
-  const info = inspectEmbeddedCharacterBook(ctx);
+  const wiMod =
+    worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
+
+  let info = inspectEmbeddedCharacterBook(ctx, { worldInfoModule: wiMod, doc });
+  if (info.hasEmbedded && !info.matchesExisting) {
+    const refreshed = await refreshHostWorldInfoList({ getContext, worldInfoModule: wiMod, doc });
+    if (refreshed) {
+      info = inspectEmbeddedCharacterBook(ctx, { worldInfoModule: wiMod, doc });
+    }
+  }
   if (!info.hasEmbedded) {
     throw new Error('当前角色卡内未检测到内嵌世界书数据');
   }
 
-  const wiMod =
-    worldInfoModule || cachedHostWorldInfoMod || (await primeHostWorldInfoModule({ doc }));
   const char = ctx?.characters?.[ctx?.characterId];
   const converted = convertEmbeddedCharacterBookToWorldInfo(char.data.character_book, {
     worldInfoModule: wiMod,

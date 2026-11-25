@@ -6,13 +6,13 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.4';
 import {
   isQuietRoomActive,
   isQuietRoomSidebarOpen,
   toggleQuietRoomSidebar,
-} from '../core/compat-bridges.js?v=0.9.2.1';
-import { svgMarkup } from '../core/icons.js?v=0.9.2.1';
+} from '../core/compat-bridges.js?v=0.9.4';
+import { svgMarkup } from '../core/icons.js?v=0.9.4';
 
 /**
  * 识别酒馆删除角色卡、群聊或最后一份存档后塞入的 `SAFETY_CHAT` 安全占位页

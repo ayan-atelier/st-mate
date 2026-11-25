@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.2.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.2.1';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.4';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.2.1';
+} from '../shell/host-actions.js?v=0.9.4';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,7 +23,7 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.2.1';
+} from './preset-backend.js?v=0.9.4';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -58,10 +58,12 @@ import {
   readActiveCharacterProfile,
   readCharacterCoverGallery,
   readWorldInfoEntries,
+  refreshHostWorldInfoList,
   reimportEmbeddedCharacterBook,
   replacePrimaryCharacterAvatarFile,
   resolveGalleryImageHref,
   resolveWorldInfoActivationState,
+  sanitizeHostWorldBookName,
   saveCharacterProfilePatch,
   saveHostWorldBook,
   setGlobalWorldBookEnabled,
@@ -69,7 +71,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.2.1';
+} from './char-world-backend.js?v=0.9.4';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -481,6 +483,16 @@ export function createCharWorldDock({
    * 响应外部脚本（如角色卡开场白 AU 自动开关、TavernHelper.updateWorldbookWith、/setentryfield 或原生世界书面板）
    * 触发的 `WORLDINFO_UPDATED`：立即失效或热替换内存副本，杜绝清爽世界书锁死旧快照甚至反覆写磁盘！
    */
+  function isSameWorldBookName(a, b) {
+    const cleanA = typeof a === 'string' ? a.trim() : '';
+    const cleanB = typeof b === 'string' ? b.trim() : '';
+    if (!cleanA || !cleanB) return false;
+    if (cleanA === cleanB) return true;
+    const sanA = sanitizeHostWorldBookName(cleanA);
+    const sanB = sanitizeHostWorldBookName(cleanB);
+    return Boolean(sanA && sanB && sanA === sanB);
+  }
+
   function handleWorldInfoUpdated(updatedBookName = '', updatedData = null) {
     if (isSelfSavingOrEditingWorld()) {
       return;
@@ -488,8 +500,8 @@ export function createCharWorldDock({
     const cleanUpdated = typeof updatedBookName === 'string' ? updatedBookName.trim() : '';
     const affectsCurrent =
       !cleanUpdated ||
-      cleanUpdated === loadedBookName ||
-      cleanUpdated === selectedWorldBook;
+      isSameWorldBookName(cleanUpdated, loadedBookName) ||
+      isSameWorldBookName(cleanUpdated, selectedWorldBook);
 
     if (!affectsCurrent) {
       if (isOpen) {
@@ -504,7 +516,7 @@ export function createCharWorldDock({
     if (!isOpen || activeTab !== 'world') {
       if (
         cleanUpdated &&
-        cleanUpdated === loadedBookName &&
+        isSameWorldBookName(cleanUpdated, loadedBookName) &&
         updatedData &&
         typeof updatedData === 'object' &&
         updatedData.entries &&
@@ -524,7 +536,7 @@ export function createCharWorldDock({
 
     if (
       cleanUpdated &&
-      cleanUpdated === selectedWorldBook &&
+      isSameWorldBookName(cleanUpdated, selectedWorldBook) &&
       updatedData &&
       typeof updatedData === 'object' &&
       updatedData.entries &&
@@ -2925,7 +2937,9 @@ export function createCharWorldDock({
         el(
           'small',
           'stm-cw-muted-note',
-          `检测到该角色卡自带内嵌世界书「${embeddedInfo.bookName}」（共 ${embeddedInfo.entryCount} 条设定）。酒馆导入角色卡遇到同名旧书时默认静默跳过，点击下方按钮即可直接用卡内最新数据覆盖书库并绑为主书：`,
+          embeddedInfo.matchesExisting
+            ? `检测到该角色卡自带内嵌世界书「${embeddedInfo.bookName}」（共 ${embeddedInfo.entryCount} 条设定），将直接原地覆盖已有书库并绑为主书（不会多出重复副本）：`
+            : `检测到该角色卡自带内嵌世界书「${embeddedInfo.bookName}」（共 ${embeddedInfo.entryCount} 条设定）。酒馆导入角色卡遇到同名旧书时默认静默跳过，点击下方按钮即可直接用卡内最新数据写入书库并绑为主书：`,
         ),
       );
       const rActions = el('div', 'stm-cw-inline-actions');
@@ -3640,11 +3654,19 @@ export function createCharWorldDock({
     }
 
     const activation = resolveWorldInfoActivationState({ getContext });
+    if (
+      selectedWorldBook &&
+      activation.worldNames.length > 0 &&
+      !activation.worldNames.includes(selectedWorldBook)
+    ) {
+      selectedWorldBook = '';
+    }
     if (!selectedWorldBook && activation.defaultBookName) {
       selectedWorldBook = activation.defaultBookName;
     }
 
-    // 异步预热官方模块，并在启用 lazyLoadCharacters 时无感补齐活跃角色完整设定
+    // 异步预热官方模块，并在启用 lazyLoadCharacters 时无感补齐活跃角色完整设定；
+    // 若检测到新导入角色卡的主书未出现在滞后的内存 `world_names` 中，自动静默刷新一次酒馆世界书名录。
     const shouldForceFreshWorld = !worldAutoSaver.hasPending() && !worldAutoSaver.isSaving();
     const curCtx = getContext?.();
     const activeCharMaybeShallow = Boolean(curCtx?.characters?.[curCtx?.characterId]?.shallow);
@@ -3652,16 +3674,51 @@ export function createCharWorldDock({
       primeHostWorldInfoModule(),
       primeHostOpenAiModule(),
       activeCharMaybeShallow ? ensureCharacterUnshallowed({ getContext }) : Promise.resolve(null),
-    ]).then(([, , unshallowed]) => {
+    ]).then(async ([, , unshallowed]) => {
       if (!isOpen) return;
+      let refreshed = resolveWorldInfoActivationState({ getContext });
+      const needsListRefresh =
+        Boolean(refreshed.missingPrimaryCharBook) ||
+        refreshed.worldNames.length === 0 ||
+        (!refreshed.defaultBookName && inspectEmbeddedCharacterBook(getContext?.()).hasEmbedded);
+      if (needsListRefresh) {
+        const listUpdated = await refreshHostWorldInfoList({ getContext });
+        if (!isOpen) return;
+        if (listUpdated) {
+          refreshed = resolveWorldInfoActivationState({ getContext });
+        }
+      }
+
       renderHeader();
       if (unshallowed && activeTab === 'char') {
         renderBodyPreservingScroll();
       }
       if (activeTab === 'world') {
-        const refreshed = resolveWorldInfoActivationState({ getContext });
+        if (
+          selectedWorldBook &&
+          refreshed.worldNames.length > 0 &&
+          !refreshed.worldNames.includes(selectedWorldBook)
+        ) {
+          selectedWorldBook = '';
+        }
         if (!selectedWorldBook && refreshed.defaultBookName) {
           selectedWorldBook = refreshed.defaultBookName;
+        }
+        if (!selectedWorldBook && refreshed.missingPrimaryCharBook) {
+          const probeName =
+            sanitizeHostWorldBookName(refreshed.missingPrimaryCharBook) ||
+            refreshed.missingPrimaryCharBook;
+          const probed = await loadHostWorldBook(probeName, { getContext }).catch(() => null);
+          if (!isOpen) return;
+          if (probed && typeof probed === 'object' && Object.keys(probed.entries || {}).length > 0) {
+            selectedWorldBook = probeName;
+            loadedBookName = probeName;
+            loadedBookData = probed;
+            loadingBookName = '';
+            renderHeader();
+            renderBodyPreservingScroll();
+            return;
+          }
         }
         if (selectedWorldBook) {
           void ensureWorldBookLoaded(selectedWorldBook, {
@@ -3734,9 +3791,11 @@ export function createCharWorldDock({
     confirmDeleteEntryUid = null;
 
     await flushAllPendingSaves();
+    selectedWorldBook = '';
     loadedBookName = '';
     loadedBookData = null;
     loadingBookName = '';
+    expandedEntryUid = null;
 
     const ctx = getContext?.();
     if (!hasActiveChatSelection(ctx)) {
@@ -3752,7 +3811,13 @@ export function createCharWorldDock({
       await ensureCharacterUnshallowed({ getContext });
     }
 
-    const act = resolveWorldInfoActivationState({ getContext });
+    let act = resolveWorldInfoActivationState({ getContext });
+    if (act.missingPrimaryCharBook || act.worldNames.length === 0) {
+      const updated = await refreshHostWorldInfoList({ getContext });
+      if (updated) {
+        act = resolveWorldInfoActivationState({ getContext });
+      }
+    }
     selectedWorldBook = act.defaultBookName || '';
     expandedEntryUid = null;
     renderHeader();

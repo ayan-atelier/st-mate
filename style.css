@@ -2244,7 +2244,7 @@ body.stm-turbo-mobile .popup {
   opacity: 0.72;
 }
 
-/* 设置中心「启用伴侣主题」浅昼/静夜内联选卡 */
+/* 设置中心「启用观月札记」正版授权日/夜双模选卡 */
 .stm-theme-picker-pop {
   flex-shrink: 0;
   display: grid;
@@ -2253,6 +2253,62 @@ body.stm-turbo-mobile .popup {
   padding: 9px 12px 11px;
   border-top: 1px dashed var(--stm-border);
   background: rgba(0, 0, 0, 0.12);
+}
+
+.stm-theme-picker-pop.is-moon-note {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stm-theme-credit-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stm-theme-credit-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stm-theme-credit-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--stm-ink);
+}
+
+.stm-theme-credit-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 99px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 34%, var(--stm-border));
+  background: color-mix(in srgb, var(--stm-accent) 12%, transparent);
+  color: var(--stm-ink);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.stm-theme-credit-note {
+  font-size: 11px;
+  color: var(--stm-muted);
+  line-height: 1.45;
+}
+
+.stm-theme-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+@media (max-width: 520px) {
+  .stm-theme-mode-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stm-theme-option-btn {
@@ -9647,8 +9703,54 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
    ========================================================================== */
 
 #stm-welcome-guide.stm-guide-dialog {
-  width: min(490px, calc(100vw - 28px));
+  width: min(500px, calc(100vw - 28px));
   max-width: calc(100vw - 28px);
+}
+
+#stm-welcome-guide .stm-guide-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 10px 16px 0;
+}
+
+#stm-welcome-guide .stm-guide-tab-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  margin: 0 !important;
+  border: 1px solid var(--stm-border) !important;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--stm-surface) 45%, transparent) !important;
+  color: var(--stm-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background-color 0.16s ease, color 0.16s ease;
+}
+
+#stm-welcome-guide .stm-guide-tab-btn:hover {
+  color: var(--stm-ink);
+  border-color: color-mix(in srgb, var(--stm-accent) 45%, var(--stm-border)) !important;
+}
+
+#stm-welcome-guide .stm-guide-tab-btn.is-active {
+  color: var(--stm-ink);
+  font-weight: 600;
+  border-color: var(--stm-accent) !important;
+  background: color-mix(in srgb, var(--stm-accent) 16%, transparent) !important;
+}
+
+#stm-welcome-guide .stm-guide-tab-svg {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #stm-welcome-guide .stm-guide-body {
@@ -9790,4 +9892,430 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
   #stm-welcome-guide .stm-guide-footer {
     padding: 10px 12px 12px;
   }
+}
+
+/* ==========================================================================
+   楼层底部操作条、编辑底栏与人话浮层菜单 (floor-actions.js)
+   ========================================================================== */
+
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons,
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_edit_buttons {
+  display: none !important;
+}
+
+body.stm-floor-actions-bottom #chat .mes_block > textarea.edit_textarea {
+  grid-row: 4;
+}
+
+.stm-floor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  grid-row: 7;
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  padding: 0;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+
+.stm-floor-bar[hidden] {
+  display: none !important;
+}
+
+.stm-floor-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  min-width: 0;
+}
+
+.stm-floor-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  margin: 0 !important;
+  border: 1px solid var(--stm-border) !important;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--stm-surface) 70%, transparent) !important;
+  color: var(--stm-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.stm-floor-pill:hover {
+  color: var(--stm-ink);
+  border-color: var(--stm-accent) !important;
+}
+
+.stm-floor-pill.is-flag {
+  border-color: color-mix(in srgb, var(--stm-accent) 42%, var(--stm-border)) !important;
+  color: var(--stm-ink);
+}
+
+.stm-floor-pill-svg {
+  width: 11px;
+  height: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stm-floor-btns {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.stm-floor-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 6px;
+  background: transparent !important;
+  color: var(--stm-muted);
+  opacity: 0.62;
+  cursor: pointer;
+  transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease;
+}
+
+.stm-floor-btn:hover,
+.stm-floor-btn:focus-visible {
+  opacity: 1;
+  color: var(--stm-ink);
+  background: color-mix(in srgb, var(--stm-ink) 9%, transparent) !important;
+}
+
+.stm-floor-btn.is-copied {
+  opacity: 1;
+  color: var(--stm-accent);
+}
+
+.stm-floor-svg {
+  width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 长段编辑态底部操作栏：删除 ··· | 取消 [✓ 保存] */
+.stm-floor-edit-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  grid-row: 7;
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.stm-floor-edit-bar[hidden] {
+  display: none !important;
+}
+
+.stm-floor-edit-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stm-floor-edit-left,
+.stm-floor-edit-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stm-floor-edit-btn-item {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 11px !important;
+  margin: 0 !important;
+  border: 1px solid var(--stm-border) !important;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--stm-surface) 76%, transparent) !important;
+  color: var(--stm-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background-color 0.14s ease, color 0.14s ease;
+}
+
+.stm-floor-edit-btn-item:hover {
+  border-color: color-mix(in srgb, var(--stm-ink) 28%, var(--stm-border)) !important;
+  background: color-mix(in srgb, var(--stm-ink) 8%, var(--stm-surface)) !important;
+}
+
+.stm-floor-edit-btn-item.is-danger {
+  color: var(--stm-muted);
+}
+
+.stm-floor-edit-btn-item.is-danger:hover {
+  color: #e06c75;
+  border-color: rgba(224, 108, 117, 0.48) !important;
+  background: rgba(224, 108, 117, 0.1) !important;
+}
+
+.stm-floor-edit-rare-toggle {
+  width: 30px;
+  padding: 0 !important;
+  color: var(--stm-muted);
+}
+
+.stm-floor-edit-rare-toggle.is-active {
+  color: var(--stm-ink);
+  border-color: var(--stm-accent) !important;
+}
+
+.stm-floor-edit-cancel {
+  color: var(--stm-muted);
+}
+
+.stm-floor-edit-save {
+  border-color: var(--stm-accent) !important;
+  background: color-mix(in srgb, var(--stm-accent) 20%, var(--stm-surface)) !important;
+  color: var(--stm-ink);
+  font-weight: 600;
+}
+
+.stm-floor-edit-save:hover {
+  background: color-mix(in srgb, var(--stm-accent) 30%, var(--stm-surface)) !important;
+}
+
+.stm-floor-edit-svg {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stm-floor-edit-rare-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stm-floor-edit-rare-strip[hidden] {
+  display: none !important;
+}
+
+.stm-floor-edit-rare-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 9px !important;
+  margin: 0 !important;
+  border: 1px solid var(--stm-border) !important;
+  border-radius: 6px;
+  background: transparent !important;
+  color: var(--stm-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.stm-floor-edit-rare-chip:hover {
+  color: var(--stm-ink);
+  border-color: var(--stm-accent) !important;
+}
+
+/* 点开「···」全局复用的轻量人话菜单 (#stm-floor-menu) */
+#stm-floor-menu.stm-floor-menu {
+  position: fixed;
+  z-index: 20120;
+  width: min(236px, calc(100vw - 20px));
+  padding: 5px;
+  border-radius: 11px;
+  border: 1px solid var(--stm-border);
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, var(--stm-bg)) 96%, var(--SmartThemeChatTintColor, #141414));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--stm-ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+#stm-floor-menu.stm-floor-menu[hidden] {
+  display: none !important;
+}
+
+#stm-floor-menu .stm-floor-menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#stm-floor-menu .stm-floor-menu-divider {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--stm-border);
+  opacity: 0.7;
+}
+
+#stm-floor-menu .stm-floor-menu-item {
+  appearance: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 8px;
+  background: transparent !important;
+  color: var(--stm-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+
+#stm-floor-menu .stm-floor-menu-item:not(.has-sub) {
+  align-items: center;
+}
+
+#stm-floor-menu .stm-floor-menu-item:hover {
+  background: color-mix(in srgb, var(--stm-ink) 8%, transparent) !important;
+}
+
+#stm-floor-menu .stm-floor-menu-item.is-danger:hover {
+  color: #e06c75;
+  background: rgba(224, 108, 117, 0.12) !important;
+}
+
+#stm-floor-menu .stm-floor-menu-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--stm-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+#stm-floor-menu .stm-floor-menu-item:not(.has-sub) .stm-floor-menu-icon {
+  margin-top: 0;
+}
+
+#stm-floor-menu .stm-floor-menu-item.is-danger:hover .stm-floor-menu-icon {
+  color: #e06c75;
+}
+
+#stm-floor-menu .stm-floor-menu-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+#stm-floor-menu .stm-floor-menu-label {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: inherit;
+}
+
+#stm-floor-menu .stm-floor-menu-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--stm-muted);
+}
+
+#stm-floor-menu .stm-floor-menu-more-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 10px !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 7px;
+  background: transparent !important;
+  color: var(--stm-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+#stm-floor-menu .stm-floor-menu-more-toggle:hover {
+  color: var(--stm-ink);
+  background: color-mix(in srgb, var(--stm-ink) 6%, transparent) !important;
+}
+
+#stm-floor-menu .stm-floor-menu-chevron {
+  width: 13px;
+  height: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#stm-floor-menu .stm-floor-menu-lowfreq-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px 4px 2px;
+}
+
+#stm-floor-menu .stm-floor-menu-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 8px !important;
+  margin: 0 !important;
+  border: 1px solid var(--stm-border) !important;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--stm-surface) 55%, transparent) !important;
+  color: var(--stm-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+#stm-floor-menu .stm-floor-menu-chip:hover {
+  color: var(--stm-ink);
+  border-color: var(--stm-accent) !important;
+}
+
+.stm-floor-chip-icon {
+  width: 12px;
+  height: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }

@@ -7,18 +7,19 @@
  */
 
 import {
-  COMPANION_THEME_DAY_NAME,
-  COMPANION_THEME_NIGHT_NAME,
-  applyCompanionTheme,
+  MOON_NOTE_THEME_META,
+  MOON_NOTE_THEME_MODES,
+  applyMoonNoteTheme,
   findInstalledYantaiPresetName,
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
-} from '../core/companion-kit.js?v=0.9.2.1';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.2.1';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.2.1';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.2.1';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.2.1';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.2.1';
+  isMoonNoteThemeName,
+} from '../core/companion-kit.js?v=0.9.4';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.4';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.4';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.4';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.4';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.4';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -942,6 +943,16 @@ export function createSettingsDialog({
         },
       }),
       makeSwitchRow({
+        helpKey: 'floor_actions_bottom',
+        icon: 'more',
+        title: '楼层底部操作与人话菜单',
+        desc: '将每条消息顶部的「··· / 编辑」与长段编辑保存栏挪至楼层底部，点开「···」以清晰中文菜单展示（开新分支、保存此楼、隐藏、删除）并自动收起原生低频图标；关闭即刻退回原版。',
+        checked: current.floorActionsBottom !== false,
+        onChange: val => {
+          updateStoreFromDialog({ floorActionsBottom: val });
+        },
+      }),
+      makeSwitchRow({
         helpKey: 'float_capsule',
         icon: 'capsule',
         title: '悬浮快捷栏与底栏收纳',
@@ -1164,22 +1175,21 @@ export function createSettingsDialog({
     const thStatus = suiteCoordinator?.getTavernHelperStatus?.() || { status: 'unknown' };
     const suiteBusy = Boolean(suiteCoordinator?.isBusy?.());
 
-    // 1. 伴侣官方配套主题（Apple 原生轻薄卡片流 · 静夜 / 浅昼）触发钮与展开栏
+    // 1. 正版授权内置美化《观月札记 V1.1.3》（原作者：WWW · 日间/夜间/跟随系统）触发钮与展开栏
     const activeThemeName = getActiveHostThemeName({ getContext, doc });
-    const isUsingCompanionTheme =
-      activeThemeName === COMPANION_THEME_NIGHT_NAME ||
-      activeThemeName === COMPANION_THEME_DAY_NAME;
+    const isUsingMoonNote = isMoonNoteThemeName(activeThemeName);
 
     const companionThemeBtn = el(
       'button',
       'stm-row-inline-btn stm-companion-theme-btn',
       applyingThemeBusy
         ? '应用中…'
-        : isUsingCompanionTheme
-          ? '切换伴侣主题'
-          : '启用伴侣主题',
+        : isUsingMoonNote
+          ? '切换观月札记'
+          : '启用观月札记',
     );
     companionThemeBtn.type = 'button';
+    companionThemeBtn.title = `一键启用 ${MOON_NOTE_THEME_META.author} 老师正版授权的《${MOON_NOTE_THEME_META.title}》日/夜双模美化`;
     companionThemeBtn.disabled = applyingThemeBusy;
     companionThemeBtn.addEventListener('click', evt => {
       evt.preventDefault();
@@ -1190,21 +1200,41 @@ export function createSettingsDialog({
 
     let themePickerNode = null;
     if (themePickerOpen) {
-      themePickerNode = el('div', 'stm-theme-picker-pop');
-      for (const [modeId, label, sub] of [
-        ['night', COMPANION_THEME_NIGHT_NAME, '深色护眼轻薄卡片'],
-        ['day', COMPANION_THEME_DAY_NAME, '浅色纸白轻薄卡片'],
-      ]) {
-        const isCur = activeThemeName === label;
+      themePickerNode = el('div', 'stm-theme-picker-pop is-moon-note');
+
+      const creditBar = el('div', 'stm-theme-credit-bar');
+      const creditHead = el('div', 'stm-theme-credit-head');
+      creditHead.append(
+        el(
+          'strong',
+          'stm-theme-credit-title',
+          `${MOON_NOTE_THEME_META.title} ${MOON_NOTE_THEME_META.version}`,
+        ),
+        el('span', 'stm-theme-credit-badge', MOON_NOTE_THEME_META.creditLine),
+      );
+      creditBar.append(
+        creditHead,
+        el(
+          'span',
+          'stm-theme-credit-note',
+          '自带日/夜双模与人设馆兼容层，点击下方模式即写入酒馆主题库并立即生效：',
+        ),
+      );
+      themePickerNode.append(creditBar);
+
+      const modeGrid = el('div', 'stm-theme-mode-grid');
+      for (const mode of MOON_NOTE_THEME_MODES) {
+        const isCur = activeThemeName === mode.name;
         const optBtn = el(
           'button',
           `stm-theme-option-btn${isCur ? ' is-active' : ''}`,
         );
         optBtn.type = 'button';
         optBtn.disabled = applyingThemeBusy;
+        optBtn.dataset.themeMode = mode.id;
         optBtn.append(
-          el('strong', 'stm-theme-opt-title', label),
-          el('span', 'stm-theme-opt-sub', isCur ? `${sub} · 当前使用中` : sub),
+          el('strong', 'stm-theme-opt-title', mode.shortLabel),
+          el('span', 'stm-theme-opt-sub', isCur ? `${mode.sub} · 当前使用中` : mode.sub),
         );
         optBtn.addEventListener('click', async evt => {
           evt.preventDefault();
@@ -1213,18 +1243,19 @@ export function createSettingsDialog({
           applyingThemeBusy = true;
           render();
           try {
-            const res = await applyCompanionTheme(modeId, { getContext, doc });
+            const res = await applyMoonNoteTheme(mode.id, { getContext, doc });
             themePickerOpen = false;
-            toastMessage(`已启用「${res.name}」`, 'success');
+            toastMessage(`已启用「${res.name}」（原作者：${res.author}）`, 'success');
           } catch (err) {
-            toastMessage(err?.message || '启用伴侣主题失败', 'error');
+            toastMessage(err?.message || '启用观月札记主题失败', 'error');
           } finally {
             applyingThemeBusy = false;
             render();
           }
         });
-        themePickerNode.append(optBtn);
+        modeGrid.append(optBtn);
       }
+      themePickerNode.append(modeGrid);
     }
 
     let helperActionBtn = null;

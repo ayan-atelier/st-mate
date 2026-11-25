@@ -11,10 +11,127 @@ import {
   getHostPresetState,
   importPresetItems,
   selectHostPresetByName,
-} from '../modules/preset-backend.js?v=0.9.2.1';
+} from '../modules/preset-backend.js?v=0.9.4';
 
 export const COMPANION_THEME_NIGHT_NAME = '伴侣主题 · 静夜';
 export const COMPANION_THEME_DAY_NAME = '伴侣主题 · 浅昼';
+
+export const MOON_NOTE_THEME_AUTO_NAME = '观月札记 · 跟随系统 (WWW)';
+export const MOON_NOTE_THEME_DAY_NAME = '观月札记 · 浅昼 (WWW)';
+export const MOON_NOTE_THEME_NIGHT_NAME = '观月札记 · 静夜 (WWW)';
+
+export const MOON_NOTE_THEME_META = Object.freeze({
+  title: '观月札记',
+  version: 'V1.1.3',
+  author: 'WWW',
+  license: 'CC-BY-NC-SA-4.0',
+  creditLine: '原作者：WWW（已获正版授权 · CC-BY-NC-SA-4.0）',
+});
+
+export const MOON_NOTE_THEME_MODES = Object.freeze([
+  {
+    id: 'auto',
+    name: MOON_NOTE_THEME_AUTO_NAME,
+    shortLabel: '跟随系统',
+    sub: '随设备明暗自动切换',
+  },
+  {
+    id: 'day',
+    name: MOON_NOTE_THEME_DAY_NAME,
+    shortLabel: '浅昼 · 日间',
+    sub: '暖白纸面 · 日间护眼',
+  },
+  {
+    id: 'night',
+    name: MOON_NOTE_THEME_NIGHT_NAME,
+    shortLabel: '静夜 · 夜间',
+    sub: '柔和炭灰 · 夜间沉浸',
+  },
+]);
+
+const MOON_NOTE_LIGHT_BASE_COLORS = Object.freeze({
+  main_text_color: 'rgba(55, 53, 47, 1)',
+  italics_text_color: 'rgba(104, 103, 98, 1)',
+  underline_text_color: 'rgba(135, 88, 94, 1)',
+  quote_text_color: 'rgba(82, 108, 120, 1)',
+  blur_tint_color: 'rgba(244, 242, 237, 1)',
+  chat_tint_color: 'rgba(250, 249, 246, 1)',
+  user_mes_blur_tint_color: 'rgba(0, 0, 0, 0)',
+  bot_mes_blur_tint_color: 'rgba(0, 0, 0, 0)',
+  shadow_color: 'rgba(35, 35, 30, 0.09)',
+  border_color: 'rgba(228, 224, 216, 1)',
+});
+
+const MOON_NOTE_DARK_BASE_COLORS = Object.freeze({
+  main_text_color: 'rgba(230, 228, 223, 1)',
+  italics_text_color: 'rgba(178, 175, 168, 1)',
+  underline_text_color: 'rgba(208, 161, 168, 1)',
+  quote_text_color: 'rgba(165, 183, 191, 1)',
+  blur_tint_color: 'rgba(32, 32, 32, 1)',
+  chat_tint_color: 'rgba(25, 25, 25, 1)',
+  user_mes_blur_tint_color: 'rgba(0, 0, 0, 0)',
+  bot_mes_blur_tint_color: 'rgba(0, 0, 0, 0)',
+  shadow_color: 'rgba(0, 0, 0, 0.25)',
+  border_color: 'rgba(65, 65, 62, 1)',
+});
+
+let cachedMoonNoteBaseTheme = null;
+
+export function isMoonNoteThemeName(themeName) {
+  const clean = typeof themeName === 'string' ? themeName.trim() : '';
+  if (!clean) return false;
+  return (
+    clean === MOON_NOTE_THEME_AUTO_NAME ||
+    clean === MOON_NOTE_THEME_DAY_NAME ||
+    clean === MOON_NOTE_THEME_NIGHT_NAME ||
+    clean.startsWith('观月札记')
+  );
+}
+
+/**
+ * 基于 WWW 老师正版授权的《观月札记 V1.1.3》底座，按其原生显示模式区块无损生成
+ * 「跟随系统 / 浅昼（固定浅色）/ 静夜（固定深色）」三套变体，完整保留原作者版权头与人设馆兼容层。
+ */
+export function buildMoonNoteThemeVariant(
+  baseTheme,
+  modeId = 'auto',
+  { preferDark = false } = {},
+) {
+  if (!baseTheme || typeof baseTheme !== 'object') {
+    throw new Error('缺少《观月札记》基础主题数据');
+  }
+  const normalizedMode = modeId === 'day' ? 'day' : modeId === 'night' ? 'night' : 'auto';
+  const modeMeta =
+    MOON_NOTE_THEME_MODES.find(item => item.id === normalizedMode) || MOON_NOTE_THEME_MODES[0];
+
+  let css = String(baseTheme.custom_css || '');
+  const lightBlockRe =
+    /(\/\*\s*固定浅色\s*\*\/\s*\r?\n)(?:\/\*\s*\r?\n)?(html:root\s*\{[\s\S]*?--nt-user-background-shade:0;\s*\r?\n\})(?:\s*\r?\n\*\/)?/;
+  const darkBlockRe =
+    /(\/\*\s*固定深色\s*\*\/\s*\r?\n)(?:\/\*\s*\r?\n)?(html:root\s*\{[\s\S]*?--nt-user-background-shade:var\(--nt-dark-background-shade\);\s*\r?\n\})(?:\s*\r?\n\*\/)?/;
+
+  if (normalizedMode === 'day') {
+    css = css.replace(lightBlockRe, '$1$2');
+    css = css.replace(darkBlockRe, '$1/*\n$2\n*/');
+  } else if (normalizedMode === 'night') {
+    css = css.replace(lightBlockRe, '$1/*\n$2\n*/');
+    css = css.replace(darkBlockRe, '$1$2');
+  } else {
+    css = css.replace(lightBlockRe, '$1/*\n$2\n*/');
+    css = css.replace(darkBlockRe, '$1/*\n$2\n*/');
+  }
+
+  const useDarkPalette =
+    normalizedMode === 'night' || (normalizedMode === 'auto' && Boolean(preferDark));
+  const baseColors = useDarkPalette ? MOON_NOTE_DARK_BASE_COLORS : MOON_NOTE_LIGHT_BASE_COLORS;
+
+  return {
+    ...baseTheme,
+    ...baseColors,
+    name: modeMeta.name,
+    custom_css: css,
+  };
+}
 
 function svgMask(inner, strokeWidth = 1.55) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='${strokeWidth}' stroke-linecap='round' stroke-linejoin='round'>${inner}</svg>`;
@@ -1131,11 +1248,8 @@ export function applySmartThemeVarsImmediate(doc, themeObj) {
   }
 }
 
-/**
- * 将配套主题写入酒馆服务端 `api/themes/save` 并立即在当前会话全量生效（绝不遗留旧浅色变量）。
- */
-export async function applyCompanionTheme(
-  modeId = 'night',
+async function persistAndActivateHostTheme(
+  themePayload,
   {
     getContext,
     fetchImpl = globalThis.fetch,
@@ -1143,8 +1257,6 @@ export async function applyCompanionTheme(
     powerUserModule = null,
   } = {},
 ) {
-  const entry = COMPANION_THEMES[modeId] || COMPANION_THEMES.night;
-  const themePayload = { ...entry.theme };
   const ctx = getContext?.();
 
   if (typeof fetchImpl === 'function') {
@@ -1222,10 +1334,85 @@ export async function applyCompanionTheme(
   // 关键修复：power-user.js 的 applyPowerUserSettings() 调用无参 applyThemeColor() 不会覆盖 SmartTheme 变量，
   // 因此此处无条件强制同步全部 SmartTheme 变量、#custom-style 与窗口几何测量！
   applySmartThemeVarsImmediate(doc, themePayload);
-  globalThis.dispatchEvent?.(new CustomEvent('resize'));
+  if (typeof globalThis.CustomEvent === 'function') {
+    globalThis.dispatchEvent?.(new globalThis.CustomEvent('resize'));
+  }
 
   ctx?.saveSettingsDebounced?.();
-  return { ok: true, name: themePayload.name, modeId: entry.id };
+  return themePayload.name;
+}
+
+/**
+ * 将正版授权的《观月札记 V1.1.3》（作者：WWW · CC-BY-NC-SA-4.0）写入酒馆主题库并立即生效。
+ * 支持 `auto`（跟随系统）/ `day`（浅昼日间）/ `night`（静夜夜间）三模式无缝秒切。
+ */
+export async function applyMoonNoteTheme(
+  modeId = 'auto',
+  {
+    getContext,
+    fetchImpl = globalThis.fetch,
+    doc = globalThis.document,
+    powerUserModule = null,
+    rawThemeData = null,
+  } = {},
+) {
+  let baseTheme = rawThemeData || cachedMoonNoteBaseTheme;
+  if (!baseTheme) {
+    if (typeof fetchImpl !== 'function') {
+      throw new Error('当前环境无法读取内置《观月札记》主题资源');
+    }
+    const assetUrl = new URL('../../assets/themes/观月札记V1.1.3.json', import.meta.url).href;
+    const res = await fetchImpl(assetUrl, { method: 'GET', cache: 'no-store' });
+    if (!res?.ok) {
+      throw new Error(`读取内置《观月札记》资源失败 (HTTP ${res?.status || 0})`);
+    }
+    baseTheme = await res.json();
+    cachedMoonNoteBaseTheme = baseTheme;
+  }
+
+  const preferDark = Boolean(
+    globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.matches,
+  );
+  const normalizedMode = modeId === 'day' ? 'day' : modeId === 'night' ? 'night' : 'auto';
+  const themePayload = buildMoonNoteThemeVariant(baseTheme, normalizedMode, { preferDark });
+
+  const appliedName = await persistAndActivateHostTheme(themePayload, {
+    getContext,
+    fetchImpl,
+    doc,
+    powerUserModule,
+  });
+
+  return {
+    ok: true,
+    name: appliedName,
+    modeId: normalizedMode,
+    author: MOON_NOTE_THEME_META.author,
+    license: MOON_NOTE_THEME_META.license,
+  };
+}
+
+/**
+ * 将配套主题写入酒馆服务端 `api/themes/save` 并立即在当前会话全量生效（绝不遗留旧浅色变量）。
+ */
+export async function applyCompanionTheme(
+  modeId = 'night',
+  {
+    getContext,
+    fetchImpl = globalThis.fetch,
+    doc = globalThis.document,
+    powerUserModule = null,
+  } = {},
+) {
+  const entry = COMPANION_THEMES[modeId] || COMPANION_THEMES.night;
+  const themePayload = { ...entry.theme };
+  const appliedName = await persistAndActivateHostTheme(themePayload, {
+    getContext,
+    fetchImpl,
+    doc,
+    powerUserModule,
+  });
+  return { ok: true, name: appliedName, modeId: entry.id };
 }
 
 /**
