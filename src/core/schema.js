@@ -112,7 +112,8 @@ export function resolveDefaultSecretKey(source, vertexAuthMode = 'express') {
 export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: STM_SCHEMA_VERSION,
   shellEnabled: true,
-  topbarMode: 'rp',
+  topbarMode: 'native',
+  welcomeGuideDismissed: false,
   nativeTopbarHiddenIcons: Object.freeze([]), // 默认全部显示（含原生背景图图标），玩家可在原版顶栏下方按需勾选隐藏
   chatImageButton: true,
   floatCapsuleEnabled: false, // 默认关闭：对话侧边独立圆球快捷组（上翻5楼 / 动态收纳球 / 下翻5楼，连戳两下浮出到顶到底）
@@ -532,10 +533,17 @@ export function normalizeSettings(raw = {}) {
     }
   }
 
+  const hasSavedObject = Boolean(raw && typeof raw === 'object' && Object.keys(raw).length > 0);
+  const welcomeGuideDismissed =
+    typeof src.welcomeGuideDismissed === 'boolean'
+      ? src.welcomeGuideDismissed
+      : hasSavedObject;
+
   return {
     schemaVersion: STM_SCHEMA_VERSION,
     shellEnabled: pickBool(src.shellEnabled, DEFAULT_SETTINGS.shellEnabled),
     topbarMode: pickEnum(src.topbarMode, TOPBAR_MODES, DEFAULT_SETTINGS.topbarMode),
+    welcomeGuideDismissed,
     nativeTopbarHiddenIcons,
     chatImageButton: pickBool(src.chatImageButton, DEFAULT_SETTINGS.chatImageButton),
     floatCapsuleEnabled: pickBool(src.floatCapsuleEnabled, DEFAULT_SETTINGS.floatCapsuleEnabled),

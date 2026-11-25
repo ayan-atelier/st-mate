@@ -77,6 +77,7 @@ export function createSettingsDialog({
   stmVersion = '0.8.4',
   onToggleShell,
   onForcePruneTurbo = null,
+  onOpenWelcomeGuide = null,
   onOpenPersonaStudio,
   onOpenStateChange,
   onAfterOpenNativeDrawer,
@@ -149,6 +150,16 @@ export function createSettingsDialog({
     titleWrap.append(title, badge, statusBadgeEl);
 
     const headerRight = el('div', 'stm-dialog-header-actions');
+    if (typeof onOpenWelcomeGuide === 'function') {
+      const guideBtn = el('button', 'stm-pill-btn stm-dialog-guide-btn', '上手导览');
+      guideBtn.type = 'button';
+      guideBtn.title = '查看 SillyTavern 伴侣快速上手导览';
+      guideBtn.addEventListener('click', () => {
+        close();
+        onOpenWelcomeGuide();
+      });
+      headerRight.append(guideBtn);
+    }
     const closeBtn = el('button', 'stm-dialog-close', '×');
     closeBtn.type = 'button';
     closeBtn.title = '关闭';
@@ -328,16 +339,16 @@ export function createSettingsDialog({
 
     const options = [
       {
-        modeId: 'rp',
-        label: '伴侣顶栏',
-        caption: '简洁明了，快捷进出',
-        withGuideBtn: true,
-      },
-      {
         modeId: 'native',
         label: '原版顶栏',
-        caption: '原汁原味，酒馆原版顶栏',
+        caption: '保留原版美化，图标已升级',
         withGuideBtn: false,
+      },
+      {
+        modeId: 'rp',
+        label: '伴侣顶栏',
+        caption: '极简沉浸，快捷进出',
+        withGuideBtn: true,
       },
     ];
 

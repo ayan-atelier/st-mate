@@ -9640,3 +9640,154 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
     padding-inline: 10px !important;
   }
 }
+
+
+/* ==========================================================================
+   首次使用快速上手轻导览弹窗 (#stm-welcome-guide)
+   ========================================================================== */
+
+#stm-welcome-guide.stm-guide-dialog {
+  width: min(490px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
+}
+
+#stm-welcome-guide .stm-guide-body {
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: min(68dvh, 520px);
+  overflow-y: auto;
+}
+
+#stm-welcome-guide .stm-guide-lead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 32%, var(--stm-border));
+  background: color-mix(in srgb, var(--stm-accent) 10%, transparent);
+}
+
+#stm-welcome-guide .stm-guide-lead-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--stm-accent);
+}
+
+#stm-welcome-guide .stm-guide-lead-text {
+  margin: 0 !important;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--stm-ink);
+}
+
+#stm-welcome-guide .stm-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#stm-welcome-guide .stm-guide-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--stm-border);
+  background: color-mix(in srgb, var(--stm-surface) 58%, transparent);
+}
+
+#stm-welcome-guide .stm-guide-item-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--stm-accent) 28%, var(--stm-border));
+  background: color-mix(in srgb, var(--stm-accent) 10%, transparent);
+  color: var(--stm-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+#stm-welcome-guide .stm-guide-svg {
+  width: 16px;
+  height: 16px;
+}
+
+#stm-welcome-guide .stm-guide-item-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#stm-welcome-guide .stm-guide-item-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--stm-ink);
+}
+
+#stm-welcome-guide .stm-guide-item-desc {
+  margin: 0 !important;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--stm-muted);
+}
+
+#stm-welcome-guide .stm-guide-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--stm-border);
+}
+
+#stm-welcome-guide .stm-guide-secondary-btn {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+#stm-welcome-guide .stm-guide-primary-btn {
+  appearance: none;
+  min-height: 34px;
+  padding: 7px 18px;
+  margin: 0;
+  border: 1px solid var(--stm-accent);
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--stm-accent) 22%, transparent);
+  color: var(--stm-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+#stm-welcome-guide .stm-guide-primary-btn:hover {
+  background: color-mix(in srgb, var(--stm-accent) 34%, transparent);
+}
+
+@media (max-width: 520px) {
+  #stm-welcome-guide .stm-guide-body {
+    padding: 12px 12px 10px;
+    gap: 9px;
+  }
+
+  #stm-welcome-guide .stm-guide-item {
+    padding: 9px 10px;
+    gap: 9px;
+  }
+
+  #stm-welcome-guide .stm-guide-footer {
+    padding: 10px 12px 12px;
+  }
+}

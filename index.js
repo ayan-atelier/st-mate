@@ -15,7 +15,7 @@ import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
 } from './src/core/file-saver.js?v=0.9.2.1';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.2.1';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.3';
 import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.9.2.1';
 import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.9.2.1';
 import { closeAllNativeDrawers, getOpenNativeDrawerIds, toastMessage } from './src/shell/host-actions.js?v=0.9.2.1';
@@ -45,10 +45,11 @@ import { primeHostWorldInfoModule } from './src/modules/char-world-backend.js?v=
 import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.9.2.1';
 import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.9.2.1';
 import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.9.2.1';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.2.1';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.3';
+import { createWelcomeGuide } from './src/shell/welcome-guide.js?v=0.9.3';
 
-const STM_VERSION = '0.9.2';
-const STM_ASSET_REV = '0.9.2.1';
+const STM_VERSION = '0.9.3';
+const STM_ASSET_REV = '0.9.3';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -85,6 +86,7 @@ function createStMateRuntime() {
 
   let suiteCoordinator = null;
   let settingsDialog = null;
+  let welcomeGuide = null;
   let homeCloak = null;
   let smartImporter = null;
   let tapImmersive = null;
@@ -319,11 +321,18 @@ function createStMateRuntime() {
         SlashCommand.fromProps({
           name: 'stmate',
           helpString:
-            '打开 ST伴侣设置中心（传入 import 呼出万能自动分流导入，char 打开角色档案，world 打开世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
+            '打开 ST伴侣设置中心（传入 guide 查看快速上手导览，import 呼出万能自动分流导入，char 打开角色档案，world 打开世界书，assistant 打开预设伴侣助手，preset 打开预设馆，api 打开API工作台，reader 打开页面排版面板，topbar 切换伴侣/原版顶栏，diag 复制环境排障体检单，toggle 切换原生酒馆/伴侣界面）',
           callback: (_args, value) => {
             const cmd = String(value || '').trim().toLowerCase();
             if (cmd === 'toggle') {
               void toggleShell(!store.get().shellEnabled);
+            } else if (cmd === 'guide' || cmd === 'help') {
+              readerDock?.close();
+              apiDock?.close();
+              presetDock?.close();
+              charWorldDock?.close();
+              settingsDialog?.close();
+              welcomeGuide?.open();
             } else if (cmd === 'import') {
               smartImporter?.openPicker();
             } else if (cmd === 'topbar' || cmd === 'bar') {
@@ -407,6 +416,7 @@ function createStMateRuntime() {
       refreshAll({ shouldHydrate: true });
       scheduleActiveChatPresetSync(40);
       scheduleSuiteAutoProvision(1200);
+      welcomeGuide?.maybeOpenOnFirstBoot(900);
     });
 
     subscribe(types.CHAT_CHANGED, () => {
@@ -635,6 +645,22 @@ function createStMateRuntime() {
       },
     });
 
+    welcomeGuide = createWelcomeGuide({
+      store,
+      isSafeMode: () => isSafeModeRequested(globalThis),
+      hasBlockingModal: () => Boolean(settingsDialog?.isOpen?.()),
+      onOpenSettings: () => {
+        readerDock?.close();
+        apiDock?.close();
+        presetDock?.close();
+        charWorldDock?.close();
+        settingsDialog?.open();
+      },
+      onOpenStateChange: () => {
+        ttOverlayBackGuard?.sync();
+      },
+    });
+
     settingsDialog = createSettingsDialog({
       getContext,
       store,
@@ -643,6 +669,7 @@ function createStMateRuntime() {
       stmVersion: STM_VERSION,
       onToggleShell: toggleShell,
       onForcePruneTurbo: () => perfEngine?.refresh?.({ forcePrune: true }),
+      onOpenWelcomeGuide: () => welcomeGuide?.open(),
       onPreviewAtmosphere: () => atmosphere?.refresh(),
       onOpenStateChange: () => {
         ttOverlayBackGuard?.sync();
@@ -794,6 +821,7 @@ function createStMateRuntime() {
         hasAnyOverlayOpen: () =>
           isExportFallbackDialogOpen(globalThis.document) ||
           Boolean(charWorldDock?.isLightboxOpen?.()) ||
+          Boolean(welcomeGuide?.isOpen?.()) ||
           Boolean(settingsDialog?.isOpen?.()) ||
           Boolean(readerDock?.isOpen?.()) ||
           Boolean(apiDock?.isOpen?.()) ||
@@ -808,6 +836,10 @@ function createStMateRuntime() {
           }
           if (charWorldDock?.isLightboxOpen?.()) {
             charWorldDock.closeLightbox();
+            return true;
+          }
+          if (welcomeGuide?.isOpen?.()) {
+            welcomeGuide.close({ persistDismiss: true });
             return true;
           }
           if (settingsDialog?.isOpen?.()) {
@@ -882,6 +914,7 @@ function createStMateRuntime() {
         refreshAll();
         scheduleActiveChatPresetSync(40);
         scheduleSuiteAutoProvision(1800);
+        welcomeGuide?.maybeOpenOnFirstBoot(1100);
         return bound;
       };
 
@@ -947,6 +980,7 @@ function createStMateRuntime() {
     tapImmersive?.destroy();
     smartImporter?.destroy();
     homeCloak?.destroy();
+    welcomeGuide?.destroy();
     settingsDialog?.destroy();
 
     charWorldDock = null;
@@ -963,6 +997,7 @@ function createStMateRuntime() {
     tapImmersive = null;
     smartImporter = null;
     homeCloak = null;
+    welcomeGuide = null;
     settingsDialog = null;
     suiteCoordinator = null;
   }
@@ -972,6 +1007,7 @@ function createStMateRuntime() {
     disable,
     refresh: refreshAll,
     openSettings: tab => settingsDialog?.open(tab),
+    openWelcomeGuide: () => welcomeGuide?.open(),
     openReaderDock: () => readerDock?.open(),
     openApiDock: () => apiDock?.open(),
     openPresetDock: () => presetDock?.open(),
