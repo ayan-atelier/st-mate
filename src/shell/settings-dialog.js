@@ -14,12 +14,12 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.5';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.5';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.5';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.5';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.5';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.5';
+} from '../core/companion-kit.js?v=0.9.6';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.6';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.6';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.6';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.6';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.6';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },

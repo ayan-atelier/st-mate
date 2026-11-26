@@ -6,8 +6,8 @@
  * 3. 严禁使用 display:contents 与 subtree:true 深度监听（彻底杜绝 iOS TauriTavern 多插件重排闪退），关闭开关时 100% 归位原始 DOM。
  */
 
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.5';
-import { closeAllNativeDrawers } from './host-actions.js?v=0.9.5';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.6';
+import { closeAllNativeDrawers } from './host-actions.js?v=0.9.6';
 
 export const LOW_FREQ_BUILTIN_CONTAINER_IDS = Object.freeze([
   'vectors_container',
@@ -197,6 +197,7 @@ export function createExtensionsTidy({
   let observedWandEl = null;
   let syncRaf = 0;
   let isMutating = false;
+  let layoutIsTidied = false;
 
   const recordedNodes = new WeakSet();
   const originalRecords = [];
@@ -415,14 +416,21 @@ export function createExtensionsTidy({
     return lowFreqDrawerEl;
   }
 
-  function restoreTidiedLayout(doc) {
-    const extBlock = doc?.querySelector?.('#rm_extensions_block .extensions_block');
+  function restoreTidiedLayout(doc, extBlockHint = null) {
+    const extBlock =
+      extBlockHint || doc?.querySelector?.('#rm_extensions_block .extensions_block') || null;
+    const hasTidiedClass = Boolean(extBlock?.classList?.contains?.('stm-ext-tidied'));
+    if (!layoutIsTidied && !hasTidiedClass && !lowFreqDrawerEl) {
+      return;
+    }
+
     extBlock?.classList?.remove?.('stm-ext-tidied');
 
     if (originalRecords.length > 0) {
       const byParent = new Map();
       for (const rec of originalRecords) {
         if (!rec.parent || !rec.node) continue;
+        if (rec.node === heroCardEl || rec.node === lowFreqDrawerEl) continue;
         if (!byParent.has(rec.parent)) byParent.set(rec.parent, []);
         byParent.get(rec.parent).push(rec);
       }
@@ -431,12 +439,16 @@ export function createExtensionsTidy({
           .slice()
           .sort((a, b) => a.initialIndex - b.initialIndex || a.initialOrder - b.initialOrder);
         for (const rec of sorted) {
-          if (rec.node === heroCardEl || rec.node === lowFreqDrawerEl) continue;
           if (rec.node?.dataset) {
             delete rec.node.dataset.stmDeprecatedExtra;
           }
-          parent.appendChild(rec.node);
         }
+        // 使用最小位移校验归位，绝不对已在原位的扩展面板重复 appendChild 导致点击失效与 MutationObserver 死循环
+        const desired = sorted.map(rec => rec.node);
+        const existingExtras = (parent.children ? [...parent.children] : []).filter(
+          n => n && n !== heroCardEl && n !== lowFreqDrawerEl && !desired.includes(n),
+        );
+        appendOrderedChildren(parent, [...desired, ...existingExtras]);
       }
     }
 
@@ -445,6 +457,7 @@ export function createExtensionsTidy({
     lowFreqBodyEl = null;
     lowFreqCountSpan = null;
     lowFreqToggleBtn = null;
+    layoutIsTidied = false;
   }
 
   function applyWandMenuTidy(doc, settings) {
@@ -513,7 +526,7 @@ export function createExtensionsTidy({
         s.shellEnabled && s.tidy?.enabled !== false && s.tidy?.tidyExtensionsPanel,
       );
       if (!shouldTidy) {
-        restoreTidiedLayout(doc);
+        restoreTidiedLayout(doc, extBlock);
         // 重新确保 heroCard 仍在顶部
         ensureHeroCard(doc, extBlock, primaryCol);
         return;
@@ -601,11 +614,16 @@ export function createExtensionsTidy({
       }
 
       extBlock?.classList?.add?.('stm-ext-tidied');
+      layoutIsTidied = true;
       appendOrderedChildren(
         primaryCol,
         mainItems.map(entry => entry.node),
       );
     } finally {
+      // 清空本次同步自身产生的 DOM 变更队列，彻底杜绝 MutationObserver 微任务自我唤醒死循环
+      hostChildObserver?.takeRecords?.();
+      drawerClassObserver?.takeRecords?.();
+      wandChildObserver?.takeRecords?.();
       isMutating = false;
     }
   }

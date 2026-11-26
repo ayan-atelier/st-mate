@@ -3,7 +3,7 @@
  * 封装返回首页、打开/关闭原生抽屉、读取当前角色/群聊头像与名称等标准动作。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.5';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.6';
 
 let coreModulePromise = null;
 let groupModulePromise = null;

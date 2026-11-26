@@ -9930,7 +9930,7 @@ test('v0.9.2: 悬浮原版顶栏零底透/零抽屉顶缝 + 搜索图标防重�
     };
 
     const { PRESET_ASSISTANT_STORAGE_KEY, createPresetAssistantPanel } = await import(
-      '../src/modules/preset-assistant.js?v=0.9.5'
+      '../src/modules/preset-assistant.js?v=0.9.6'
     );
 
     const panel1 = createPresetAssistantPanel({
@@ -10300,6 +10300,53 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
     );
     homeCloak.destroy();
     assert.equal(doc.body.classList.contains('stm-show-home-composer'), false);
+
+    // 6. 回归防线：切回原生酒馆 (shellEnabled = false) 后，extensionsTidy 归位必须 100% 幂等（0 重复 appendChild 死循环导致插件栏点不动）
+    const { createExtensionsTidy } = await import('../src/shell/extensions-tidy.js');
+    const rmBlock = doc.createElement('div');
+    rmBlock.id = 'rm_extensions_block';
+    const extWrap = doc.createElement('div');
+    extWrap.className = 'extensions_block';
+    const col1 = doc.createElement('div');
+    col1.id = 'extensions_settings';
+    const col2 = doc.createElement('div');
+    col2.id = 'extensions_settings2';
+    const regexBox = doc.createElement('div');
+    regexBox.id = 'regex_container';
+    const shelfBox = doc.createElement('div');
+    shelfBox.id = 'jd-bookshelf-settings';
+    col1.append(regexBox);
+    col2.append(shelfBox);
+    extWrap.append(col1, col2);
+    rmBlock.append(extWrap);
+    doc.body.append(rmBlock);
+
+    const extStore = createSettingsStore({ getContext: () => homeCtx });
+    const extTidy = createExtensionsTidy({ root: win, store: extStore, stmVersion: '0.9.6' });
+    extTidy.sync();
+    assert.equal(extWrap.classList.contains('stm-ext-tidied'), true);
+
+    // 切回原生酒馆：首次 sync 归位，二次及多次 sync 必须 0 次 DOM 移动！
+    extStore.update({ shellEnabled: false });
+    extTidy.sync();
+    assert.equal(extWrap.classList.contains('stm-ext-tidied'), false);
+    assert.equal(shelfBox.parentNode, col2);
+
+    let nativeMutations = 0;
+    const origC1Append = col1.appendChild.bind(col1);
+    const origC2Append = col2.appendChild.bind(col2);
+    const origC1Insert = col1.insertBefore.bind(col1);
+    const origC2Insert = col2.insertBefore.bind(col2);
+    col1.appendChild = (...a) => { nativeMutations += 1; return origC1Append(...a); };
+    col2.appendChild = (...a) => { nativeMutations += 1; return origC2Append(...a); };
+    col1.insertBefore = (...a) => { nativeMutations += 1; return origC1Insert(...a); };
+    col2.insertBefore = (...a) => { nativeMutations += 1; return origC2Insert(...a); };
+
+    extTidy.sync();
+    extTidy.sync();
+    extTidy.sync();
+    assert.equal(nativeMutations, 0, '切回原生酒馆归位后再次 sync 必须保持 0 次 DOM 插拔，绝不卡死插件折叠点击');
+    extTidy.destroy();
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
