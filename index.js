@@ -221,7 +221,7 @@ function createStMateRuntime() {
     const registry = ensureControlRegistry(globalThis);
     controlHandle = {
       id: 'st-mate',
-      label: 'SillyTavern 伴侣总台',
+      label: 'SillyTavern 伴侣',
       version: STM_VERSION,
       schemaVersion: STM_SCHEMA_VERSION,
       namespace: 'st_mate',

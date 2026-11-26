@@ -896,7 +896,7 @@ export function createSettingsDialog({
         helpKey: 'tidy_sub_extensions',
         icon: 'grid',
         title: '净化拼图「扩展面板」排序与收纳',
-        desc: '按「伴侣总台 -> 正则 -> 酒馆助手 -> 快速回复 -> 第三方插件」置顶排列，并将二十余项低频内置模块收进底部折叠夹。',
+        desc: '按「SillyTavern 伴侣 -> 正则 -> 酒馆助手 -> 快速回复 -> 第三方插件」置顶排列，并将二十余项低频内置模块收进底部折叠夹。',
         checked: Boolean(tidyState.tidyExtensionsPanel),
         onChange: val => {
           updateStoreFromDialog({ tidy: { tidyExtensionsPanel: val } });
