@@ -4,7 +4,7 @@
  * 杜绝双份 DOM 挂载、重复事件监听与顶栏控制权打架。
  */
 
-import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.9.7';
+import { retireRedundantLegacyPlugins } from './suite-guard.js?v=0.9.8';
 
 export const CONTROL_REGISTRY_KEY = Symbol.for('yantai.control.registry.v1');
 export const STM_RUNTIME_KEY = Symbol.for('yantai.st_mate.runtime.v1');
@@ -72,9 +72,9 @@ export const MODULE_DESCRIPTORS = Object.freeze([
     key: 'memory',
     registryId: 'yantai-memory',
     settingsNamespace: 'yantai_memory_v2',
-    label: '叙事记忆系统',
+    label: '记忆增强系统',
     icon: 'memory',
-    summary: '默认关闭且零生成拦截，方便你混用表格记忆等外部插件；开启后启用砚台因果记忆台。',
+    summary: '平时无感、默认关闭且零拦截；开启后每 3 轮自动总结剧情生成独立世界书，长对话不忘细节且随时可查。',
   },
 ]);
 

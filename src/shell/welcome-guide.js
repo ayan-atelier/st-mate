@@ -2,12 +2,12 @@
  * SillyTavern 伴侣 (st-mate) · 首次使用与进阶玩法双页签导览卡片 (#stm-welcome-guide)
  * 设计理念：
  * 1. 新用户首次装好刷新后仅轻柔弹出一次，点右上角 ×、遮罩、ESC 或「知道了，开始用」立即永久关闭，绝不反复打扰；
- * 2. 「快速上手」默认呈现最常用也最容易错过的 4 个核心入口（T/Aa 排版背景与重点字、万能混传、原版顶栏升级、底栏发图）；
- * 3. 「进阶玩法」由用户按需点击翻看，讲清酒馆深度玩法入口（酒馆助手提示词查看器、魔法棒收纳瘦身、副 API 与 AI 改预设、多封面随机与无损换开场白、授权主题与安全模式）；
+ * 2. 「快速上手」首行双卡并排交代最关键的交互坐标（左下角「☰」三横菜单、段落右下角「···」操作栏），随后依次展示排版与对话样式、书架万能混传与底栏发表情包/图片；
+ * 3. 「进阶玩法」按从日常顺手到深度排查的顺序梳理五大玩法：低频按钮隐藏（不关停）、独立副 API 全套共用、记忆增强系统、角色卡多封面轮换、魔法棒提示词查看器；
  * 4. 任何时候都可在「伴侣设置中心」右上角点击「上手导览」或输入 /stmate guide 重新打开。
  */
 
-import { createIconNode } from '../core/icons.js?v=0.9.7';
+import { createIconNode } from '../core/icons.js?v=0.9.8';
 
 const GUIDE_TABS = Object.freeze([
   { id: 'quick', label: '快速上手', icon: 'zap' },
@@ -18,59 +18,67 @@ const GUIDE_SECTIONS = Object.freeze({
   quick: {
     leadIcon: 'zap',
     leadText:
-      '已为你保留原版顶栏美化，底层防卡防烫引擎已在后台静默开启。所有模块随时可单独开关、一键退回原版。',
+      '底层加速与防卡防烫引擎已静默开启，并完整保留原版顶栏美化。所有模块随时可单独开关，或一键无损退回原版。',
+    pair: [
+      {
+        icon: 'bars',
+        title: '左下角「☰」三横菜单',
+        desc: '退出回书架、保存、存档管理、重写与续写都在输入框左侧三横里。',
+      },
+      {
+        icon: 'more',
+        title: '段落右下角操作栏',
+        desc: '每段对话右下角可编辑、复制；点「···」可开新分支、保存或隐藏。',
+      },
+    ],
     items: [
       {
         icon: 'typography',
-        title: '点顶栏「T」（伴侣顶栏「Aa」），随手调排版、背景与重点字',
-        desc: '实时调字号、边距、首行缩进、行距与无框书页；一键把当前角色立绘设为背景并调亮度清晰度；还能给对话和内心换配色、加荧光笔或虚线重点，内置多套「经典搭配」直接套用。',
+        title: '点顶栏「T」（简化顶栏「Aa」），随手调排版、背景与对话样式',
+        desc: '实时调字号、页宽、首行缩进、行距与无框书页；一键把当前角色立绘设为背景并调亮度清晰度；还能给对话和内心换配色、加荧光笔或虚线重点，内置多套「经典搭配」直接套用。',
       },
       {
         icon: 'upload',
-        title: '书架页「万能混传」一键导入',
-        desc: '点角色书架右上角导入图标（或输入 /stmate import），把角色卡、预设、世界书、正则、主题全选一起拖进去，自动识别分流归位。',
-      },
-      {
-        icon: 'sliders',
-        title: '点你熟悉的原版顶栏，核心面板已全部升级',
-        desc: '预设与 API 彻底解绑（常用模型可加星收藏、支持角色⇄预设双向绑定）；世界书用蓝绿灯标清真生效状态；人设馆自带 4 张新手体验头像，上手零门槛。',
+        title: '书架首页点导入图标，整套资源万能混传',
+        desc: '点角色书架顶部导入图标（或输入 /stmate import），把角色卡、预设、世界书、正则、美化主题全选一起拖进去，自动识别分流归位。',
       },
       {
         icon: 'image',
-        title: '输入框右下角直接发图与表情包',
-        desc: '聊天输入框右下角已放好低调图片图标，选图或贴表情包自动开启识图并智能压缩，防手机大图触发反代报错。',
+        title: '输入框右下角直接给角色发表情包与图片',
+        desc: '点聊天输入框右下角低调图片图标（或直接粘贴表情包），自动开启识图并智能压图，防手机大图触发反代报错。',
       },
     ],
   },
   advanced: {
     leadIcon: 'spark',
     leadText:
-      '玩熟日常对话后，这些藏在酒馆与伴侣里的实用入口，能让排查问题、学写预设和长线 RP 更顺手。',
+      '玩熟日常对话后，这些伴侣与酒馆进阶功能，能让界面收纳、副模型省钱提速、长线记忆与排查问题都更顺手。',
+    pair: null,
     items: [
       {
-        icon: 'search',
-        title: '想看清 AI 这轮到底收到了什么？用「提示词查看器」',
-        desc: '点顶栏拼图（扩展）→「酒馆助手」即可开启「提示词查看器」（也可在单条消息菜单里点开），按真实发送顺序逐条查看预设、世界书触发情况与 Token 占用——查世界书生没生效、自己学改预设都很直观。',
-      },
-      {
         icon: 'fold',
-        title: '顶栏、魔法棒与扩展页清爽瘦身',
-        desc: '打开「伴侣设置 → 界面整理与低频收纳」，把平时不点但需后台运行的扩展从魔法棒、顶栏或扩展列表里折叠藏起（仅藏入口，绝不停用插件功能）。',
+        title: '顶栏、三横与魔法棒低频按钮隐藏（隐藏但不关停）',
+        desc: '打开「伴侣设置 → 界面整理与低频收纳」，把低频插件入口折叠藏起，需要时点击展开查看；仅隐藏入口，绝不关停插件后台功能。',
       },
       {
-        icon: 'edit',
-        title: '副 API 通道 ＋ AI 伴侣助手帮你改预设',
-        desc: '在 API 工作台可单独指定轻量小模型作为副通道（不碰主模型与聊天）；点预设馆「伴侣助手」，直接说话就能改词条、排冲突，或生成随预设携带的小剧场美化正则（改前改后对比勾选 ＋ 10 步撤销）。',
+        icon: 'plug',
+        title: '独立「副 API」一处配好、全套共用',
+        desc: '在 API 工作台可单独指定轻量高速副 API（绝不碰主线模型与聊天）；改预设、写人设、整理剧情记忆都能共用这一条副通道，省钱又省心。',
+      },
+      {
+        icon: 'memory',
+        title: '记忆增强系统（平时无感 · 每 3 轮自动归档）',
+        desc: '默认关闭零打扰，在伴侣设置开启后平时后台无感运行；每 3 轮自动总结剧情并生成独立世界书，长对话不忘设定，随时可点开查看与微调。',
       },
       {
         icon: 'idcard',
-        title: '单卡多封面随机轮换 ＋ 第 1 楼无损切开场白',
-        desc: '在角色档案点封面可上传多张角色美图并开启「回首页随机轮换」；多开场白长卡在第 1 楼直接点档案里的开场白胶囊，免删档一键切换。',
+        title: '角色卡多封面图库与随机轮换',
+        desc: '在角色档案点封面上传多张心仪立绘，开启「回首页随机轮换」，每次回到书架都能解锁不同的角色封面。',
       },
       {
-        icon: 'palette',
-        title: '内置授权美化《观月札记》、长线记忆与安全模式',
-        desc: '在「伴侣设置 → 原生与设置」可一键启用 WWW 老师正版授权的《观月札记》日/夜双模美化；想开启「伴侣顶栏 / 叙事记忆 / 重Roll助手」也在设置中心自由开关；遇冲突时网址加 ?stm_safe=1 即可安全进场。',
+        icon: 'search',
+        title: '查看每轮发给 AI 的完整内容（魔法棒 → 提示词查看器）',
+        desc: '点输入框左侧魔法棒打开「提示词查看器」（也可在扩展「酒馆助手」或单条消息菜单里打开），每轮发给 AI 的预设、世界书触发与 Token 占用一目了然。',
       },
     ],
   },
@@ -80,7 +88,6 @@ export function createWelcomeGuide({
   store,
   isSafeMode = () => false,
   hasBlockingModal = () => false,
-  onOpenSettings = null,
   onOpenStateChange = null,
 } = {}) {
   let dialogEl = null;
@@ -127,6 +134,27 @@ export function createWelcomeGuide({
     }
   }
 
+  function buildItemCard(doc, item, { compact = false } = {}) {
+    const card = el('div', compact ? 'stm-guide-item is-compact-pair' : 'stm-guide-item');
+    if (compact) {
+      const head = el('div', 'stm-guide-pair-head');
+      const iconBox = el('div', 'stm-guide-item-icon is-mini');
+      iconBox.append(createIconNode(doc, item.icon, 'stm-guide-svg'));
+      head.append(iconBox, el('strong', 'stm-guide-item-title', item.title));
+      card.append(head, el('p', 'stm-guide-item-desc', item.desc));
+      return card;
+    }
+    const iconBox = el('div', 'stm-guide-item-icon');
+    iconBox.append(createIconNode(doc, item.icon, 'stm-guide-svg'));
+    const copy = el('div', 'stm-guide-item-copy');
+    copy.append(
+      el('strong', 'stm-guide-item-title', item.title),
+      el('p', 'stm-guide-item-desc', item.desc),
+    );
+    card.append(iconBox, copy);
+    return card;
+  }
+
   function renderTabsAndBody() {
     const doc = globalThis.document;
     if (!doc || !tabBarEl || !bodyEl) return;
@@ -162,18 +190,17 @@ export function createWelcomeGuide({
     );
     bodyEl.append(lead);
 
+    if (Array.isArray(section.pair) && section.pair.length > 0) {
+      const pairGrid = el('div', 'stm-guide-pair');
+      for (const pairItem of section.pair) {
+        pairGrid.append(buildItemCard(doc, pairItem, { compact: true }));
+      }
+      bodyEl.append(pairGrid);
+    }
+
     const list = el('div', 'stm-guide-list');
     for (const item of section.items) {
-      const card = el('div', 'stm-guide-item');
-      const iconBox = el('div', 'stm-guide-item-icon');
-      iconBox.append(createIconNode(doc, item.icon, 'stm-guide-svg'));
-      const copy = el('div', 'stm-guide-item-copy');
-      copy.append(
-        el('strong', 'stm-guide-item-title', item.title),
-        el('p', 'stm-guide-item-desc', item.desc),
-      );
-      card.append(iconBox, copy);
-      list.append(card);
+      list.append(buildItemCard(doc, item));
     }
     bodyEl.append(list);
   }
@@ -208,18 +235,11 @@ export function createWelcomeGuide({
     bodyEl = el('div', 'stm-dialog-body stm-guide-body');
 
     const footer = el('footer', 'stm-guide-footer');
-    const settingsBtn = el('button', 'stm-pill-btn stm-guide-secondary-btn', '去伴侣设置看看');
-    settingsBtn.type = 'button';
-    settingsBtn.addEventListener('click', () => {
-      close({ persistDismiss: true });
-      onOpenSettings?.();
-    });
-
     const startBtn = el('button', 'stm-guide-primary-btn', '知道了，开始用');
     startBtn.type = 'button';
     startBtn.addEventListener('click', () => close({ persistDismiss: true }));
 
-    footer.append(settingsBtn, startBtn);
+    footer.append(startBtn);
     dialogEl.append(header, tabBarEl, bodyEl, footer);
 
     renderTabsAndBody();

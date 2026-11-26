@@ -7,8 +7,8 @@
  * 4. 100% 代理触发酒馆原生按钮事件与官方 `deleteMessage`，零 DOM 破坏、关闭开关即瞬间无损退回原版布局。
  */
 
-import { createIconNode } from '../core/icons.js?v=0.9.7';
-import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.7';
+import { createIconNode } from '../core/icons.js?v=0.9.8';
+import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.8';
 
 const BODY_ACTIVE_CLASS = 'stm-floor-actions-bottom';
 

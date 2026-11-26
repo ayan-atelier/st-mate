@@ -14,12 +14,13 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.7';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.7';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.7';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.7';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.7';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.7';
+} from '../core/companion-kit.js?v=0.9.8';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.8';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.8';
+import { createVersionManager } from '../core/version-manager.js?v=0.9.8';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.8';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.8';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.8';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -75,10 +76,12 @@ export function createSettingsDialog({
   store,
   moduleBridge,
   suiteCoordinator = null,
-  stmVersion = '0.8.4',
+  versionManager = null,
+  stmVersion = '0.9.8',
   onToggleShell,
   onForcePruneTurbo = null,
   onOpenWelcomeGuide = null,
+  onBeforeVersionChange = null,
   onOpenPersonaStudio,
   onOpenStateChange,
   onAfterOpenNativeDrawer,
@@ -88,7 +91,7 @@ export function createSettingsDialog({
   let bodyEl = null;
   let statusBadgeEl = null;
   let activeTab = 'modules';
-  let activeSubView = ''; // '' | 'tidy'
+  let activeSubView = ''; // '' | 'tidy' | 'version'
   let expandedHelpKey = '';
   let nativeBarFoldOpen = false;
   let turboFoldOpen = false;
@@ -96,6 +99,29 @@ export function createSettingsDialog({
   let applyingThemeBusy = false;
   let importingPresetBusy = false;
   let internalUpdating = false;
+  let ownedVersionManager = null;
+  const versionUi = {
+    checked: null,
+    notice: '',
+    error: '',
+    pendingTarget: null,
+    appliedInfo: null,
+  };
+
+  function getVersionManager() {
+    if (versionManager) return versionManager;
+    if (!ownedVersionManager) {
+      ownedVersionManager = createVersionManager({
+        getContext,
+        store,
+        currentVersion: stmVersion,
+        beforeChange: async () => {
+          await onBeforeVersionChange?.();
+        },
+      });
+    }
+    return ownedVersionManager;
+  }
 
   function el(tag, className = '', text = '') {
     const node = globalThis.document.createElement(tag);
@@ -808,7 +834,7 @@ export function createSettingsDialog({
       handle.open();
       return;
     }
-    toastMessage('请先打开右侧开关以启用叙事记忆系统', 'info');
+    toastMessage('请先打开右侧开关以启用记忆增强系统', 'info');
   }
 
   function renderTidySubView(container, current) {
@@ -1022,8 +1048,8 @@ export function createSettingsDialog({
       makeSwitchRow({
         helpKey: 'mod_memory',
         icon: 'memory',
-        title: '叙事记忆系统',
-        desc: '默认关闭且零生成拦截，方便混用表格记忆等外部插件；开启后启用砚台因果记忆控制台。',
+        title: '记忆增强系统',
+        desc: '平时无感、默认关闭且零拦截；开启后每 3 轮自动总结剧情生成独立世界书，长对话不忘设定且随时可查。',
         actionLabel: '设置',
         onAction: () => {
           void handleOpenMemorySettings();
@@ -1215,11 +1241,7 @@ export function createSettingsDialog({
       const creditBar = el('div', 'stm-theme-credit-bar');
       const creditHead = el('div', 'stm-theme-credit-head');
       creditHead.append(
-        el(
-          'strong',
-          'stm-theme-credit-title',
-          `${MOON_NOTE_THEME_META.title} ${MOON_NOTE_THEME_META.version}`,
-        ),
+        el('strong', 'stm-theme-credit-title', MOON_NOTE_THEME_META.title),
         el('span', 'stm-theme-credit-badge', MOON_NOTE_THEME_META.creditLine),
       );
       creditBar.append(
@@ -1237,15 +1259,21 @@ export function createSettingsDialog({
         const isCur = activeThemeName === mode.name;
         const optBtn = el(
           'button',
-          `stm-theme-option-btn${isCur ? ' is-active' : ''}`,
+          `stm-theme-option-btn${isCur ? ' is-active' : ''}${mode.id === 'auto' ? ' is-span-full' : ''}`,
         );
         optBtn.type = 'button';
         optBtn.disabled = applyingThemeBusy;
         optBtn.dataset.themeMode = mode.id;
-        optBtn.append(
-          el('strong', 'stm-theme-opt-title', mode.shortLabel),
-          el('span', 'stm-theme-opt-sub', isCur ? `${mode.sub} · 当前使用中` : mode.sub),
-        );
+
+        const optHead = el('div', 'stm-theme-opt-head');
+        optHead.append(el('strong', 'stm-theme-opt-title', mode.shortLabel));
+        if (mode.recommended) {
+          optHead.append(el('span', 'stm-theme-rec-badge', '推荐'));
+        }
+        if (isCur) {
+          optHead.append(el('span', 'stm-theme-cur-badge', '使用中'));
+        }
+        optBtn.append(optHead, el('span', 'stm-theme-opt-sub', mode.sub));
         optBtn.addEventListener('click', async evt => {
           evt.preventDefault();
           evt.stopPropagation();
@@ -1255,7 +1283,7 @@ export function createSettingsDialog({
           try {
             const res = await applyMoonNoteTheme(mode.id, { getContext, doc });
             themePickerOpen = false;
-            toastMessage(`已启用「${res.name}」（原作者：${res.author}）`, 'success');
+            toastMessage(`已启用「${res.name}」（作者：${res.author}）`, 'success');
           } catch (err) {
             toastMessage(err?.message || '启用观月札记主题失败', 'error');
           } finally {
@@ -1293,7 +1321,7 @@ export function createSettingsDialog({
         drawerId: 'user-settings-button',
         icon: 'palette',
         title: '用户设置与导入美化主题',
-        desc: '导入与切换酒馆 UI 美化主题、自定义 CSS、对话气泡样式与流式输出速度；也可直接点右侧「启用伴侣主题」换上官方 Apple 轻薄卡片流日/夜主题。',
+        desc: '导入与切换酒馆 UI 美化主题、自定义 CSS、对话气泡样式与流式输出速度；也可直接点右侧「启用观月札记」一键应用 WWW 老师授权的《观月札记》日/夜主题。',
         trailingActionNode: companionThemeBtn,
         extraDrawerNode: themePickerNode,
       }),
@@ -1365,6 +1393,42 @@ export function createSettingsDialog({
     container.append(el('div', 'stm-settings-subhead', '系统排障与总开关'));
     const footerGroup = el('div', 'stm-settings-group');
 
+    const versionHelpKey = 'native_version_mgr';
+    const isVersionHelpOpen = expandedHelpKey === versionHelpKey;
+    const versionWrap = el(
+      'div',
+      `stm-shortcut-item is-compact${isVersionHelpOpen ? ' is-help-open' : ''}`,
+    );
+    const versionBar = el('div', 'stm-shortcut-bar stm-version-entry-bar');
+    const versionHead = el('div', 'stm-switch-head');
+    versionHead.append(
+      createIconNode(doc, 'refresh', 'stm-row-icon'),
+      el('strong', 'stm-switch-title', '版本与更新'),
+      el('span', 'stm-ver-pill', `v${stmVersion}`),
+      makeHelpTriggerButton(versionHelpKey, '版本与更新'),
+    );
+    versionBar.append(versionHead, el('span', 'stm-shortcut-arrow', '›'));
+    versionBar.addEventListener('click', evt => {
+      const target = evt.target;
+      if (target && typeof target.closest === 'function' && target.closest('.stm-help-btn')) {
+        return;
+      }
+      activeSubView = 'version';
+      expandedHelpKey = '';
+      versionUi.pendingTarget = null;
+      render();
+    });
+    versionWrap.append(versionBar);
+    if (isVersionHelpOpen) {
+      versionWrap.append(
+        el(
+          'div',
+          'stm-switch-help-pop',
+          '手动检查 SillyTavern 伴侣最新版、一键更新或回退至历史稳定版本。切换前会自动备份全部伴侣设置，角色卡与聊天存档完全不受影响。',
+        ),
+      );
+    }
+
     const diagHelpKey = 'native_diag_report';
     const isDiagHelpOpen = expandedHelpKey === diagHelpKey;
     const diagWrap = el('div', `stm-shortcut-item is-compact${isDiagHelpOpen ? ' is-help-open' : ''}`);
@@ -1393,7 +1457,7 @@ export function createSettingsDialog({
         el(
           'div',
           'stm-switch-help-pop',
-          '一键复制当前设备容器、主题、砚台套件状态与已装第三方扩展名单（不含任何 API 密钥与聊天隐私），方便快速定位多插件冲突。极端冲突无法进入页面时可在网址末尾加 ?stm_safe=1 安全启动。',
+          '一键复制当前设备容器、主题、砚台套件状态与已装第三方扩展名单（不含任何 API 密钥与聊天隐私）。遇到使用疑问、插件或美化不兼容时，复制体检单联系作者即可逐个帮你调好适配；极端冲突无法进页可在网址末尾加 ?stm_safe=1 安全启动。',
         ),
       );
     }
@@ -1415,8 +1479,231 @@ export function createSettingsDialog({
       },
     });
 
-    footerGroup.append(diagWrap, masterSwitchRow);
+    footerGroup.append(versionWrap, diagWrap, masterSwitchRow);
     container.append(footerGroup);
+  }
+
+  function renderVersionSubView(container) {
+    const doc = globalThis.document;
+    const vm = getVersionManager();
+    const checked = versionUi.checked;
+    const busy = Boolean(vm.busy);
+    const reloadNeeded = Boolean(vm.reloadNeeded);
+
+    const navRow = el('div', 'stm-subview-bar');
+    const backBtn = el('button', 'stm-subview-back-btn');
+    backBtn.type = 'button';
+    backBtn.append(createIconNode(doc, 'back', 'stm-row-icon'), el('span', '', '返回原生与设置'));
+    backBtn.addEventListener('click', () => {
+      activeSubView = '';
+      expandedHelpKey = '';
+      versionUi.pendingTarget = null;
+      render();
+    });
+    navRow.append(backBtn, el('strong', 'stm-subview-title', '版本与更新'));
+    container.append(navRow);
+
+    const hero = el('div', 'stm-ver-hero');
+    const heroTop = el('div', 'stm-ver-hero-top');
+    heroTop.append(
+      el('strong', 'stm-ver-hero-title', `SillyTavern 伴侣 v${stmVersion}`),
+      el(
+        'span',
+        'stm-ver-pill',
+        checked?.currentBranchName ? `分支：${checked.currentBranchName}` : '手动检查模式',
+      ),
+    );
+    hero.append(
+      heroTop,
+      el(
+        'p',
+        'stm-ver-hero-note',
+        '只在你点击时检查更新或切换版本，绝不后台静默改动；切换前会自动备份全部伴侣设置，角色卡与聊天存档保持原样。',
+      ),
+    );
+
+    const actions = el('div', 'stm-ver-actions');
+    const checkBtn = el('button', 'stm-ver-btn', busy ? '正在处理…' : '检查更新');
+    checkBtn.type = 'button';
+    checkBtn.dataset.versionAction = 'check';
+    checkBtn.disabled = busy || reloadNeeded;
+    checkBtn.addEventListener('click', async () => {
+      versionUi.error = '';
+      versionUi.pendingTarget = null;
+      versionUi.notice = '正在连接仓库核对最新版本与可回退分支…';
+      render();
+      try {
+        const res = await vm.check();
+        versionUi.checked = res;
+        if (res.latest) {
+          versionUi.notice = res.needsMainSwitch
+            ? `当前停留在历史分支 ${res.currentBranchName}，可一键回到最新版 v${res.latest.version}。`
+            : `发现新版 v${res.latest.version}，可点击下方按钮更新。`;
+        } else if (res.unavailableLatest) {
+          versionUi.notice = '仓库已有更新版本，但需要较新版酒馆客户端支持。';
+        } else {
+          versionUi.notice = `当前 v${stmVersion} 已是最新稳定版本。`;
+        }
+      } catch (err) {
+        versionUi.error = err?.message || '检查更新失败，请稍后重试。';
+        versionUi.notice = '';
+      } finally {
+        render();
+      }
+    });
+
+    const updateBtn = el(
+      'button',
+      'stm-ver-btn is-primary',
+      checked?.latest ? `更新到 v${checked.latest.version}` : '更新到最新版',
+    );
+    updateBtn.type = 'button';
+    updateBtn.dataset.versionAction = 'update';
+    updateBtn.disabled = busy || reloadNeeded || !checked?.latest;
+    updateBtn.addEventListener('click', () => {
+      if (!checked?.latest || vm.busy || vm.reloadNeeded) return;
+      versionUi.pendingTarget = checked.latest;
+      versionUi.error = '';
+      render();
+    });
+
+    actions.append(checkBtn, updateBtn);
+
+    if (reloadNeeded) {
+      const reloadBtn = el('button', 'stm-ver-btn is-primary', '立即刷新酒馆生效');
+      reloadBtn.type = 'button';
+      reloadBtn.dataset.versionAction = 'reload';
+      reloadBtn.addEventListener('click', () => {
+        globalThis.location?.reload?.();
+      });
+      actions.append(reloadBtn);
+    }
+
+    hero.append(actions);
+    container.append(hero);
+
+    if (versionUi.error) {
+      container.append(el('div', 'stm-ver-banner is-error', versionUi.error));
+    } else if (versionUi.notice) {
+      container.append(el('div', 'stm-ver-banner', versionUi.notice));
+    }
+
+    if (versionUi.pendingTarget && checked && !reloadNeeded) {
+      const target = versionUi.pendingTarget;
+      const isUpgrade = target.action === 'update';
+      const confirmCard = el('div', 'stm-ver-confirm');
+      confirmCard.append(
+        el(
+          'strong',
+          'stm-ver-confirm-title',
+          isUpgrade ? `确认更新到最新版 v${target.version}？` : `确认回退到历史版本 v${target.version}？`,
+        ),
+        el(
+          'p',
+          'stm-ver-confirm-desc',
+          target.notes ||
+            '切换前会自动保存当前伴侣设置快照；角色卡、世界书与聊天存档保持原样，完成后点击刷新即可生效。',
+        ),
+      );
+      const confirmActions = el('div', 'stm-ver-actions');
+      const cancelBtn = el('button', 'stm-ver-btn', '取消');
+      cancelBtn.type = 'button';
+      cancelBtn.disabled = busy;
+      cancelBtn.addEventListener('click', () => {
+        versionUi.pendingTarget = null;
+        render();
+      });
+      const okBtn = el('button', 'stm-ver-btn is-primary', isUpgrade ? '确认更新' : '确认回退');
+      okBtn.type = 'button';
+      okBtn.dataset.versionAction = 'confirm';
+      okBtn.disabled = busy;
+      okBtn.addEventListener('click', async () => {
+        versionUi.error = '';
+        versionUi.notice = isUpgrade
+          ? `正在更新到 v${target.version}，请勿关闭页面…`
+          : `正在回退到 v${target.version}，请勿关闭页面…`;
+        render();
+        try {
+          const applied = await vm.apply(checked, target);
+          versionUi.appliedInfo = applied;
+          versionUi.pendingTarget = null;
+          versionUi.notice = `已切换至 v${applied.version}（分支：${applied.branch}），请点击上方「立即刷新酒馆生效」。`;
+          toastMessage(`伴侣已切换至 v${applied.version}，请刷新酒馆生效`, 'success');
+        } catch (err) {
+          versionUi.error = err?.message || '版本切换失败，请刷新确认当前版本。';
+          versionUi.notice = '';
+        } finally {
+          render();
+        }
+      });
+      confirmActions.append(cancelBtn, okBtn);
+      confirmCard.append(confirmActions);
+      container.append(confirmCard);
+    }
+
+    if (checked?.latestInfo) {
+      container.append(el('div', 'stm-settings-subhead', '最新版本说明'));
+      const latestCard = el('div', 'stm-ver-release-card');
+      const latestHead = el('div', 'stm-ver-release-head');
+      latestHead.append(
+        el('strong', 'stm-ver-release-ver', `v${checked.latestInfo.version}`),
+        el(
+          'span',
+          'stm-ver-pill',
+          checked.latestInfo.version === stmVersion ? '当前版本' : '最新稳定版',
+        ),
+      );
+      latestCard.append(
+        latestHead,
+        el('p', 'stm-ver-release-notes', checked.latestInfo.notes || '常规稳定性与体验优化。'),
+      );
+      container.append(latestCard);
+    }
+
+    if (checked) {
+      container.append(el('div', 'stm-settings-subhead', '历史稳定版本（一键回退）'));
+      const list = el('div', 'stm-ver-list');
+      if (Array.isArray(checked.rollbackList) && checked.rollbackList.length > 0) {
+        for (const rel of checked.rollbackList) {
+          const card = el('div', 'stm-ver-release-card');
+          const head = el('div', 'stm-ver-release-head');
+          head.append(el('strong', 'stm-ver-release-ver', `v${rel.version}`));
+          const rbBtn = el('button', 'stm-ver-btn', '回退此版本');
+          rbBtn.type = 'button';
+          rbBtn.dataset.rollbackVersion = rel.version;
+          rbBtn.disabled = busy || reloadNeeded;
+          rbBtn.addEventListener('click', () => {
+            if (vm.busy || vm.reloadNeeded) return;
+            versionUi.pendingTarget = rel;
+            versionUi.error = '';
+            render();
+          });
+          head.append(rbBtn);
+          card.append(
+            head,
+            el('p', 'stm-ver-release-notes', rel.notes || '历史稳定版本。'),
+          );
+          list.append(card);
+        }
+      } else {
+        list.append(
+          el(
+            'p',
+            'stm-ver-foot-hint',
+            '当前仓库暂无更早的兼容发布分支可供回退；后续每个稳定版本发布后都会自动出现在这里。',
+          ),
+        );
+      }
+      container.append(list);
+    }
+
+    container.append(
+      el(
+        'p',
+        'stm-ver-foot-hint',
+        '提示：在云酒馆或解压包安装环境下若提示无写权限，可直接在酒馆「管理扩展」更新；遇到新旧版本或第三方插件不兼容，随时联系作者协助适配。',
+      ),
+    );
   }
 
   function render() {
@@ -1440,6 +1727,8 @@ export function createSettingsDialog({
     bodyEl.replaceChildren();
     if (activeSubView === 'tidy') {
       renderTidySubView(bodyEl, current);
+    } else if (activeSubView === 'version') {
+      renderVersionSubView(bodyEl);
     } else if (activeTab === 'modules') {
       renderModulesTab(bodyEl, current);
     } else {
@@ -1452,6 +1741,9 @@ export function createSettingsDialog({
     if (tabId === 'tidy') {
       activeTab = 'modules';
       activeSubView = 'tidy';
+    } else if (tabId === 'version') {
+      activeTab = 'native';
+      activeSubView = 'version';
     } else if (tabId === 'reading') {
       activeTab = 'modules';
     } else if (tabId === 'api') {
@@ -1499,6 +1791,8 @@ export function createSettingsDialog({
   }
 
   function destroy() {
+    ownedVersionManager?.dispose?.();
+    ownedVersionManager = null;
     close();
     dialogEl?.remove();
     dialogEl = null;

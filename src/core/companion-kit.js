@@ -11,7 +11,7 @@ import {
   getHostPresetState,
   importPresetItems,
   selectHostPresetByName,
-} from '../modules/preset-backend.js?v=0.9.7';
+} from '../modules/preset-backend.js?v=0.9.8';
 
 export const COMPANION_THEME_NIGHT_NAME = '伴侣主题 · 静夜';
 export const COMPANION_THEME_DAY_NAME = '伴侣主题 · 浅昼';
@@ -25,7 +25,7 @@ export const MOON_NOTE_THEME_META = Object.freeze({
   version: 'V1.1.3',
   author: 'WWW',
   license: 'CC-BY-NC-SA-4.0',
-  creditLine: '原作者：WWW（已获正版授权 · CC-BY-NC-SA-4.0）',
+  creditLine: '作者：WWW · 已获授权',
 });
 
 export const MOON_NOTE_THEME_MODES = Object.freeze([
@@ -34,18 +34,21 @@ export const MOON_NOTE_THEME_MODES = Object.freeze([
     name: MOON_NOTE_THEME_AUTO_NAME,
     shortLabel: '跟随系统',
     sub: '随设备明暗自动切换',
+    recommended: false,
   },
   {
     id: 'day',
     name: MOON_NOTE_THEME_DAY_NAME,
     shortLabel: '浅昼 · 日间',
     sub: '暖白纸面 · 日间护眼',
+    recommended: false,
   },
   {
     id: 'night',
     name: MOON_NOTE_THEME_NIGHT_NAME,
     shortLabel: '静夜 · 夜间',
     sub: '柔和炭灰 · 夜间沉浸',
+    recommended: true,
   },
 ]);
 

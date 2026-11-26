@@ -7,7 +7,7 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.9.7';
+import { detectPlatform } from './env.js?v=0.9.8';
 
 export const TAVERN_HELPER_SPEC = Object.freeze({
   folderName: 'JS-Slash-Runner',
@@ -51,7 +51,7 @@ export const COMPANION_PLUGINS = Object.freeze([
     moduleKey: 'memory',
     registryId: 'yantai-memory',
     folderName: 'yantai-memory',
-    displayName: '砚台 · 叙事记忆',
+    displayName: '砚台 · 记忆增强',
     repoUrl: 'https://github.com/ayan-atelier/yantai-memory',
     minVersion: '0.4.1',
     defaultEnabled: false,

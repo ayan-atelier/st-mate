@@ -6292,10 +6292,10 @@ test('v0.7.7 suite-guard: 新用户零基础一键配齐四件套（预写待命
       '底部同时提供「一键补齐套件」快捷横幅',
     );
 
-    // 找到「叙事记忆」开关并主动拨到开启 -> 自动触发按需重装并同步写为开启！
+    // 找到「记忆增强」开关并主动拨到开启 -> 自动触发按需重装并同步写为开启！
     const switchCards = dialogRoot.findAll(n => n.classList?.contains('stm-switch-card'));
-    const memoryCard = switchCards.find(c => collectText(c).includes('叙事记忆'));
-    assert.ok(memoryCard, '应渲染叙事记忆开关行');
+    const memoryCard = switchCards.find(c => collectText(c).includes('记忆增强'));
+    assert.ok(memoryCard, '应渲染记忆增强开关行');
     const memoryCheckbox = memoryCard.querySelector('.stm-switch-input');
     memoryCheckbox.checked = true;
     memoryCheckbox.dispatchEvent({ type: 'change' });
@@ -6963,11 +6963,11 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
     settingsDialog.open('modules');
     const memSetBtn = dlg
       .findAll(n => n.classList.contains('stm-switch-card'))
-      .find(c => collectText(c).includes('叙事记忆系统'))
+      .find(c => collectText(c).includes('记忆增强系统'))
       ?.querySelector('.stm-row-inline-btn');
     assert.ok(memSetBtn && memSetBtn.textContent === '设置');
     memSetBtn.click();
-    assert.equal(memoryPanelOpened, true, '点叙事记忆「设置」直接打开记忆面板');
+    assert.equal(memoryPanelOpened, true, '点记忆增强「设置」直接打开记忆面板');
 
     // 3. 进入「界面整理与低频收纳 -> 设置」二级页，验证魔法棒入口隐藏与恢复
     settingsDialog.open('modules');
@@ -10148,9 +10148,9 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
     assert.ok(advTabBtn, '提供第二个进阶玩法页签按钮');
     advTabBtn.click();
     const advText = collectText(dlg);
-    assert.ok(advText.includes('提示词查看器') && advText.includes('酒馆助手'), '进阶玩法指明酒馆助手提示词查看器入口');
+    assert.ok(advText.includes('提示词查看器') && advText.includes('魔法棒'), '进阶玩法指明魔法棒提示词查看器入口');
     assert.ok(advText.includes('界面整理与低频收纳'), '进阶玩法介绍魔法棒与顶栏收纳');
-    assert.ok(advText.includes('观月札记') && advText.includes('WWW'), '进阶玩法提及授权美化观月札记');
+    assert.ok(advText.includes('记忆增强系统'), '进阶玩法介绍记忆增强系统');
     assert.equal(/红鸟|工具箱|抓包插件|拖慢手机/.test(quickText + advText), false, '导览文案温和大方，零拉踩措辞');
     guide.destroy();
 
@@ -10469,6 +10469,219 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
         !cssText.includes('.ch_name > .mes_buttons,\r\n'),
       '楼层底部模式精准隐藏原生 4 项而非整条 .mes_buttons，保活 ST-iPhonie 小手机楼层工具键',
     );
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('pre-launch polish: 观月札记还原原版与清爽卡片 + 新版双页签导览 + 记忆增强改名 + 版本更新与历史回退', async () => {
+  const { MOON_NOTE_THEME_META, MOON_NOTE_THEME_MODES } = await import('../src/core/companion-kit.js');
+  const { createWelcomeGuide } = await import('../src/shell/welcome-guide.js');
+  const { createSettingsDialog } = await import('../src/shell/settings-dialog.js');
+  const { MODULE_DESCRIPTORS } = await import('../src/core/registry.js');
+  const { OPTIONS_MENU_PRIMARY_ORDER } = await import('../src/shell/atmosphere.js');
+  const {
+    compareVersions,
+    createVersionManager,
+    parseReleaseCatalog,
+  } = await import('../src/core/version-manager.js');
+
+  // 1. 观月札记内置原版 JSON 还原 WWW 原版提示语、font_scale=1、零个人水印、保留人设馆兼容层与许可证头
+  const moonPath = new URL('../assets/themes/观月札记V1.1.3.json', import.meta.url);
+  const moonRaw = JSON.parse(fs.readFileSync(moonPath, 'utf8'));
+  assert.equal(moonRaw.font_scale, 1);
+  assert.equal('_wm' in moonRaw, false);
+  assert.equal('_build' in moonRaw, false);
+  assert.match(moonRaw.custom_css, /--nt-hint:"☾ 月色会记得，我们在此相遇 ☽";/);
+  assert.equal(moonRaw.custom_css.includes('故事还在继续'), false);
+  assert.match(moonRaw.custom_css, /砚台人设馆兼容层/);
+  assert.match(moonRaw.custom_css, /CC-BY-NC-SA-4\.0/);
+
+  // 2. 观月札记 UI 元数据精简：无版本号、无原作者/CC缩写，夜间带推荐标记
+  assert.equal(MOON_NOTE_THEME_META.creditLine, '作者：WWW · 已获授权');
+  assert.equal(MOON_NOTE_THEME_MODES.find(m => m.id === 'night')?.recommended, true);
+  assert.equal(MOON_NOTE_THEME_MODES.find(m => m.id === 'day')?.recommended, false);
+
+  // 3. 叙事记忆 -> 记忆增强系统 命名统一
+  assert.equal(MODULE_DESCRIPTORS.find(m => m.key === 'memory')?.label, '记忆增强系统');
+  assert.equal(OPTIONS_MENU_PRIMARY_ORDER.find(i => i.id === 'yt-memory-menu')?.label, '记忆增强');
+
+  // 4. versions.json 可通过正式目录校验器
+  const versionsJson = JSON.parse(fs.readFileSync(new URL('../versions.json', import.meta.url), 'utf8'));
+  const parsedCatalog = parseReleaseCatalog(versionsJson);
+  assert.equal(parsedCatalog.latest, versionsJson.latest);
+  assert.equal(compareVersions('0.9.7', '0.9.6'), 1);
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  try {
+    const { doc, win } = createMiniDomHarness();
+    globalThis.document = doc;
+    globalThis.window = win;
+
+    const ctx = {
+      powerUserSettings: { theme: '观月札记 · 静夜 (WWW)' },
+      extensionSettings: {},
+      getRequestHeaders: () => ({ 'Content-Type': 'application/json' }),
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    const collectText = rootNode => rootNode.findAll(() => true).map(n => n.textContent || '').join(' ');
+
+    // 5. 新版双页签导览：单主按钮「知道了，开始用」+ 首行双卡并排 + 进阶 5 步顺序
+    const guide = createWelcomeGuide({ store });
+    guide.open('quick');
+    const guideDlg = doc.getElementById('stm-welcome-guide');
+    assert.ok(guideDlg);
+    const quickText = collectText(guideDlg);
+    assert.equal(quickText.includes('去伴侣设置看看'), false, '移除冗余次按钮，只留一个「知道了，开始用」');
+    assert.equal(quickText.includes('欢迎联系作者'), false, '导览底栏保持纯净，不突然塞入联系作者提示');
+    assert.ok(quickText.includes('知道了，开始用'));
+    assert.ok(quickText.includes('防卡防烫'));
+    const pairCards = guideDlg.querySelector('.stm-guide-pair')?.findAll(n => n.classList.contains('stm-guide-item')) || [];
+    assert.equal(pairCards.length, 2, '快速上手首行左右并排展示三横菜单与段落右下角操作栏');
+    assert.ok(collectText(pairCards[0]).includes('三横') && collectText(pairCards[0]).includes('退出'));
+    assert.ok(collectText(pairCards[1]).includes('右下角') && collectText(pairCards[1]).includes('开新分支'));
+
+    const advBtn = guideDlg.findAll(n => n.classList.contains('stm-guide-tab-btn'))[1];
+    advBtn.click();
+    const advTitles = guideDlg.findAll(n => n.classList.contains('stm-guide-item-title')).map(n => n.textContent);
+    assert.equal(advTitles.length, 5, '进阶玩法精确 5 项且不含美化主题');
+    assert.ok(advTitles[0].includes('低频按钮隐藏'));
+    assert.ok(advTitles[1].includes('副 API'));
+    assert.ok(advTitles[2].includes('记忆增强系统'));
+    assert.ok(advTitles[3].includes('多封面'));
+    assert.ok(advTitles[4].includes('提示词查看器'));
+    guide.destroy();
+
+    // 6. 版本更新与历史回退控制器 + 设置中心「版本与更新」二级页与观月札记卡片
+    const apiCalls = [];
+    let currentBranch = 'main';
+    let diskVersion = '0.9.7';
+    const mockCatalog = {
+      schema: 1,
+      extension: 'st-mate',
+      latest: '0.9.8',
+      releases: [
+        { version: '0.9.8', branch: 'v0.9.8', settings_schema: 1, minimum_client_version: '1.12.0', notes: '细节优化与版本回退' },
+        { version: '0.9.7', branch: 'v0.9.7', settings_schema: 1, minimum_client_version: '1.12.0', notes: '开机提示与五大插件兼容' },
+        { version: '0.9.6', branch: 'v0.9.6', settings_schema: 1, minimum_client_version: '1.12.0', notes: '原生扩展恢复' },
+      ],
+    };
+    const mockFetch = async (url, init = {}) => {
+      const href = String(url);
+      const body = init.body ? JSON.parse(init.body) : null;
+      apiCalls.push({ href, body });
+      if (href.endsWith('/api/extensions/discover')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify([{ name: 'third-party/st-mate', type: 'local' }]) };
+      }
+      if (href.endsWith('/api/extensions/version')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              remoteUrl: 'https://github.com/ayan-atelier/st-mate.git',
+              currentBranchName: currentBranch,
+              currentCommitHash: 'abc1234',
+              isUpToDate: currentBranch === 'main' && diskVersion === '0.9.8',
+            }),
+        };
+      }
+      if (href.endsWith('/version')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ pkgVersion: '1.19.0' }) };
+      }
+      if (href.includes('raw.githubusercontent.com/ayan-atelier/st-mate/main/versions.json')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify(mockCatalog) };
+      }
+      if (href.endsWith('/api/extensions/branches')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify([
+              { name: 'origin/main', commit: '9999999' },
+              { name: 'origin/v0.9.8', commit: '8888888' },
+              { name: 'origin/v0.9.7', commit: '7777777' },
+              { name: 'origin/v0.9.6', commit: '6666666' },
+            ]),
+        };
+      }
+      if (href.endsWith('/api/extensions/switch')) {
+        currentBranch = String(body.branch || '').replace(/^origin\//, '');
+        diskVersion = currentBranch === 'main' ? '0.9.8' : currentBranch.replace(/^v/, '');
+        return { ok: true, status: 204, text: async () => '' };
+      }
+      if (href.endsWith('/api/extensions/update')) {
+        diskVersion = '0.9.8';
+        return { ok: true, status: 200, text: async () => JSON.stringify({ shortCommitHash: '9999999', isUpToDate: false }) };
+      }
+      if (href.endsWith('/manifest.json')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ version: diskVersion }) };
+      }
+      return { ok: false, status: 404, text: async () => '' };
+    };
+
+    const vm = createVersionManager({
+      getContext: () => ctx,
+      store,
+      moduleURL: 'http://127.0.0.1:8000/scripts/extensions/third-party/st-mate/src/core/version-manager.js',
+      apiRoot: 'http://127.0.0.1:8000/',
+      currentVersion: '0.9.7',
+      fetcher: mockFetch,
+    });
+
+    const checked = await vm.check();
+    assert.equal(checked.latest?.version, '0.9.8', '可发现新版 0.9.8');
+    assert.equal(checked.rollbackList.length, 1);
+    assert.equal(checked.previous?.version, '0.9.6', '可发现历史回退版 0.9.6');
+
+    const rbApplied = await vm.apply(checked, checked.previous);
+    assert.equal(rbApplied.version, '0.9.6');
+    assert.equal(rbApplied.branch, 'v0.9.6');
+    assert.equal(ctx.extensionSettings.st_mate_version_backup?.version, '0.9.7', '回退前自动保存伴侣配置快照');
+    assert.equal(vm.reloadNeeded, true);
+
+    // 验证从回退分支 v0.9.6 一键升级回到 main 最新版
+    const vmUpgrade = createVersionManager({
+      getContext: () => ctx,
+      store,
+      moduleURL: 'http://127.0.0.1:8000/scripts/extensions/third-party/st-mate/src/core/version-manager.js',
+      apiRoot: 'http://127.0.0.1:8000/',
+      currentVersion: '0.9.6',
+      fetcher: mockFetch,
+    });
+    const checkedFromOld = await vmUpgrade.check();
+    assert.equal(checkedFromOld.needsMainSwitch, true);
+    assert.equal(checkedFromOld.latest?.version, '0.9.8');
+    const upApplied = await vmUpgrade.apply(checkedFromOld, checkedFromOld.latest);
+    assert.equal(upApplied.version, '0.9.8');
+    assert.equal(upApplied.branch, 'main');
+
+    // 验证设置中心原生页：观月札记卡片精简展示 + 版本与更新二级页打开与检查
+    const settingsDialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null },
+      versionManager: vm,
+      stmVersion: '0.9.7',
+      onToggleShell: async () => {},
+    });
+    settingsDialog.open('native');
+    const dlg = doc.getElementById('stm-settings-dialog');
+    const moonTrigger = dlg.querySelector('.stm-companion-theme-btn');
+    moonTrigger.click();
+    const moonCardText = collectText(dlg.querySelector('.stm-theme-picker-pop'));
+    assert.ok(moonCardText.includes('观月札记') && !moonCardText.includes('V1.1.3'), '卡片标题不再显示版本号');
+    assert.ok(moonCardText.includes('作者：WWW · 已获授权') && !moonCardText.includes('CC-BY-NC-SA-4.0') && !moonCardText.includes('原作者'));
+    assert.ok(moonCardText.includes('推荐'), '静夜模式展示推荐徽章');
+
+    const verBar = dlg.querySelector('.stm-version-entry-bar');
+    assert.ok(verBar, '原生与设置页展示版本与更新入口');
+    verBar.click();
+    assert.ok(collectText(dlg).includes('版本与更新') && collectText(dlg).includes('检查更新'));
+    settingsDialog.destroy();
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;

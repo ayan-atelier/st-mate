@@ -6,14 +6,14 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.7';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.8';
 import {
   EM_ITALIC_MODES,
   TEXT_DECO_STYLES,
   hexLuminance,
   sanitizeHexColor,
-} from '../core/schema.js?v=0.9.7';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.7';
+} from '../core/schema.js?v=0.9.8';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.8';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -26,7 +26,7 @@ const LOW_FREQ_OPTION_IDS = Object.freeze([
 export const OPTIONS_MENU_PRIMARY_ORDER = Object.freeze([
   { id: 'option_regenerate', label: '重新生成', group: 'gen' },
   { id: 'option_continue', label: '续写', group: 'gen' },
-  { id: 'yt-memory-menu', label: '叙事记忆', group: 'chat' },
+  { id: 'yt-memory-menu', label: '记忆增强', group: 'chat' },
   { id: 'option_start_new_chat', label: '开启新对话', group: 'chat' },
   { id: 'option_new_bookmark', label: '保存', group: 'chat' },
   { id: 'option_select_chat', label: '存档管理', group: 'chat' },

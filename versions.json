@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "extension": "st-mate",
+  "latest": "0.9.8",
+  "releases": [
+    {
+      "version": "0.9.8",
+      "branch": "release-0.9.8",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "内置《观月札记》还原作者原版文案并精简卡片排版（静夜模式标推荐）、重排双页签使用导览、「叙事记忆系统」正名为「记忆增强系统」，并新增「版本与更新（支持历史稳定版一键回退）」。"
+    },
+    {
+      "version": "0.9.7",
+      "branch": "release-0.9.7",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "开机顶中显示轻提示（SillyTavern 伴侣已启动 · 渲染加速中），并新增 ST-iPhonie、柏宝绘、兔子镜小剧场、织幕、墨提斯之镜五大社区插件兼容护盾。"
+    },
+    {
+      "version": "0.9.6",
+      "branch": "release-0.9.6",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "修复切回原生酒馆后扩展程序页点不动与首页存档记录恢复问题。"
+    }
+  ]
+}
