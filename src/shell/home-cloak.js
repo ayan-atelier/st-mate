@@ -6,13 +6,13 @@
  * - 性能铁律：仅监听 #chat 直接子节点（严禁 subtree:true 监听流式正文），不广播全局 resize 事件。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.4';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.5';
 import {
   isQuietRoomActive,
   isQuietRoomSidebarOpen,
   toggleQuietRoomSidebar,
-} from '../core/compat-bridges.js?v=0.9.4';
-import { svgMarkup } from '../core/icons.js?v=0.9.4';
+} from '../core/compat-bridges.js?v=0.9.5';
+import { svgMarkup } from '../core/icons.js?v=0.9.5';
 
 /**
  * 识别酒馆删除角色卡、群聊或最后一份存档后塞入的 `SAFETY_CHAT` 安全占位页
@@ -348,6 +348,8 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     }
 
     const shouldCloak = Boolean(settings.shellEnabled && isBookshelfMountedOnHome());
+    const shouldHideComposer = Boolean(shouldCloak && settings.hideHomeComposer !== false);
+    const shouldShowComposer = Boolean(shouldCloak && settings.hideHomeComposer === false);
 
     if (cloaked !== shouldCloak) {
       cloaked = shouldCloak;
@@ -355,6 +357,8 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     } else if (doc.body.classList.contains('stm-home-cloak') !== shouldCloak) {
       doc.body.classList.toggle('stm-home-cloak', shouldCloak);
     }
+    doc.body.classList.toggle('stm-hide-home-composer', shouldHideComposer);
+    doc.body.classList.toggle('stm-show-home-composer', shouldShowComposer);
 
     enhanceBookshelfToolbar();
     syncNativeWelcomeShortcut();
@@ -459,7 +463,11 @@ export function createHomeCloak({ getContext, store, onOpenSettings, onToggleShe
     chatObserver = null;
     observedChatEl = null;
     cloaked = false;
-    globalThis.document?.body.classList.remove('stm-home-cloak');
+    globalThis.document?.body.classList.remove(
+      'stm-home-cloak',
+      'stm-hide-home-composer',
+      'stm-show-home-composer',
+    );
     restoreBookshelfDom();
   }
 

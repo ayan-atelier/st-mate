@@ -368,7 +368,8 @@ body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-
   pointer-events: none !important;
 }
 
-body.stm-shell-active.stm-home-cloak #form_sheld {
+body.stm-shell-active.stm-home-cloak.stm-hide-home-composer #form_sheld,
+body.stm-shell-active.stm-home-cloak.stm-hide-home-composer #form_sheld#form_sheld {
   display: none !important;
 }
 

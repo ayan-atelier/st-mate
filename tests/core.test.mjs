@@ -9930,7 +9930,7 @@ test('v0.9.2: 悬浮原版顶栏零底透/零抽屉顶缝 + 搜索图标防重�
     };
 
     const { PRESET_ASSISTANT_STORAGE_KEY, createPresetAssistantPanel } = await import(
-      '../src/modules/preset-assistant.js?v=0.9.4'
+      '../src/modules/preset-assistant.js?v=0.9.5'
     );
 
     const panel1 = createPresetAssistantPanel({
@@ -10263,6 +10263,43 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
     assert.equal(doc.body.classList.contains('stm-floor-actions-bottom'), false);
     assert.equal(mesBlock.querySelector('.stm-floor-bar'), null);
     floorActions.destroy();
+
+    // 5. 验证 v0.9.5 首页隐藏底部输入栏可自由开关且与角色书架联动防冲突
+    const { createHomeCloak } = await import('../src/shell/home-cloak.js');
+    const shelfNode = doc.createElement('div');
+    shelfNode.className = 'jd-bookshelf';
+    chatEl.append(shelfNode);
+    doc.body.classList.add('jd-bookshelf-home-active');
+    const homeCtx = {
+      characterId: undefined,
+      groupId: null,
+      chat: [],
+      extensionSettings: {},
+      saveSettingsDebounced() {},
+    };
+    const homeStore = createSettingsStore({ getContext: () => homeCtx });
+    assert.equal(homeStore.get().hideHomeComposer, true, '默认开启首页隐藏底部输入栏');
+    const homeCloak = createHomeCloak({
+      getContext: () => homeCtx,
+      store: homeStore,
+      onOpenSettings: () => {},
+      onToggleShell: () => {},
+    });
+    homeCloak.refresh();
+    assert.equal(doc.body.classList.contains('stm-home-cloak'), true);
+    assert.equal(doc.body.classList.contains('stm-hide-home-composer'), true);
+    assert.equal(doc.body.classList.contains('stm-show-home-composer'), false);
+
+    homeStore.update({ hideHomeComposer: false });
+    homeCloak.refresh();
+    assert.equal(doc.body.classList.contains('stm-hide-home-composer'), false);
+    assert.equal(
+      doc.body.classList.contains('stm-show-home-composer'),
+      true,
+      '关闭开关时挂起 stm-show-home-composer 同步覆盖书架隐藏规则以恢复首页魔法棒',
+    );
+    homeCloak.destroy();
+    assert.equal(doc.body.classList.contains('stm-show-home-composer'), false);
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;

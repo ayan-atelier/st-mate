@@ -14,12 +14,12 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.4';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.4';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.4';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.4';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.4';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.4';
+} from '../core/companion-kit.js?v=0.9.5';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.5';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.5';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.5';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.5';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.5';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -950,6 +950,16 @@ export function createSettingsDialog({
         checked: current.floorActionsBottom !== false,
         onChange: val => {
           updateStoreFromDialog({ floorActionsBottom: val });
+        },
+      }),
+      makeSwitchRow({
+        helpKey: 'hide_home_composer',
+        icon: 'eyeoff',
+        title: '首页隐藏底部输入栏',
+        desc: '默认开启，在角色书架首页隐藏酒馆原生底部输入栏，画面更清爽；若习惯在书架首页点击底部魔法棒菜单或输入指令，关闭即可恢复显示（注：若所用第三方美化主题自身隐藏了首页输入栏，仍以美化样式为准）。',
+        checked: current.hideHomeComposer !== false,
+        onChange: val => {
+          updateStoreFromDialog({ hideHomeComposer: val });
         },
       }),
       makeSwitchRow({
