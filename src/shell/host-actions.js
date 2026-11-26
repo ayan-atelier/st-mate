@@ -3,7 +3,7 @@
  * 封装返回首页、打开/关闭原生抽屉、读取当前角色/群聊头像与名称等标准动作。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.6';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.7';
 
 let coreModulePromise = null;
 let groupModulePromise = null;
@@ -92,13 +92,26 @@ export async function uploadBackgroundAsset(file, getContext) {
   return `backgrounds/${encodeURIComponent(filename)}`;
 }
 
-export function toastMessage(message, type = 'info') {
+export function toastMessage(message, type = 'info', options = {}) {
   const toastr = globalThis.toastr;
+  const title = options && options.title !== undefined ? options.title : 'ST伴侣';
+  const timeOut = Number.isFinite(options?.timeOut) ? options.timeOut : 2400;
+  const toastOpts = { timeOut };
+  if (options && typeof options.positionClass === 'string' && options.positionClass) {
+    toastOpts.positionClass = options.positionClass;
+  }
   if (toastr && typeof toastr[type] === 'function') {
-    toastr[type](message, 'ST伴侣', { timeOut: 2400 });
+    toastr[type](message, title, toastOpts);
   } else {
     console.info('[ST伴侣]', message);
   }
+}
+
+export function formatStartupToastText(settings = {}) {
+  if (!settings || settings.shellEnabled === false) return '';
+  return settings.turboRender !== false
+    ? 'SillyTavern 伴侣已启动 · 渲染加速中'
+    : 'SillyTavern 伴侣已启动';
 }
 
 /**

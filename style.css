@@ -9899,7 +9899,10 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
    楼层底部操作条、编辑底栏与人话浮层菜单 (floor-actions.js)
    ========================================================================== */
 
-body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons,
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons > .mes_edit,
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons > .extraMesButtonsIcon,
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons > .extraMesButtons,
+body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_buttons > .mes_bookmark,
 body.stm-floor-actions-bottom #chat .mes:not(.smallSysMes, [ch_name="SillyTavern System"]) .ch_name > .mes_edit_buttons {
   display: none !important;
 }

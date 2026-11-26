@@ -7,8 +7,8 @@
  * 4. 100% 代理触发酒馆原生按钮事件与官方 `deleteMessage`，零 DOM 破坏、关闭开关即瞬间无损退回原版布局。
  */
 
-import { createIconNode } from '../core/icons.js?v=0.9.6';
-import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.6';
+import { createIconNode } from '../core/icons.js?v=0.9.7';
+import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.7';
 
 const BODY_ACTIVE_CLASS = 'stm-floor-actions-bottom';
 
@@ -130,7 +130,7 @@ export function discoverThirdPartyFloorButtons(mesEl, win = globalThis) {
     const isKnownNative = KNOWN_EXTRA_CLASSES.some(cls => child.classList.contains(cls));
     if (isKnownNative) continue;
     if (!isNodeEffectivelyVisible(child, win)) continue;
-    const rawLabel = String(
+    let cleanLabel = String(
       child.getAttribute?.('title') ||
         child.getAttribute?.('aria-label') ||
         child.dataset?.tooltip ||
@@ -139,7 +139,11 @@ export function discoverThirdPartyFloorButtons(mesEl, win = globalThis) {
     )
       .replace(/\s+/g, ' ')
       .trim();
-    const label = rawLabel ? rawLabel.slice(0, 18) : '扩展操作';
+    if (cleanLabel.length > 14) {
+      const stripped = cleanLabel.replace(/[（(][^）)]*[）)]\s*$/, '').trim();
+      if (stripped.length >= 2) cleanLabel = stripped;
+    }
+    const label = cleanLabel ? cleanLabel.slice(0, 18) : '扩展操作';
     out.push({ el: child, label });
   }
   return out;

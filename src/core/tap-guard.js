@@ -48,6 +48,22 @@ export const INTERACTIVE_ANCESTOR_SELECTOR = [
   '.stm-floor-bar',
   '.stm-floor-edit-bar',
   '.stm-floor-menu',
+  '[data-sttts-action]',
+  '[data-sttts-tools]',
+  '[data-sttts-pic-action]',
+  '.sttts-pic',
+  '.sttts-pic-zoom',
+  '.sttts-context-menu',
+  '[data-bbi-slot]',
+  '.bbi-slot',
+  '.bbi-tag-action',
+  '[data-rabbit-mirror-external-shell]',
+  '[data-rabbit-mirror-independent-inline-anchor]',
+  '[data-rabbit-mirror-follow-external-anchor]',
+  '.rabbit-mirror-external-shell',
+  '[data-rm-tool-menu]',
+  '.st-esg-message-floor-panel',
+  '.st-esg-floor-compact',
   '#top-bar',
   '#top-settings-holder',
   '.drawer-content',
@@ -107,6 +123,13 @@ export function shouldTogglePureReading({
 
   if (element.closest(INTERACTIVE_ANCESTOR_SELECTOR)) {
     return false;
+  }
+
+  // Shadow DOM 宿主（如柏宝绘楼层卡片等嵌入式微前端）：事件重靶到 light DOM 宿主 div，统一放行防误触全屏
+  for (let cur = element; cur && cur !== chatRoot; cur = cur.parentElement) {
+    if (cur.shadowRoot) {
+      return false;
+    }
   }
 
   return true;

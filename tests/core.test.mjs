@@ -4406,6 +4406,14 @@ function createMiniDomHarness() {
         const classes = s.slice(1).split('.');
         return classes.every(c => this.classList.contains(c));
       }
+      if (s.startsWith('[') && s.endsWith(']')) {
+        const inner = s.slice(1, -1);
+        const eq = inner.indexOf('=');
+        if (eq < 0) return this.attributes.has(inner);
+        const attrName = inner.slice(0, eq).trim();
+        const attrVal = inner.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        return this.attributes.get(attrName) === attrVal;
+      }
       return this.tagName === s.toUpperCase();
     }
 
@@ -9930,7 +9938,7 @@ test('v0.9.2: 悬浮原版顶栏零底透/零抽屉顶缝 + 搜索图标防重�
     };
 
     const { PRESET_ASSISTANT_STORAGE_KEY, createPresetAssistantPanel } = await import(
-      '../src/modules/preset-assistant.js?v=0.9.6'
+      '../src/modules/preset-assistant.js?v=0.9.7'
     );
 
     const panel1 = createPresetAssistantPanel({
@@ -10322,7 +10330,7 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
     doc.body.append(rmBlock);
 
     const extStore = createSettingsStore({ getContext: () => homeCtx });
-    const extTidy = createExtensionsTidy({ root: win, store: extStore, stmVersion: '0.9.6' });
+    const extTidy = createExtensionsTidy({ root: win, store: extStore, stmVersion: '0.9.7' });
     extTidy.sync();
     assert.equal(extWrap.classList.contains('stm-ext-tidied'), true);
 
@@ -10347,6 +10355,120 @@ test('v0.9.4: 含特殊符号世界书归一化防失配防重导重复 + 双页
     extTidy.sync();
     assert.equal(nativeMutations, 0, '切回原生酒馆归位后再次 sync 必须保持 0 次 DOM 插拔，绝不卡死插件折叠点击');
     extTidy.destroy();
+
+    // 7. 验证开机单行胶囊轻提示文案（全名 SillyTavern 伴侣、无版本号、渲染加速态感知、原生挂起静默）
+    const { formatStartupToastText, toastMessage } = await import('../src/shell/host-actions.js');
+    assert.equal(
+      formatStartupToastText({ shellEnabled: true, turboRender: true }),
+      'SillyTavern 伴侣已启动 · 渲染加速中',
+    );
+    assert.equal(
+      formatStartupToastText({ shellEnabled: true, turboRender: false }),
+      'SillyTavern 伴侣已启动',
+    );
+    assert.equal(formatStartupToastText({ shellEnabled: false, turboRender: true }), '');
+    const toastCalls = [];
+    const prevToastr = globalThis.toastr;
+    try {
+      globalThis.toastr = {
+        success(msg, title, opts) {
+          toastCalls.push({ msg, title, opts });
+        },
+      };
+      toastMessage(formatStartupToastText({ shellEnabled: true, turboRender: true }), 'success', {
+        title: '',
+        timeOut: 2200,
+        positionClass: 'toast-top-center',
+      });
+    } finally {
+      globalThis.toastr = prevToastr;
+    }
+    assert.equal(toastCalls.length, 1);
+    assert.equal(toastCalls[0].title, '', '开机轻提示不传副标题，渲染为单行极简胶囊');
+    assert.equal(toastCalls[0].opts.timeOut, 2200);
+    assert.equal(toastCalls[0].opts.positionClass, 'toast-top-center');
+    assert.equal(/\d+\.\d+/.test(toastCalls[0].msg), false, '开机轻提示不含版本号');
+
+    // 8. 第三方热门插件协同护栏：ST-iPhonie / 柏宝绘 / 兔子镜小剧场 / 织幕 / 墨提斯之镜
+    const { shouldTogglePureReading } = await import('../src/core/tap-guard.js');
+    const { discoverThirdPartyFloorButtons } = await import('../src/shell/floor-actions.js');
+    const { inspectWildFloatingCandidate } = await import('../src/shell/float-capsule.js');
+    const { readFileSync } = await import('node:fs');
+    const tapSettings = { shellEnabled: true, tapPureReading: true, tapPureReadingScope: 'all' };
+    const chatBox = doc.createElement('div');
+    chatBox.id = 'chat';
+    doc.body.append(chatBox);
+
+    const makeChatTarget = (tag, attrs = {}, cls = '') => {
+      const node = doc.createElement(tag);
+      if (cls) node.className = cls;
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+      chatBox.append(node);
+      return node;
+    };
+
+    const stttsWave = makeChatTarget('span', { 'data-sttts-action': 'line' });
+    const bbiCardHost = makeChatTarget('div', {}, 'custom-shadow-card');
+    bbiCardHost.shadowRoot = { mode: 'open' };
+    const totoShell = makeChatTarget('div', { 'data-rabbit-mirror-external-shell': 'true' }, 'rabbit-mirror-external-shell');
+    const esgPanel = makeChatTarget('section', {}, 'st-esg-message-floor-panel');
+    const plainText = makeChatTarget('p', {}, 'plain-story');
+
+    for (const [label, node] of [
+      ['ST-iPhonie 正文声波按钮', stttsWave],
+      ['柏宝绘/Shadow DOM 卡片宿主', bbiCardHost],
+      ['兔子镜小剧场外置壳', totoShell],
+      ['织幕楼层组件面板', esgPanel],
+    ]) {
+      assert.equal(
+        shouldTogglePureReading({ settings: tapSettings, target: node, chatRoot: chatBox }),
+        false,
+        `${label} 点击绝不误触全屏纯享阅读`,
+      );
+    }
+    assert.equal(
+      shouldTogglePureReading({ settings: tapSettings, target: plainText, chatRoot: chatBox }),
+      true,
+      '普通正文段落仍正常响应轻触纯享阅读',
+    );
+
+    // 柏宝绘楼层 .extraMesButtons 透传按钮自动剥离括号副注，文案清爽不截断
+    const bbiMes = doc.createElement('div');
+    bbiMes.className = 'mes';
+    const bbiExtra = doc.createElement('div');
+    bbiExtra.className = 'extraMesButtons';
+    const bbiBtn = doc.createElement('div');
+    bbiBtn.className = 'mes_button fa-solid fa-palette bbi-tag-action';
+    bbiBtn.setAttribute('title', '生成生图 tag（已有 tag 时重新生成）');
+    bbiExtra.append(bbiBtn);
+    bbiMes.append(bbiExtra);
+    const discoveredExt = discoverThirdPartyFloorButtons(bbiMes, win);
+    assert.equal(discoveredExt.length, 1);
+    assert.equal(discoveredExt[0].label, '生成生图 tag');
+
+    // 第三方浮层菜单/弹窗绝不被野生挂件扫描器误收
+    const stttsMenu = doc.createElement('div');
+    stttsMenu.className = 'sttts-context-menu';
+    stttsMenu.style.position = 'fixed';
+    stttsMenu.style.width = '120px';
+    stttsMenu.style.height = '100px';
+    assert.equal(inspectWildFloatingCandidate(stttsMenu, win), null, 'ST-iPhonie 右键菜单不被误收为悬浮球');
+
+    const stscPanel = doc.createElement('div');
+    stscPanel.id = 'stsc_floating_panel';
+    stscPanel.style.position = 'fixed';
+    stscPanel.style.width = '120px';
+    stscPanel.style.height = '120px';
+    assert.equal(inspectWildFloatingCandidate(stscPanel, win), null, '墨提斯之镜浮窗面板不被误收');
+
+    // 确认 style.css 仅隐藏 .mes_buttons 内 4 个原生按钮，放行 ST-iPhonie 等直接挂载的第三方楼层按钮
+    const cssText = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    assert.ok(
+      cssText.includes('.ch_name > .mes_buttons > .extraMesButtons') &&
+        !cssText.includes('.ch_name > .mes_buttons,\n') &&
+        !cssText.includes('.ch_name > .mes_buttons,\r\n'),
+      '楼层底部模式精准隐藏原生 4 项而非整条 .mes_buttons，保活 ST-iPhonie 小手机楼层工具键',
+    );
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;

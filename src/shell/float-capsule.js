@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.6';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.6';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.6';
-import { toastMessage } from './host-actions.js?v=0.9.6';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.7';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.7';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.7';
+import { toastMessage } from './host-actions.js?v=0.9.7';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -332,7 +332,17 @@ export function inspectWildFloatingCandidate(node, root = globalThis) {
   const tag = String(node.tagName).toUpperCase();
   if (IGNORED_TAG_NAMES.has(tag)) return null;
   const id = String(node.id || '');
-  if (CORE_BODY_EXCLUDED_IDS.has(id) || isYantaiInternalNode(node)) return null;
+  if (
+    CORE_BODY_EXCLUDED_IDS.has(id) ||
+    id === 'stsc_floating_panel' ||
+    id === 'stsc_manager_overlay' ||
+    id === 'stsc_dialog_overlay' ||
+    id === 'sttts-panel' ||
+    id === 'bbi-app-host' ||
+    isYantaiInternalNode(node)
+  ) {
+    return null;
+  }
 
   const cls = node.classList;
   if (
@@ -346,7 +356,10 @@ export function inspectWildFloatingCandidate(node, root = globalThis) {
     cls?.contains?.('ih-find-bar') ||
     cls?.contains?.('ih-color-picker-portal') ||
     cls?.contains?.('ih-folder-dropdown-portal') ||
-    cls?.contains?.('hp-studio-overlay')
+    cls?.contains?.('hp-studio-overlay') ||
+    cls?.contains?.('sttts-context-menu') ||
+    cls?.contains?.('st-esg-help-tour') ||
+    node.hasAttribute?.('data-rm-tool-menu')
   ) {
     return null;
   }
