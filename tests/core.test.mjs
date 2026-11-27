@@ -10687,3 +10687,131 @@ test('pre-launch polish: 观月札记还原原版与清爽卡片 + 新版双页�
     globalThis.window = prevWin;
   }
 });
+
+test('home bookshelf TT theme top-gap guard: 4-ID #sheld 压制主题首页顶推 + #top-bar 自身高度防滚雪球 + 首页 row-gap 归零 + 伴侣顶栏拦截第三方直插图标', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevComputed = globalThis.getComputedStyle;
+  const prevRO = globalThis.ResizeObserver;
+
+  const { doc } = createMiniDomHarness();
+  const win = {
+    innerWidth: 393,
+    innerHeight: 759,
+    document: doc,
+    getComputedStyle: () => ({
+      display: 'flex',
+      visibility: 'visible',
+      opacity: '1',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      backgroundImage: 'none',
+      borderBottomWidth: '0px',
+    }),
+  };
+  globalThis.document = doc;
+  globalThis.window = win;
+  globalThis.getComputedStyle = win.getComputedStyle;
+
+  const roCallbacks = [];
+  globalThis.ResizeObserver = class MockResizeObserver {
+    constructor(cb) {
+      this.cb = cb;
+      roCallbacks.push(cb);
+    }
+    observe() {}
+    disconnect() {}
+  };
+
+  try {
+    const suiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const rawCss = fs.readFileSync(path.join(suiteRoot, 'style.css'), 'utf8');
+    const cssNoComments = rawCss.replace(/\/\*[\s\S]*?\*\//g, '');
+
+    // 1. 验证首页 #sheld 使用 4-ID 选择器，压制《角色映幕》等 TT 主题的 `html body:has(#chat .welcomePanel) #sheld#sheld` (3-ID)
+    assert.ok(
+      cssNoComments.includes('html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld#sheld#sheld'),
+      '首页书架 #sheld 必须使用 4-ID 规则压制主题 3-ID 顶推，避免外层 top 与内层 --jd-home-inset-top 双重叠加',
+    );
+    assert.ok(
+      cssNoComments.includes('html body.stm-shell-active.stm-home-cloak #chat#chat.jd-bookshelf-home') &&
+        cssNoComments.includes('row-gap: 0 !important;') &&
+        cssNoComments.includes('padding-top: 0 !important;'),
+      '首页书架 #chat#chat 必须清零 gap / row-gap 与 padding-top，防止隐藏标尺或主题间距多出一道留白',
+    );
+    assert.ok(
+      cssNoComments.includes('min-height: var(--stm-native-bar-height, var(--topBarBlockSize, 44px)) !important;') &&
+        cssNoComments.includes('height: var(--stm-native-bar-height, var(--topBarBlockSize, 44px)) !important;'),
+      '#top-bar 高度修复必须绑定纯自身高度 --stm-native-bar-height，严禁反灌含 top 偏移的 --stm-native-bar-offset',
+    );
+    assert.ok(
+      cssNoComments.includes('html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > :not(.drawer)') &&
+        cssNoComments.includes('html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > :not(.drawer-content)'),
+      '伴侣顶栏模式必须连同第三方直插顶栏按钮一并收起，同时保留原生 .drawer-content 可用',
+    );
+
+    // 2. 模拟 TT 适配主题把 #top-bar 与 #top-settings-holder 统一设了 top: 50px（刘海安全区），自身高 40px
+    let simulatedBarHeight = 40;
+    const topBar = doc.createElement('div');
+    topBar.id = 'top-bar';
+    topBar.getBoundingClientRect = () => ({
+      top: 50,
+      bottom: 50 + simulatedBarHeight,
+      left: 0,
+      right: 393,
+      width: 393,
+      height: simulatedBarHeight,
+    });
+    const holder = doc.createElement('div');
+    holder.id = 'top-settings-holder';
+    holder.getBoundingClientRect = () => ({
+      top: 50,
+      bottom: 90,
+      left: 0,
+      right: 393,
+      width: 393,
+      height: 40,
+    });
+    topBar.append(holder);
+    doc.body.append(topBar);
+
+    const ctx = {
+      extensionSettings: { st_mate: { topbarMode: 'native' } },
+      characterId: undefined,
+      groupId: null,
+      characters: [],
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const topbar = createTopbar({
+      getContext: () => ctx,
+      store,
+      moduleBridge: { getRegisteredHandle: () => null },
+    });
+    topbar.refresh();
+
+    // 验证首次测量：--stm-native-bar-height 仅 40px，--stm-native-bar-offset 为 90px（含 50px top）
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-bar-height'), '40px');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-bar-offset'), '90px');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-drawer-top'), '90px');
+
+    // 模拟 CSS 应用 `height: var(--stm-native-bar-height)` 后连续触发多次 ResizeObserver：严禁滚雪球！
+    for (let i = 0; i < 4; i += 1) {
+      simulatedBarHeight = Number.parseFloat(
+        doc.documentElement.style.getPropertyValue('--stm-native-bar-height') || '40',
+      );
+      for (const cb of roCallbacks) cb();
+    }
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-bar-height'), '40px', '重复 ResizeObserver 下高度恒定 40px 零膨胀');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-bar-offset'), '90px', '重复 ResizeObserver 下底边恒定 90px 零滚雪球');
+
+    topbar.destroy();
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-native-bar-height'), '', 'destroy 清理 --stm-native-bar-height');
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.getComputedStyle = prevComputed;
+    globalThis.ResizeObserver = prevRO;
+  }
+});

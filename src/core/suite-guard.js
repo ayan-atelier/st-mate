@@ -7,7 +7,7 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.9.9';
+import { detectPlatform } from './env.js?v=0.9.10';
 
 export const TAVERN_HELPER_SPEC = Object.freeze({
   folderName: 'JS-Slash-Runner',

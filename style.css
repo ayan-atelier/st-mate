@@ -51,13 +51,14 @@ body.stm-shell-active.stm-native-topbar.stm-home-cloak:not(.stm-native-drawer-op
   --stm-drawer-top: var(--stm-native-drawer-top, var(--stm-native-bar-offset, calc(var(--topBarBlockSize, 48px) + var(--stm-safe-top))));
 }
 
-/* 修复酒馆原生 #top-bar 高度绑定在 --bottomFormBlockSize 上导致书架首页净空态 (--bottomFormBlockSize=0) 顶栏底色塌缩变透明的问题 */
+/* 修复酒馆原生 #top-bar 高度绑定在 --bottomFormBlockSize 上导致书架首页净空态 (--bottomFormBlockSize=0) 顶栏底色塌缩变透明的问题；
+   仅使用纯自身高度 --stm-native-bar-height（不含 top 偏移），避免主题设 `#top-bar { top: var(--sl-tauri-top) }` 时与 ResizeObserver 形成滚雪球 */
 html body.stm-shell-active.stm-native-topbar #top-bar {
-  min-height: var(--stm-native-bar-offset, var(--topBarBlockSize, 44px)) !important;
+  min-height: var(--stm-native-bar-height, var(--topBarBlockSize, 44px)) !important;
 }
 
 html body.stm-shell-active.stm-native-topbar.stm-home-cloak #top-bar {
-  height: var(--stm-native-bar-offset, var(--topBarBlockSize, 44px)) !important;
+  height: var(--stm-native-bar-height, var(--topBarBlockSize, 44px)) !important;
 }
 
 html body.stm-shell-active:not(.stm-native-topbar) #top-bar,
@@ -123,8 +124,10 @@ html body.stm-shell-active:not(.stm-native-topbar) #top-bar::after {
   content: none !important;
 }
 
-/* 只隐藏顶部 9 个原生抽屉的触发图标，保留内部 .drawer-content 面板完好无损 */
-html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > .drawer-toggle {
+/* 只隐藏顶部原生抽屉触发图标与第三方顶栏直插按钮，保留内部 .drawer-content 面板完好无损 */
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > .drawer-toggle,
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > :not(.drawer-content),
+html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > :not(.drawer) {
   display: none !important;
 }
 
@@ -310,7 +313,9 @@ html body.stm-shell-active:not(.movingUI):not(.waifuMode):not(.stm-home-cloak) #
 }
 
 /* 首页书架态：#sheld 从视口顶边 0px 连续铺底（防止《观月札记》等悬浮胶囊顶栏主题因 #top-bar 透明而在顶栏背后露出原生壁纸 #bg1），
-   并通过 --jd-home-inset-top 自动让出原版顶栏高度零遮挡 */
+   并通过 --jd-home-inset-top 自动让出原版顶栏高度零遮挡；
+   追加 4-ID 高权重选择器压制《角色映幕》等 TT 适配主题的 `html body:has(#chat .welcomePanel) #sheld#sheld` (3-ID) 强推，避免外层 top 与内层 --jd-home-inset-top 双重叠加空白 */
+html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld#sheld#sheld,
 html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
   top: 0 !important;
   height: 100vh !important;
@@ -332,6 +337,7 @@ html body.stm-shell-active.stm-native-topbar.stm-home-cloak #chat#chat:not(.jd-b
     max-height: 100dvh !important;
   }
 
+  html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld#sheld#sheld,
   body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld {
     top: 0 !important;
     height: 100dvh !important;
@@ -435,12 +441,23 @@ html body.stm-shell-active.stm-home-cloak #chat#chat {
   flex: 1 1 auto !important;
   padding-left: 0 !important;
   padding-right: 0 !important;
+  gap: 0 !important;
+  row-gap: 0 !important;
   border-left: 0 !important;
   border-right: 0 !important;
 }
 
+html body.stm-shell-active.stm-home-cloak #chat#chat.jd-bookshelf-home {
+  padding-top: 0 !important;
+}
+
 @media screen and (max-width: 1000px) {
+  html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld#sheld#sheld,
   html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld {
+    top: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
     width: 100% !important;
     max-width: 100vw !important;
     padding-inline: 0 !important;

@@ -6,14 +6,14 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.9';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.10';
 import {
   isQuietRoomActive,
   isQuietRoomSidebarOpen,
   toggleQuietRoomSidebar,
-} from '../core/compat-bridges.js?v=0.9.9';
-import { svgMarkup } from '../core/icons.js?v=0.9.9';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.9';
+} from '../core/compat-bridges.js?v=0.9.10';
+import { svgMarkup } from '../core/icons.js?v=0.9.10';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.10';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -22,7 +22,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.9.9';
+} from './host-actions.js?v=0.9.10';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',
@@ -409,14 +409,32 @@ export function createTopbar({
     const win = globalThis.window || globalThis;
     const holder = doc.getElementById?.('top-settings-holder');
     const topBar = doc.getElementById?.('top-bar');
-    const holderBottom =
+    const holderRect =
       typeof holder?.getBoundingClientRect === 'function'
-        ? Number(holder.getBoundingClientRect()?.bottom || 0)
-        : 0;
-    const barBottom =
+        ? holder.getBoundingClientRect()
+        : null;
+    const barRect =
       typeof topBar?.getBoundingClientRect === 'function'
-        ? Number(topBar.getBoundingClientRect()?.bottom || 0)
-        : 0;
+        ? topBar.getBoundingClientRect()
+        : null;
+    const holderTop = Number(holderRect?.top || 0);
+    const holderBottom = Number(holderRect?.bottom || 0);
+    const holderHeight = Number(holderRect?.height || Math.max(0, holderBottom - holderTop) || 0);
+    const barTop = Number(barRect?.top || 0);
+    const barBottom = Number(barRect?.bottom || 0);
+    const barHeight = Number(barRect?.height || Math.max(0, barBottom - barTop) || 0);
+
+    // 给 #top-bar 修复塌缩用的纯自身高度 (--stm-native-bar-height) 严禁取含 top 偏移的 barBottom，
+    // 否则在主题设了 `#top-bar { top: var(--sl-tauri-top) }` (top > 0) 时会触发 ResizeObserver 滚雪球膨胀。
+    const holderSpanFromBarTop =
+      holderBottom > 0 ? Math.max(0, holderBottom - Math.max(0, barTop)) : 0;
+    const barOwnHeightPx = Math.round(
+      holderBottom > 0 ? Math.max(holderHeight, holderSpanFromBarTop) : barHeight,
+    );
+    if (barOwnHeightPx >= 24 && barOwnHeightPx <= 180) {
+      doc.documentElement.style.setProperty('--stm-native-bar-height', `${barOwnHeightPx}px`);
+    }
+
     const clearancePx = Math.round(Math.max(holderBottom, barBottom));
     const topBarPaints = isBarElementPaintingBox(win, topBar);
     const visibleBarBottom = topBarPaints
@@ -435,6 +453,7 @@ export function createTopbar({
   }
 
   function clearNativeBarOffset(doc) {
+    doc?.documentElement?.style?.removeProperty?.('--stm-native-bar-height');
     doc?.documentElement?.style?.removeProperty?.('--stm-native-bar-offset');
     doc?.documentElement?.style?.removeProperty?.('--stm-native-drawer-top');
   }

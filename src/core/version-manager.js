@@ -144,7 +144,7 @@ export function createVersionManager({
   store,
   moduleURL = import.meta.url,
   apiRoot = globalThis.location?.href || 'http://127.0.0.1:8000/',
-  currentVersion = '0.9.9',
+  currentVersion = '0.9.10',
   beforeChange = async () => {},
   fetcher = (...args) => globalThis.fetch(...args),
 } = {}) {

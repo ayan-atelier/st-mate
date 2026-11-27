@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.9",
+  "latest": "0.9.10",
   "releases": [
+    {
+      "version": "0.9.10",
+      "branch": "release-0.9.10",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "修复搭配《角色映幕》等 TauriTavern 适配主题时书架首页顶端双重留白与原版顶栏高度测量滚雪球问题；首页清零多余行距，伴侣顶栏模式同步收起第三方直插顶栏图标。"
+    },
     {
       "version": "0.9.9",
       "branch": "release-0.9.9",
