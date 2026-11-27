@@ -9,7 +9,7 @@
  * 4. 多轮精简会话控制器：维护最近 8 轮精简问答摘要（剥离历史巨型 JSON 防 Token 膨胀），支持一键清空与流中取消。
  */
 
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.8';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.9';
 import {
   buildHostProxyPresetName,
   buildProbeGenerateBody,
@@ -22,7 +22,7 @@ import {
   needsV1Suffix,
   resolveAuxApiChannel,
   resolveSecretKeyForStation,
-} from './api-backend.js?v=0.9.8';
+} from './api-backend.js?v=0.9.9';
 
 export const DEFAULT_ASSISTANT_TIMEOUT_MS = 90000;
 export const DEFAULT_MAX_HISTORY_TURNS = 8;

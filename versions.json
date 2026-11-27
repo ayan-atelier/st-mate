@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.8",
+  "latest": "0.9.9",
   "releases": [
+    {
+      "version": "0.9.9",
+      "branch": "release-0.9.9",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "抬高老用户配套子插件兼容水位线（角色书架 1.5.5、人设馆 1.1.9、记忆增强 0.4.3），旧版单插件用户安装伴侣时自动提示一键升级，避免旧开关冲突。"
+    },
     {
       "version": "0.9.8",
       "branch": "release-0.9.8",

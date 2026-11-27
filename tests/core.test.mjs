@@ -6796,10 +6796,10 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
 
     const diskExtensions = new Map([
       ['third-party/st-mate', { type: 'local', version: '0.8.0' }],
-      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.3', isUpToDate: false }],
-      ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.7', isUpToDate: true }],
+      ['third-party/yantai-bookshelf', { type: 'local', version: '1.5.5', isUpToDate: false }],
+      ['third-party/yantai-persona-studio', { type: 'local', version: '1.1.9', isUpToDate: true }],
       ['third-party/yantai-echoes', { type: 'local', version: '1.0.4', isUpToDate: true }],
-      ['third-party/yantai-memory', { type: 'local', version: '0.4.1', isUpToDate: true }],
+      ['third-party/yantai-memory', { type: 'local', version: '0.4.3', isUpToDate: true }],
     ]);
     const installCalls = [];
     const versionCalls = [];
@@ -6876,7 +6876,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
     let memoryPanelOpened = false;
     moduleBridge.registry.modules.set('yantai-memory', {
       id: 'yantai-memory',
-      version: '0.4.1',
+      version: '0.4.3',
       inspect: () => ({ enabled: store.get().modules.memory }),
       setEnabled: async () => true,
       open: () => {

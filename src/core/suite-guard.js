@@ -7,7 +7,7 @@
  * 4. 养蛊排障逃生舱：支持 ?stm_safe=1 URL 安全模式挂起启动，以及零隐私泄漏的「一键复制环境排障体检单」。
  */
 
-import { detectPlatform } from './env.js?v=0.9.8';
+import { detectPlatform } from './env.js?v=0.9.9';
 
 export const TAVERN_HELPER_SPEC = Object.freeze({
   folderName: 'JS-Slash-Runner',
@@ -23,7 +23,7 @@ export const COMPANION_PLUGINS = Object.freeze([
     folderName: 'yantai-bookshelf',
     displayName: '砚台 · 角色书架',
     repoUrl: 'https://github.com/ayan-atelier/yantai-bookshelf',
-    minVersion: '1.5.3',
+    minVersion: '1.5.5',
     defaultEnabled: true,
     legacyDomSelector: '.jd-bookshelf, #jd-bookshelf-return',
   },
@@ -33,7 +33,7 @@ export const COMPANION_PLUGINS = Object.freeze([
     folderName: 'yantai-persona-studio',
     displayName: '砚台 · 人设馆',
     repoUrl: 'https://github.com/ayan-atelier/yantai-persona-studio',
-    minVersion: '1.1.7',
+    minVersion: '1.1.9',
     defaultEnabled: true,
     legacyDomSelector: '#yt-persona-native-workspace',
   },
@@ -53,7 +53,7 @@ export const COMPANION_PLUGINS = Object.freeze([
     folderName: 'yantai-memory',
     displayName: '砚台 · 记忆增强',
     repoUrl: 'https://github.com/ayan-atelier/yantai-memory',
-    minVersion: '0.4.1',
+    minVersion: '0.4.3',
     defaultEnabled: false,
     legacyDomSelector: '#yt-memory-dialog, #yt-memory-settings',
   },

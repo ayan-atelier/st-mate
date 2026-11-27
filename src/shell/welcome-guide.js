@@ -7,7 +7,7 @@
  * 4. 任何时候都可在「伴侣设置中心」右上角点击「上手导览」或输入 /stmate guide 重新打开。
  */
 
-import { createIconNode } from '../core/icons.js?v=0.9.8';
+import { createIconNode } from '../core/icons.js?v=0.9.9';
 
 const GUIDE_TABS = Object.freeze([
   { id: 'quick', label: '快速上手', icon: 'zap' },
