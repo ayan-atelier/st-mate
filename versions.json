@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.13",
+  "latest": "0.9.14",
   "releases": [
+    {
+      "version": "0.9.14",
+      "branch": "release-0.9.14",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "修复新版安卓 TauriTavern 窗口壁纸（.tt-window-background）被移动端防压扁规则截短导致对话与首页底部露出状态栏等高白条的问题；修复《观月札记》首楼 7 行 subgrid 下楼底「··· / 复制 / 编辑」操作条与重Roll助手面板（.mes_bias）行号重叠遮挡的问题。"
+    },
     {
       "version": "0.9.13",
       "branch": "release-0.9.13",

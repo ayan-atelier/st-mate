@@ -10762,6 +10762,18 @@ test('home bookshelf TT theme top-gap guard: 4-ID #sheld 压制主题首页顶�
         cssNoComments.includes('color: #ffffff !important;'),
       '浅色/日间主题下卡片封面深底置顶与收藏角标必须保持纯白高对比',
     );
+    assert.ok(
+      cssNoComments.includes('body.stm-turbo-mobile #bg1:not(.tt-window-background)') &&
+        cssNoComments.includes('body.stm-turbo-mobile #bg_custom:not(.tt-window-background)') &&
+        cssNoComments.includes('height: max(var(--stm-stable-vh, 100dvh), 100dvh) !important;'),
+      '移动端壁纸防压扁规则必须跳过 TauriTavern 原生窗口壁纸 .tt-window-background，避免压扁 --tt-window-height 导致底部露出与状态栏等高的白条',
+    );
+    assert.ok(
+      cssNoComments.includes('html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"]') &&
+        cssNoComments.includes('grid-row: 2 / span 8 !important;') &&
+        cssNoComments.includes('grid-row: 8 !important;'),
+      '观月札记首楼 7 行 subgrid 下必须自动扩至第 8 行放置 .stm-floor-bar，避免与重Roll助手 (.mes_bias row 7) 重叠',
+    );
 
     // 2. 模拟 TT 适配主题把 #top-bar 与 #top-settings-holder 统一设了 top: 50px（刘海安全区），自身高 40px
     let simulatedBarHeight = 40;

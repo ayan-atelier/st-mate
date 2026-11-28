@@ -7,17 +7,17 @@
  * 4. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.13';
-import { svgMarkup } from '../core/icons.js?v=0.9.13';
-import { hexLuminance, sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.9.13';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.14';
+import { svgMarkup } from '../core/icons.js?v=0.9.14';
+import { hexLuminance, sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.9.14';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.9.13';
-import { openImageCropDialog } from './image-cropper.js?v=0.9.13';
+} from './host-actions.js?v=0.9.14';
+import { openImageCropDialog } from './image-cropper.js?v=0.9.14';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },

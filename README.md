@@ -1,6 +1,6 @@
 # 砚台 · SillyTavern 伴侣 (`st-mate`)
 
-![Version](https://img.shields.io/badge/version-0.9.13-d4b98c)
+![Version](https://img.shields.io/badge/version-0.9.14-d4b98c)
 
 > **让 SillyTavern 更好看、更顺手、更丝滑的一站式体验优化插件。**
 > 底层加速与防卡防烫引擎静默开启，**默认完整保留你的原版顶栏与美化主题**，不碰旧存档、全模块独立开关，随时一键无损退回原生酒馆。

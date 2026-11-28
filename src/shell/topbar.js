@@ -6,14 +6,14 @@
  * - 性能铁律：窄屏（<= 1000px）跳过 #sheld 几何观察器，桌面宽屏采用 rAF 合批读取，杜绝强制同步回流。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.13';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.14';
 import {
   isQuietRoomActive,
   isQuietRoomSidebarOpen,
   toggleQuietRoomSidebar,
-} from '../core/compat-bridges.js?v=0.9.13';
-import { svgMarkup } from '../core/icons.js?v=0.9.13';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.13';
+} from '../core/compat-bridges.js?v=0.9.14';
+import { svgMarkup } from '../core/icons.js?v=0.9.14';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.14';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
@@ -22,7 +22,7 @@ import {
   openNativeDrawer,
   returnToHomeScreen,
   toastMessage,
-} from './host-actions.js?v=0.9.13';
+} from './host-actions.js?v=0.9.14';
 
 const PRESET_WATCH_IDS = new Set([
   'main_api',

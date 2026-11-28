@@ -7,8 +7,8 @@
  * 4. 100% 代理触发酒馆原生按钮事件与官方 `deleteMessage`，零 DOM 破坏、关闭开关即瞬间无损退回原版布局。
  */
 
-import { createIconNode } from '../core/icons.js?v=0.9.13';
-import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.13';
+import { createIconNode } from '../core/icons.js?v=0.9.14';
+import { primeHostCoreModule } from '../modules/char-world-backend.js?v=0.9.14';
 
 const BODY_ACTIVE_CLASS = 'stm-floor-actions-bottom';
 
@@ -538,6 +538,31 @@ export function createFloorActions({
       nativeBookmarkOpen && isNodeEffectivelyVisible(nativeBookmarkOpen, root),
     );
 
+    // 兼容《观月札记》首楼 / 每楼封面 7 行 subgrid：探测到 --nt-footer-row 为 9 的 grid 楼层时，
+    // 自动标记独立第 8 行给底部操作条，避免与挂在 .mes_bias (row 7) 的重Roll助手面板重叠遮挡
+    let isNineRowSubgrid = false;
+    if (typeof root?.getComputedStyle === 'function') {
+      try {
+        const blockCs = root.getComputedStyle(mesBlock);
+        const mesCs = root.getComputedStyle(mesEl);
+        const footerRow = String(mesCs?.getPropertyValue?.('--nt-footer-row') || '').trim();
+        const alreadyMarked = mesEl.dataset?.stmSubgridFloor === '1';
+        if (blockCs?.display === 'grid' && (footerRow === '9' || (alreadyMarked && footerRow === '10'))) {
+          isNineRowSubgrid = true;
+        }
+      } catch {
+        // ignore mock DOM
+      }
+    }
+    if (isNineRowSubgrid) {
+      if (mesEl.dataset) mesEl.dataset.stmSubgridFloor = '1';
+      else mesEl.setAttribute?.('data-stm-subgrid-floor', '1');
+    } else if (mesEl.dataset?.stmSubgridFloor === '1') {
+      delete mesEl.dataset.stmSubgridFloor;
+    } else if (mesEl.getAttribute?.('data-stm-subgrid-floor') === '1') {
+      mesEl.removeAttribute?.('data-stm-subgrid-floor');
+    }
+
     // 1. 常态底部极简 3 键条（··· / 复制 / 编辑）
     let bar = findDirectChildByClass(mesBlock, 'stm-floor-bar');
     if (!bar) {
@@ -887,6 +912,13 @@ export function createFloorActions({
       for (const cls of ['.stm-floor-bar', '.stm-floor-edit-bar']) {
         for (const node of [...(doc.querySelectorAll?.(cls) || [])]) {
           node.remove();
+        }
+      }
+      for (const node of [...(doc.querySelectorAll?.('[data-stm-subgrid-floor]') || [])]) {
+        if (node.dataset && 'stmSubgridFloor' in node.dataset) {
+          delete node.dataset.stmSubgridFloor;
+        } else {
+          node.removeAttribute?.('data-stm-subgrid-floor');
         }
       }
       menuEl?.remove();

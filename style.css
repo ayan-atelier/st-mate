@@ -950,6 +950,7 @@ html body.stm-shell-active.stm-backdrop-live:not(.stm-home-cloak) #form_sheld {
 .stm-vibe-backdrop[data-host="body"] {
   position: fixed;
   height: var(--stm-stable-vh, 100dvh);
+  height: max(var(--stm-stable-vh, 100dvh), 100dvh);
   z-index: 2;
 }
 
@@ -1045,9 +1046,13 @@ body.stm-turbo-active #top-settings-holder > .drawer > .drawer-content.closedDra
   content-visibility: hidden;
 }
 
-body.stm-turbo-mobile #bg1,
-body.stm-turbo-mobile #bg_custom {
+/* TauriTavern 原生窗口壁纸 (#bg1.tt-window-background) 已用 top: -insets.top 与完整窗高 --tt-window-height 抗键盘压扁，
+   绝不可用内容视口高 --stm-stable-vh !important 强行截短它，否则底部会露出与状态栏等高的白条；
+   普通手机浏览器仍用 max(--stm-stable-vh, 100dvh) 防键盘弹起压扁壁纸，同时避免视口增高时底部漏白 */
+body.stm-turbo-mobile #bg1:not(.tt-window-background),
+body.stm-turbo-mobile #bg_custom:not(.tt-window-background) {
   height: var(--stm-stable-vh, 100vh) !important;
+  height: max(var(--stm-stable-vh, 100dvh), 100dvh) !important;
 }
 
 /* 移动端智能卸除酒馆多层重叠毛玻璃，保留原主题底色与高对比可读性 */
@@ -10537,6 +10542,8 @@ body.stm-floor-actions-bottom #chat .mes_block > textarea.edit_textarea {
 }
 
 .stm-floor-bar {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -10548,6 +10555,21 @@ body.stm-floor-actions-bottom #chat .mes_block > textarea.edit_textarea {
   padding: 0;
   min-height: 28px;
   box-sizing: border-box;
+}
+
+/* 观月札记首楼（及每楼头图模式）使用 7 行 subgrid 且 .mes_bias 占第 7 行；
+   扩展为 8 行 subgrid 并将底部操作条 / 编辑栏单独放到第 8 行，彻底杜绝与重Roll助手 (.yte-dock) 重叠遮挡 */
+html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"] {
+  --nt-footer-row: 10 !important;
+}
+
+html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"] > .mes_block {
+  grid-row: 2 / span 8 !important;
+}
+
+html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"] > .mes_block > .stm-floor-bar,
+html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"] > .mes_block > .stm-floor-edit-bar {
+  grid-row: 8 !important;
 }
 
 .stm-floor-bar[hidden] {
