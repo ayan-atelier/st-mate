@@ -7,7 +7,7 @@
  * 5. 移动端窄屏智能卸除酒馆 20+ 处高耗电多层高斯毛玻璃 + 软键盘弹出视口稳定锁。
  */
 
-import { detectPlatform } from '../core/env.js?v=0.9.17';
+import { detectPlatform } from '../core/env.js?v=0.9.18';
 
 const AWAKE_TAIL_COUNT = 8;
 const HIBERNATE_MIN_TOTAL = 12;

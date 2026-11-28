@@ -15,7 +15,7 @@
   --stm-drawer-top: calc(var(--stm-bar-core-height) + var(--stm-safe-top));
   --stm-ink: var(--SmartThemeBodyColor, #ebedf2);
   --stm-muted: var(--SmartThemeEmColor, #989ca8);
-  --stm-surface: var(--SmartThemeBlurTintColor, rgba(24, 24, 28, 0.92));
+  --stm-surface: var(--stm-surface-override, var(--SmartThemeBlurTintColor, rgba(24, 24, 28, 0.92)));
   --stm-card-bg: var(--SmartThemeChatTintColor, rgba(34, 34, 40, 0.72));
   --stm-border: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.14));
   --stm-accent: var(--SmartThemeUnderlineColor, #c4c9d4);
@@ -1139,8 +1139,8 @@ body.stm-turbo-mobile .popup {
   border: 1px solid var(--stm-border);
   border-top: 2px solid var(--stm-accent);
   border-radius: 14px;
-  background: rgba(24, 22, 20, 0.9);
-  background: color-mix(in srgb, var(--stm-surface) 84%, transparent);
+  background: rgba(24, 22, 20, 0.94);
+  background: color-mix(in srgb, var(--stm-surface) 95%, transparent);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   color: var(--stm-ink);

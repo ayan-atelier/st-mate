@@ -5,10 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  clearSurfaceOpacityGuard,
   clearTauriSafeAreaGuard,
   createTauriOverlayBackGuard,
   detectPlatform,
   hasActiveChatSelection,
+  parseCssColorRgba,
+  syncSurfaceOpacityGuard,
   syncTauriSafeAreaGuard,
 } from '../src/core/env.js';
 import {
@@ -12043,4 +12046,111 @@ test('v0.9.17 UX polish: 预设两行排版、收纳仓滚动位记忆不弹顶�
     globalThis.window = prevWin;
     globalThis.getComputedStyle = prevComputed;
   }
+});
+
+test('v0.9.18 surface opacity guard & Android/TT safe-top dedup: 防透明主题伴侣面板透字 + 安卓黑底状态栏顶栏去重留白', () => {
+  // 1. 颜色解析器覆盖 transparent / rgba / CSS4 / #hex
+  assert.deepEqual(parseCssColorRgba('transparent'), { r: 0, g: 0, b: 0, a: 0 });
+  assert.deepEqual(parseCssColorRgba('rgba(28, 35, 49, 0.25)'), { r: 28, g: 35, b: 49, a: 0.25 });
+  assert.deepEqual(parseCssColorRgba('rgb(28 35 49 / 50%)'), { r: 28, g: 35, b: 49, a: 0.5 });
+  assert.deepEqual(parseCssColorRgba('#1c2331'), { r: 28, g: 35, b: 49, a: 1 });
+
+  // 2. 面板防全透明保底：低透明主题优先采样原生不透明扩展面板色 (#1c2331)；正常不透明主题零干预
+  const { doc } = createMiniDomHarness();
+  const extDrawer = doc.createElement('div');
+  extDrawer.id = 'rm_extensions_block';
+  doc.body.append(extDrawer);
+
+  const mockGlassRoot = {
+    document: doc,
+    getComputedStyle(node) {
+      if (node === extDrawer) return { backgroundColor: 'rgb(28, 35, 49)' };
+      if (node?.style?.cssText?.includes('--SmartThemeBlurTintColor')) {
+        return { backgroundColor: 'rgba(20, 24, 34, 0.22)' };
+      }
+      return { backgroundColor: '' };
+    },
+  };
+  const glassRes = syncSurfaceOpacityGuard(mockGlassRoot);
+  assert.equal(glassRes.applied, true, '毛玻璃色调透明度 0.22 时应自动启用实底保底');
+  assert.equal(glassRes.resolved, 'rgba(28, 35, 49, 1)', '应精准采样原生已着色扩展面板同色系实底');
+  assert.equal(doc.documentElement.style.getPropertyValue('--stm-surface-override'), 'rgba(28, 35, 49, 1)');
+
+  // 切回正常不透明主题（如 0.92）应自动撤除覆写，零干预
+  const mockOpaqueRoot = {
+    document: doc,
+    getComputedStyle(node) {
+      if (node?.style?.cssText?.includes('--SmartThemeBlurTintColor')) {
+        return { backgroundColor: 'rgba(248, 246, 242, 0.94)' };
+      }
+      return { backgroundColor: '' };
+    },
+  };
+  const opaqueRes = syncSurfaceOpacityGuard(mockOpaqueRoot);
+  assert.equal(opaqueRes.applied, false, '不透明主题不应强行覆写 --stm-surface');
+  assert.equal(doc.documentElement.style.getPropertyValue('--stm-surface-override'), '');
+  clearSurfaceOpacityGuard(mockOpaqueRoot);
+
+  // 3. 安卓黑底状态栏 / TT 2.4 顶栏安全区去重护栏
+  const { doc: docAndroid } = createMiniDomHarness();
+  const bg1 = docAndroid.createElement('div');
+  bg1.id = 'bg1';
+  bg1.classList.add('tt-window-background');
+  docAndroid.body.append(bg1);
+
+  // 3a) TauriTavern 2.4：bg1 设了 top: -51px，即便 screenTop=0 也能识别视口已在状态栏之下
+  const tt24Root = {
+    document: docAndroid,
+    innerHeight: 800,
+    screen: { height: 851 },
+    devicePixelRatio: 3,
+    navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36' },
+    getComputedStyle(node) {
+      if (node === docAndroid.documentElement) {
+        return { getPropertyValue: k => (k === '--tt-inset-top' ? '51px' : '') };
+      }
+      if (node === bg1) return { top: '-51px' };
+      return { paddingTop: '51px', paddingBottom: '0px', height: '851px' };
+    },
+  };
+  const res24 = syncTauriSafeAreaGuard(tt24Root);
+  assert.equal(res24.applied, true, 'TT 2.4 负 top 壁纸应识别 WebView 已位于状态栏之下并清零重复安全区');
+  assert.equal(res24.reason, 'tt-window-bg-pullup');
+  assert.equal(docAndroid.documentElement.style.getPropertyValue('--stm-safe-top'), '0px');
+  clearTauriSafeAreaGuard(tt24Root);
+
+  // 3b) 安卓黑底状态栏（非沉浸，screen.height 851 - innerHeight 804 = 47px === safeTop）：清零重复安全区
+  const { doc: docKarrisa } = createMiniDomHarness();
+  const androidBlackBarRoot = {
+    document: docKarrisa,
+    innerHeight: 804,
+    screen: { height: 851 },
+    devicePixelRatio: 3,
+    navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Xiaomi) AppleWebKit/537.36' },
+    getComputedStyle(node) {
+      if (node === docKarrisa.documentElement) return { getPropertyValue: () => '' };
+      return { paddingTop: '47px', paddingBottom: '0px', height: '0px' };
+    },
+  };
+  const resBlack = syncTauriSafeAreaGuard(androidBlackBarRoot);
+  assert.equal(resBlack.applied, true, '安卓黑底状态栏已缩短视口高度时应消除伴侣顶栏重复留白');
+  assert.equal(resBlack.reason, 'android-screen-deficit');
+  assert.equal(docKarrisa.documentElement.style.getPropertyValue('--stm-safe-top'), '0px');
+
+  // 3c) 真正沉浸式透明状态栏（WebView 铺满全屏 innerHeight === screen.height = 851）：必须保留 safeTop 避开刘海！
+  const immersiveRoot = {
+    document: docKarrisa,
+    innerHeight: 851,
+    screen: { height: 851 },
+    devicePixelRatio: 3,
+    navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Tauri)' },
+    __TAURI__: {},
+    getComputedStyle(node) {
+      if (node === docKarrisa.documentElement) return { getPropertyValue: () => '' };
+      return { paddingTop: '47px', paddingBottom: '0px', height: '851px' };
+    },
+  };
+  const resImm = syncTauriSafeAreaGuard(immersiveRoot);
+  assert.equal(resImm.applied, false, '真正沉浸式透明状态栏下必须保留 --stm-safe-top 防止顶栏撞上系统时间');
+  assert.equal(docKarrisa.documentElement.style.getPropertyValue('--stm-safe-top'), '');
 });

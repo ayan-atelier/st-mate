@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.17",
+  "latest": "0.9.18",
   "releases": [
+    {
+      "version": "0.9.18",
+      "branch": "release-0.9.18",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "新增伴侣面板防全透明保底护栏：当当前酒馆主题把毛玻璃色调（--SmartThemeBlurTintColor）设为透明或极低透明度时，自动采样原生已着色抽屉或同色系实底垫实面板，彻底解决预设馆/Aa排版等抽屉透出聊天正文难以阅读的问题；升级安卓 TauriTavern 与手机 WebView 刘海安全区去重护栏，结合窗口壁纸上拉、--tt-window-height 与系统状态栏视口差值精准识别已占位黑底状态栏，消除伴侣顶栏顶部多垫一截空白的问题。"
+    },
     {
       "version": "0.9.17",
       "branch": "release-0.9.17",

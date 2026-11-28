@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.17';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.18';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.18';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.17';
+} from '../shell/host-actions.js?v=0.9.18';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,7 +23,7 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.17';
+} from './preset-backend.js?v=0.9.18';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -81,7 +81,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.17';
+} from './char-world-backend.js?v=0.9.18';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {

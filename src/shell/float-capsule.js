@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.17';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.17';
-import { toastMessage } from './host-actions.js?v=0.9.17';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.18';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.18';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.18';
+import { toastMessage } from './host-actions.js?v=0.9.18';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
