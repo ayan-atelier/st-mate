@@ -7,8 +7,8 @@
  * 4. 在输入框上方附件条实时展示小缩略图预览，支持纯发表情包免打字直接发送。
  */
 
-import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.9.14';
-import { svgMarkup } from '../core/icons.js?v=0.9.14';
+import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.9.15';
+import { svgMarkup } from '../core/icons.js?v=0.9.15';
 
 export const IMAGE_COMPRESS_THRESHOLD_BYTES = 380 * 1024;
 export const DESKTOP_IMAGE_MAX_EDGE = 1440;
@@ -276,6 +276,8 @@ export function createChatVision({
   let boundTextarea = null;
   let rightFormObserver = null;
   let observedRightForm = null;
+  let textareaObserver = null;
+  let observedTextarea = null;
   let resizeBound = false;
   let inliningNoticeShown = false;
   let busy = false;
@@ -396,6 +398,49 @@ export function createChatVision({
     void processAndAttachImages(allFiles);
   }
 
+  function clearTextareaClearance(textarea) {
+    if (!textarea?.classList) return;
+    textarea.classList.remove('stm-vision-pad-right', 'stm-vision-pad-bottom');
+  }
+
+  function syncTextareaClearance(doc = root?.document) {
+    const textarea = doc?.getElementById?.('send_textarea') || boundTextarea;
+    if (!textarea?.classList) return;
+    if (!btnEl || btnEl.hidden) {
+      clearTextareaClearance(textarea);
+      return;
+    }
+
+    const rawValue = String(textarea.value || '');
+    if (rawValue.length === 0) {
+      clearTextareaClearance(textarea);
+      return;
+    }
+
+    const alreadyBottom = Boolean(textarea.classList.contains('stm-vision-pad-bottom'));
+    const hasNewline = rawValue.includes('\n');
+    const rawScrollHeight = Number(textarea.scrollHeight || 0);
+    const rectHeight =
+      typeof textarea.getBoundingClientRect === 'function'
+        ? Number(textarea.getBoundingClientRect()?.height || 0)
+        : 0;
+    const measuredHeight = Math.max(rawScrollHeight, rectHeight);
+    const effectiveHeight =
+      alreadyBottom && measuredHeight > 30 ? measuredHeight - 28 : measuredHeight;
+
+    // 单调稳态切换（彻底杜绝 1~2 行临界字数来回抖动）：
+    // - 一旦文本换行或撑破单行高度，即切入 34px 专属底槽并保持满宽；
+    // - 切入后在本次草稿编辑期间锁定底槽不跳动，仅当发送清空或删至极短单行（<= 4 字）时收回。
+    const wantBottom = alreadyBottom
+      ? hasNewline || rawValue.length > 4 || effectiveHeight > 50
+      : measuredHeight > 0
+        ? hasNewline || effectiveHeight > 54
+        : hasNewline || rawValue.length >= 30;
+
+    textarea.classList.toggle('stm-vision-pad-bottom', wantBottom);
+    textarea.classList.toggle('stm-vision-pad-right', !wantBottom);
+  }
+
   function syncButtonOffset(doc = root?.document) {
     if (!btnEl || btnEl.hidden || !doc) return;
     const nonQR = doc.getElementById?.('nonQRFormItems');
@@ -414,14 +459,20 @@ export function createChatVision({
     const taRect = textarea.getBoundingClientRect();
     if (!wrapRect || !taRect || wrapRect.width <= 0 || taRect.width <= 0) return;
 
-    // 精准悬浮于 #send_textarea 右下角内侧（紧贴右下斜纹左侧，输入框多行撑高时前几排满宽、图标始终停在最后一行最右）
+    // 精准悬浮于 #send_textarea 右下角内侧（紧贴右下斜纹左侧，输入框多行撑高时停在底部专属留白槽右下角）
     const rightInset = Math.max(8, Math.round(wrapRect.right - taRect.right + 10));
     const bottomInset = Math.max(4, Math.round(wrapRect.bottom - taRect.bottom + 6));
     btnEl.style.setProperty('--stm-img-btn-right', `${rightInset}px`);
     btnEl.style.setProperty('--stm-img-btn-bottom', `${bottomInset}px`);
   }
 
+  function onTextareaInput() {
+    syncTextareaClearance();
+    syncButtonOffset();
+  }
+
   function onViewportResize() {
+    syncTextareaClearance();
     syncButtonOffset();
   }
 
@@ -437,11 +488,34 @@ export function createChatVision({
 
     const textarea = doc?.getElementById?.('send_textarea') || null;
     if (textarea !== boundTextarea) {
-      boundTextarea?.removeEventListener?.('paste', onTextareaPaste, true);
+      if (boundTextarea) {
+        boundTextarea.removeEventListener?.('paste', onTextareaPaste, true);
+        boundTextarea.removeEventListener?.('input', onTextareaInput, true);
+        boundTextarea.removeEventListener?.('change', onTextareaInput);
+        boundTextarea.removeEventListener?.('compositionend', onTextareaInput);
+        clearTextareaClearance(boundTextarea);
+      }
       if (textarea) {
         textarea.addEventListener?.('paste', onTextareaPaste, true);
+        // 捕获阶段先更新留白类，确保酒馆自身的 input 自动增高计算立刻包含 34px 底槽高度
+        textarea.addEventListener?.('input', onTextareaInput, true);
+        textarea.addEventListener?.('change', onTextareaInput);
+        textarea.addEventListener?.('compositionend', onTextareaInput);
       }
       boundTextarea = textarea;
+    }
+
+    if (textarea !== observedTextarea) {
+      textareaObserver?.disconnect?.();
+      textareaObserver = null;
+      if (textarea && typeof root?.ResizeObserver === 'function') {
+        // ResizeObserver 仅同步微标几何定位，绝不在此反改 padding 类，彻底杜绝临界字数反馈震荡
+        textareaObserver = new root.ResizeObserver(() => {
+          syncButtonOffset(doc);
+        });
+        textareaObserver.observe(textarea);
+      }
+      observedTextarea = textarea;
     }
 
     const rightSend = doc?.getElementById?.('rightSendForm') || null;
@@ -523,6 +597,7 @@ export function createChatVision({
       if (btnEl) {
         btnEl.hidden = true;
       }
+      clearTextareaClearance(doc.getElementById?.('send_textarea') || boundTextarea);
       if (!s.shellEnabled || !s.chatImageButton) {
         btnEl?.remove?.();
         pickerEl?.remove?.();
@@ -536,6 +611,7 @@ export function createChatVision({
     ensureButtonMounted(doc);
     if (btnEl) {
       btnEl.hidden = false;
+      syncTextareaClearance(doc);
       syncButtonOffset(doc);
     }
   }
@@ -550,12 +626,21 @@ export function createChatVision({
     rightFormObserver?.disconnect?.();
     rightFormObserver = null;
     observedRightForm = null;
+    textareaObserver?.disconnect?.();
+    textareaObserver = null;
+    observedTextarea = null;
     if (resizeBound && typeof root?.removeEventListener === 'function') {
       root.removeEventListener('resize', onViewportResize);
       resizeBound = false;
     }
     boundFileForm?.removeEventListener?.('reset', onFileFormReset);
-    boundTextarea?.removeEventListener?.('paste', onTextareaPaste, true);
+    if (boundTextarea) {
+      boundTextarea.removeEventListener?.('paste', onTextareaPaste, true);
+      boundTextarea.removeEventListener?.('input', onTextareaInput, true);
+      boundTextarea.removeEventListener?.('change', onTextareaInput);
+      boundTextarea.removeEventListener?.('compositionend', onTextareaInput);
+      clearTextareaClearance(boundTextarea);
+    }
     boundFileForm = null;
     boundTextarea = null;
     btnEl?.remove?.();

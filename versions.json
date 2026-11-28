@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.14",
+  "latest": "0.9.15",
   "releases": [
+    {
+      "version": "0.9.15",
+      "branch": "release-0.9.15",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "优化底栏一键发图（识图）微标的输入框智能避让：空框零增高、单行右侧留安全距、多行或语音长段自动切换整行满宽并在最下方留出 34px 专属底槽（含单调稳态防抖，彻底解决长文本末尾改错字误触与临界字数闪动）。"
+    },
     {
       "version": "0.9.14",
       "branch": "release-0.9.14",

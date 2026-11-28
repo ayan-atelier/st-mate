@@ -6706,10 +6706,56 @@ test('v0.7.8: 原版顶栏模式 (T键变Aa/齿轮保原版/角色页回书架) 
     fileForm.dispatchEvent({ type: 'reset' });
     assert.equal(imgBtn.classList.contains('has-attachment'), false, '清空附件后微标恢复低调半透明态');
 
+    // 验证输入框智能避让：空框无额外留白 -> 单行短字右侧避让 -> 多行/语音长段切 34px 独立底槽防末尾改错字误触 -> 清空还原
+    const sendTextareaEl = doc.getElementById('send_textarea');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), false, '空输入框零额外右留白');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), false, '空输入框零额外底留白');
+
+    sendTextareaEl.value = '你好呀';
+    sendTextareaEl.scrollHeight = 38;
+    const origTaRect = sendTextareaEl.getBoundingClientRect;
+    sendTextareaEl.getBoundingClientRect = () => ({ left: 40, right: 350, top: 0, bottom: 38, width: 310, height: 38 });
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), true, '单行短文本右侧自动留出图标安全距');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), false, '单行短文本不撑高底槽');
+
+    sendTextareaEl.value = '老大！语音输入特别长的一段话，如果末尾要改错字的话，千万不要和上传图片图标重叠呀！';
+    sendTextareaEl.scrollHeight = 112;
+    sendTextareaEl.getBoundingClientRect = origTaRect;
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), true, '多行/长文本自动启用 34px 专属底槽，末尾文字彻底高于图标零重叠');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), false, '多行态恢复整行满宽显示');
+
+    // 临界字数防抖动回归（如 17 字在去掉右留白后缩回 1 行高度时，绝不回弹震荡）
+    sendTextareaEl.value = '腊八快乐腊肉八快乐腊腊八快乐腊八快';
+    sendTextareaEl.scrollHeight = 66;
+    sendTextareaEl.getBoundingClientRect = () => ({ left: 40, right: 350, top: 0, bottom: 66, width: 310, height: 66 });
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), true, '17 字临界字数保持底槽稳态绝不回弹闪动');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), false);
+
+    // 删至极短单行（<= 4 字）时平稳退回单行右留白态
+    sendTextareaEl.value = '腊八';
+    sendTextareaEl.scrollHeight = 66;
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), false, '删至极短单行平滑收回底槽');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), true);
+
+    sendTextareaEl.value = '';
+    sendTextareaEl.scrollHeight = 38;
+    sendTextareaEl.getBoundingClientRect = origTaRect;
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), false, '发送/清空后立刻收回底槽');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-right'), false, '发送/清空后立刻收回右留白');
+
     // 纯文字 RP 玩家关闭发图开关后，底栏按钮立即彻底移除零残留
+    sendTextareaEl.value = '一行文字\n二行文字';
+    sendTextareaEl.dispatchEvent({ type: 'input' });
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), true);
     store.update({ chatImageButton: false });
     chatVision.refresh();
     assert.equal(doc.getElementById('stm-send-image-btn'), null, '关闭发图开关后彻底移除底栏图片按钮');
+    assert.equal(sendTextareaEl.classList.contains('stm-vision-pad-bottom'), false, '关闭发图开关同步清理输入框底槽类');
 
     chatVision.destroy();
     extTidy.destroy();

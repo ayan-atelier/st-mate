@@ -2799,6 +2799,15 @@ body.stm-turbo-mobile .popup {
   position: relative;
 }
 
+/* 智能避让输入文字：单行时右侧留出图标宽，多行/语音长段切满宽并在底边留出 34px 专属底槽，避免选末尾改错字误触发图 */
+body.stm-shell-active #nonQRFormItems:has(> .stm-send-image-btn:not([hidden])) #send_textarea.stm-vision-pad-right {
+  padding-right: 36px !important;
+}
+
+body.stm-shell-active #nonQRFormItems:has(> .stm-send-image-btn:not([hidden])) #send_textarea.stm-vision-pad-bottom {
+  padding-bottom: 34px !important;
+}
+
 .stm-send-image-btn {
   position: absolute;
   right: var(--stm-img-btn-right, calc(var(--bottomFormBlockSize, 36px) + 12px));
