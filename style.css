@@ -36,7 +36,7 @@ body.stm-shell-active:not(.stm-native-topbar) {
   --topBarBlockSize: 0px !important;
 }
 
-body.stm-shell-active.stm-home-cloak {
+body.stm-shell-active.stm-home-cloak.stm-hide-home-composer {
   --bottomFormBlockSize: var(--stm-safe-bottom) !important;
 }
 
@@ -374,6 +374,7 @@ body.stm-shell-active.stm-native-topbar.stm-pure-reading:not(.stm-native-drawer-
   pointer-events: none !important;
 }
 
+html body.stm-shell-active.stm-home-cloak.stm-hide-home-composer #sheld#sheld #form_sheld#form_sheld,
 body.stm-shell-active.stm-home-cloak.stm-hide-home-composer #form_sheld,
 body.stm-shell-active.stm-home-cloak.stm-hide-home-composer #form_sheld#form_sheld {
   display: none !important;

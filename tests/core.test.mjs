@@ -12315,3 +12315,64 @@ test('v0.9.20 index.js full-boot smoke test: 非 Tauri 普通手机/桌面浏览
     }
   }
 });
+
+test('v0.9.21 home composer --bottomFormBlockSize guard & 美化-反色 data-th-color-preserve compat', async () => {
+  // 1. 校验 style.css 仅在 .stm-hide-home-composer 态压平 --bottomFormBlockSize，不伤及显示底栏时的三横/魔法棒宽度
+  const cssPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'style.css');
+  const cssText = fs.readFileSync(cssPath, 'utf8');
+  assert.match(
+    cssText,
+    /body\.stm-shell-active\.stm-home-cloak\.stm-hide-home-composer\s*\{\s*--bottomFormBlockSize:\s*var\(--stm-safe-bottom\)\s*!important;/,
+    '--bottomFormBlockSize 归零规则必须严格限定在 .stm-hide-home-composer 隐藏态，避免小猫毡等主题三横与魔法棒重叠',
+  );
+  assert.doesNotMatch(
+    cssText,
+    /body\.stm-shell-active\.stm-home-cloak\s*\{\s*--bottomFormBlockSize:/,
+    '不得在无条件 stm-home-cloak 下压零 --bottomFormBlockSize',
+  );
+
+  // 2. 校验顶栏头像与角色档案立绘/名录图均挂上 data-th-color-preserve="1"，原生兼容美化-反色脚本
+  const { doc } = createMiniDomHarness();
+  const prevDoc = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const ctx = {
+      characterId: 0,
+      characters: [
+        {
+          name: '五条悟',
+          avatar: 'gojo.png',
+          description: '设定内容',
+          data: { description: '设定内容' },
+        },
+      ],
+      extensionSettings: { st_mate: { shellEnabled: true, topbarMode: 'rp' } },
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const moduleBridge = createModuleBridge({ root: globalThis, getContext: () => ctx, store });
+    const topbar = createTopbar({ getContext: () => ctx, store, moduleBridge });
+    topbar.refresh();
+    const topAvatar = doc.getElementById('stm-topbar')?.querySelector('.stm-topbar-avatar');
+    assert.equal(
+      topAvatar?.getAttribute?.('data-th-color-preserve'),
+      '1',
+      '伴侣顶栏头像应带 data-th-color-preserve="1" 保色标记',
+    );
+    topbar.destroy();
+
+    const cwDock = createCharWorldDock({ getContext: () => ctx, store });
+    cwDock.open('char');
+    const portraitImg = doc.getElementById('stm-char-world-dock')?.querySelector('.stm-cw-portrait-img');
+    assert.equal(
+      portraitImg?.getAttribute?.('data-th-color-preserve'),
+      '1',
+      '角色档案立绘应带 data-th-color-preserve="1" 保色标记',
+    );
+    await new Promise(r => setTimeout(r, 20));
+    cwDock.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});

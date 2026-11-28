@@ -7,8 +7,8 @@
  * 4. 在输入框上方附件条实时展示小缩略图预览，支持纯发表情包免打字直接发送。
  */
 
-import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.9.20';
-import { svgMarkup } from '../core/icons.js?v=0.9.20';
+import { detectPlatform, hasActiveChatSelection } from '../core/env.js?v=0.9.21';
+import { svgMarkup } from '../core/icons.js?v=0.9.21';
 
 export const IMAGE_COMPRESS_THRESHOLD_BYTES = 380 * 1024;
 export const DESKTOP_IMAGE_MAX_EDGE = 1440;
@@ -328,6 +328,7 @@ export function createChatVision({
         img.src = previewUrl;
         img.alt = imgFile.name || '';
         img.decoding = 'async';
+        img.setAttribute('data-th-color-preserve', '1');
         thumbWrapEl.appendChild(img);
       } catch {
         // ignore preview failure in restricted env

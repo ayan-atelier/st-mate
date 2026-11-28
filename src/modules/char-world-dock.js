@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.20';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.20';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.21';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.21';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.20';
+} from '../shell/host-actions.js?v=0.9.21';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,7 +23,7 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.20';
+} from './preset-backend.js?v=0.9.21';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -81,7 +81,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.20';
+} from './char-world-backend.js?v=0.9.21';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -398,6 +398,7 @@ export function createCharWorldDock({
     const img = el('img', 'stm-portrait-lightbox-img');
     img.src = imageUrl;
     img.alt = titleText || '角色立绘';
+    img.setAttribute('data-th-color-preserve', '1');
 
     const captionBar = el('div', 'stm-portrait-lightbox-bar');
     captionBar.append(el('span', 'stm-portrait-lightbox-title', titleText || '角色立绘'));
@@ -934,6 +935,7 @@ export function createCharWorldDock({
     const img = el('img', 'stm-cw-portrait-img');
     img.src = profile.portraitUrl || profile.thumbUrl;
     img.alt = profile.name;
+    img.setAttribute('data-th-color-preserve', '1');
     const zoomHint = el('span', 'stm-cw-portrait-zoom');
     zoomHint.innerHTML = svgMarkup('maximize');
     portraitBtn.append(img, zoomHint);
@@ -1165,6 +1167,7 @@ export function createCharWorldDock({
     const portraitStage = el('div', 'stm-cw-portrait-stage');
     if (activeArtUrl) {
       const ambientBg = el('div', 'stm-cw-portrait-ambient');
+      ambientBg.setAttribute('data-th-color-preserve', '1');
       ambientBg.style.setProperty('--stm-char-art', `url(${JSON.stringify(activeArtUrl)})`);
       portraitStage.append(ambientBg);
     }
@@ -1175,6 +1178,7 @@ export function createCharWorldDock({
     const portraitImg = el('img', 'stm-cw-portrait-img');
     portraitImg.src = activeArtUrl;
     portraitImg.alt = profile.name;
+    portraitImg.setAttribute('data-th-color-preserve', '1');
     portraitImg.style.objectPosition = `${activeCrop.x}% ${activeCrop.y}%`;
     const zoomIcon = el('span', 'stm-cw-portrait-zoom');
     zoomIcon.innerHTML = svgMarkup('maximize');
@@ -1525,6 +1529,7 @@ export function createCharWorldDock({
       const pImg = el('img', 'stm-cw-cover-thumb-img');
       pImg.src = primaryArtUrl;
       pImg.alt = '原卡图';
+      pImg.setAttribute('data-th-color-preserve', '1');
       pImg.style.objectPosition = `${galleryState.primaryCrop.x}% ${galleryState.primaryCrop.y}%`;
       primaryThumbBtn.append(pImg, el('span', 'stm-cw-cover-thumb-tag', '原卡'));
       primaryThumbBtn.addEventListener('click', () => {
@@ -1546,6 +1551,7 @@ export function createCharWorldDock({
         const gImg = el('img', 'stm-cw-cover-thumb-img');
         gImg.src = resolveGalleryImageHref(item.url);
         gImg.alt = '';
+        gImg.setAttribute('data-th-color-preserve', '1');
         gImg.style.objectPosition = `${item.x}% ${item.y}%`;
         pickBtn.append(gImg);
         pickBtn.addEventListener('click', () => {
@@ -2211,6 +2217,7 @@ export function createCharWorldDock({
         img.alt = '';
         img.loading = 'lazy';
         img.decoding = 'async';
+        img.setAttribute('data-th-color-preserve', '1');
         img.src = item.thumbUrl;
         img.addEventListener('error', () => img.remove());
         coverBox.append(img);

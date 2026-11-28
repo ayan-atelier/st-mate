@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.20",
+  "latest": "0.9.21",
   "releases": [
+    {
+      "version": "0.9.21",
+      "branch": "release-0.9.21",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "修复首页保留底部输入栏（或搭配《小猫毡》等主题显示底栏）时 --bottomFormBlockSize 被归零导致左下角三横与魔法棒重叠、发送键被挤窄的问题；兼容《美化-反色 3.8.7》等界面调色脚本，为伴侣顶栏头像、角色立绘/灯箱、多封面缩略图、角色名录封面与发图缩略图统一补齐 data-th-color-preserve 官方保色标记（配套《砚台 · 角色书架 v1.5.6》同步支持）。"
+    },
     {
       "version": "0.9.20",
       "branch": "release-0.9.20",
