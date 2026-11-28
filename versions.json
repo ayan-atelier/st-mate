@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.19",
+  "latest": "0.9.20",
   "releases": [
+    {
+      "version": "0.9.20",
+      "branch": "release-0.9.20",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "紧急修复 v0.9.18 / v0.9.19 在非 TauriTavern 普通浏览器环境下因 index.js 遗漏 platform 声明导致启动中止、入口消失的问题，并新增 index.js 全链路实装启动冒烟单测防回归。"
+    },
     {
       "version": "0.9.19",
       "branch": "release-0.9.19",

@@ -39,7 +39,7 @@ import {
   sanitizeAssetUrl,
 } from '../src/core/schema.js';
 import { INTERACTIVE_ANCESTOR_SELECTOR, shouldTogglePureReading } from '../src/core/tap-guard.js';
-import { CONTROL_REGISTRY_KEY, MODULE_DESCRIPTORS, createModuleBridge } from '../src/core/registry.js';
+import { CONTROL_REGISTRY_KEY, MODULE_DESCRIPTORS, STM_RUNTIME_KEY, createModuleBridge } from '../src/core/registry.js';
 import {
   COMPANION_PLUGINS,
   compareSemver,
@@ -12238,5 +12238,80 @@ test('v0.9.19 input-helper protection inside #qr--bar & bookshelf independent to
     dialog.destroy();
   } finally {
     globalThis.document = prevDoc;
+  }
+});
+
+test('v0.9.20 index.js full-boot smoke test: 非 Tauri 普通手机/桌面浏览器导入 index.js 并完整 enable()/disable() 零 ReferenceError', async () => {
+  const { doc } = createMiniDomHarness();
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevST = globalThis.SillyTavern;
+  const prevComputed = globalThis.getComputedStyle;
+  const prevRuntime = globalThis[STM_RUNTIME_KEY];
+  const prevNavDesc = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+
+  const topBar = doc.createElement('div');
+  topBar.id = 'top-bar';
+  const holder = doc.createElement('div');
+  holder.id = 'top-settings-holder';
+  topBar.append(holder);
+  const sheld = doc.createElement('div');
+  sheld.id = 'sheld';
+  const chat = doc.createElement('div');
+  chat.id = 'chat';
+  sheld.append(chat);
+  doc.body.append(topBar, sheld);
+
+  const mockCtx = {
+    characterId: undefined,
+    characters: [],
+    extensionSettings: {
+      st_mate: { shellEnabled: true, topbarMode: 'native', welcomeGuideDismissed: true },
+    },
+    eventSource: {
+      on() {},
+      removeListener() {},
+    },
+    event_types: {
+      APP_READY: 'app_ready',
+      CHAT_CHANGED: 'chat_changed',
+      SETTINGS_UPDATED: 'settings_updated',
+    },
+    saveSettingsDebounced() {},
+  };
+
+  globalThis.document = doc;
+  globalThis.window = globalThis;
+  globalThis.SillyTavern = { getContext: () => mockCtx };
+  globalThis.getComputedStyle = () => ({
+    backgroundColor: 'rgba(24, 24, 28, 0.92)',
+    paddingTop: '0px',
+    paddingBottom: '0px',
+    height: '0px',
+    getPropertyValue: () => '',
+  });
+  delete globalThis[STM_RUNTIME_KEY];
+
+  try {
+    const mod = await import('../index.js?smoke=1');
+    assert.equal(typeof mod.onEnable, 'function');
+    assert.equal(typeof mod.onDisable, 'function');
+    assert.ok(globalThis[STM_RUNTIME_KEY], '非 Tauri 浏览器导入 index.js 后必须零报错完成 runtime 挂载');
+    await new Promise(r => setTimeout(r, 30));
+    mod.onDisable();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.SillyTavern = prevST;
+    globalThis.getComputedStyle = prevComputed;
+    if (prevRuntime === undefined) delete globalThis[STM_RUNTIME_KEY];
+    else globalThis[STM_RUNTIME_KEY] = prevRuntime;
+    if (prevNavDesc) {
+      try {
+        Object.defineProperty(globalThis, 'navigator', prevNavDesc);
+      } catch {
+        // ignore read-only navigator
+      }
+    }
   }
 });
