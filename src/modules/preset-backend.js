@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
-import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.11';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.12';
+import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.12';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 
@@ -2569,6 +2569,13 @@ export function duplicatePromptEntry(
     ? [...srcPrompt.injection_trigger]
     : [];
 
+  // 若原条目归属某个分组（含柏宝箱分组），副本自动归入同一分组
+  const existingGroups = readPresetPromptGroups(oaiSettings, { promptManager });
+  const srcGroupId = existingGroups.prompts[sourceIdentifier]?.groupId || '';
+  if (srcGroupId) {
+    assignPromptToGroup(oaiSettings, created.identifier, srcGroupId, { promptManager });
+  }
+
   return { ok: true, prompt: created, insertIndex };
 }
 
@@ -2596,7 +2603,367 @@ export function deleteCustomPromptEntry(oaiSettings, identifier) {
     }
   }
 
+  const bbGroups = oaiSettings?.extensions?.baibaiToolkit?.presetPromptGroups;
+  if (bbGroups?.prompts && typeof bbGroups.prompts === 'object' && identifier in bbGroups.prompts) {
+    delete bbGroups.prompts[identifier];
+  }
+
   return { ok: true, deletedId: identifier };
+}
+
+// =============================================================================
+// 预设提示词条目分组（100% 双向兼容柏宝箱 `extensions.baibaiToolkit.presetPromptGroups`
+// 并兼容读取第三方 `extensions.entryGrouping` 成员列表 / 起止范围两种格式）
+// =============================================================================
+
+function normalizePresetPromptGroupStateInternal(rawState, validPromptIds = null) {
+  const rawGroups = Array.isArray(rawState?.groups) ? rawState.groups : [];
+  const seenGroupIds = new Set();
+  const groups = rawGroups
+    .filter(g => g && typeof g === 'object' && String(g.id || '').trim())
+    .map((g, idx) => ({
+      id: String(g.id).trim(),
+      name: String(g.name || '未命名分组').trim().slice(0, 60) || '未命名分组',
+      order: Number.isFinite(Number(g.order)) ? Number(g.order) : idx,
+      collapsed: Boolean(g.collapsed),
+      enabled: g.enabled !== false,
+    }))
+    .sort((a, b) => a.order - b.order)
+    .filter(g => {
+      if (seenGroupIds.has(g.id)) return false;
+      seenGroupIds.add(g.id);
+      return true;
+    })
+    .map((g, idx) => ({ ...g, order: idx }));
+
+  const validGroupIds = new Set(groups.map(g => g.id));
+  const prompts = {};
+  const rawPrompts = rawState?.prompts && typeof rawState.prompts === 'object' ? rawState.prompts : {};
+  for (const [promptId, meta] of Object.entries(rawPrompts)) {
+    const gid = typeof meta === 'string' ? meta.trim() : String(meta?.groupId || '').trim();
+    if (!gid || !validGroupIds.has(gid)) continue;
+    if (validPromptIds instanceof Set && !validPromptIds.has(promptId)) continue;
+    prompts[promptId] = { groupId: gid };
+  }
+
+  return { groups, prompts };
+}
+
+function parseCompatEntryGroupingToBaiBaiState(entryGrouping, orderedPromptIds = []) {
+  if (!entryGrouping || !orderedPromptIds.length) return null;
+  let list = [];
+  if (Array.isArray(entryGrouping)) {
+    list = entryGrouping;
+  } else if (typeof entryGrouping === 'object') {
+    for (const k of ['groups', 'entries', 'entryGroups', 'items']) {
+      if (Array.isArray(entryGrouping[k])) {
+        list = entryGrouping[k];
+        break;
+      }
+    }
+  }
+  if (!list.length) return null;
+
+  const validSet = new Set(orderedPromptIds);
+
+  // 1) 优先尝试成员列表格式 (memberIdentifiers)
+  const memberGroups = [];
+  const memberPrompts = {};
+  const memberAssigned = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (!item || typeof item !== 'object' || !Array.isArray(item.memberIdentifiers)) continue;
+    const ids = item.memberIdentifiers
+      .map(v => String(v || '').trim())
+      .filter(id => id && validSet.has(id) && !memberAssigned.has(id));
+    if (!ids.length) continue;
+    const gid = String(item.id || `eg_m_${i + 1}`).trim();
+    memberGroups.push({
+      id: gid,
+      name: String(item.name || '未命名分组').trim().slice(0, 60) || '未命名分组',
+      order: i,
+      collapsed: item.collapsed !== false,
+      enabled: item.enabled !== false,
+    });
+    for (const id of ids) {
+      memberAssigned.add(id);
+      memberPrompts[id] = { groupId: gid };
+    }
+  }
+  if (memberGroups.length > 0 && Object.keys(memberPrompts).length > 0) {
+    return normalizePresetPromptGroupStateInternal(
+      { groups: memberGroups, prompts: memberPrompts },
+      validSet,
+    );
+  }
+
+  // 2) 回退起止范围格式 (startIdentifier / endIdentifier)
+  const rangeGroups = [];
+  const rangePrompts = {};
+  const rangeAssigned = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i];
+    if (!item || typeof item !== 'object') continue;
+    const startIdx = orderedPromptIds.indexOf(String(item.startIdentifier || ''));
+    const endIdx = orderedPromptIds.indexOf(String(item.endIdentifier || ''));
+    if (startIdx < 0 || endIdx < 0) continue;
+    const exclusive = String(item.mode || 'inclusive').toLowerCase() === 'exclusive';
+    const from = Math.min(startIdx, endIdx) + (exclusive ? 1 : 0);
+    const to = Math.max(startIdx, endIdx) - (exclusive ? 1 : 0);
+    if (from > to) continue;
+    const gid = String(item.id || `eg_r_${i + 1}`).trim();
+    rangeGroups.push({
+      id: gid,
+      name: String(item.name || '未命名分组').trim().slice(0, 60) || '未命名分组',
+      order: i,
+      collapsed: item.collapsed !== false,
+      enabled: item.enabled !== false,
+    });
+    for (const pid of orderedPromptIds.slice(from, to + 1)) {
+      if (!validSet.has(pid) || rangeAssigned.has(pid)) continue;
+      rangeAssigned.add(pid);
+      rangePrompts[pid] = { groupId: gid };
+    }
+  }
+  if (rangeGroups.length > 0 && Object.keys(rangePrompts).length > 0) {
+    return normalizePresetPromptGroupStateInternal(
+      { groups: rangeGroups, prompts: rangePrompts },
+      validSet,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * 读取当前预设的提示词分组配置（优先读取柏宝箱 `extensions.baibaiToolkit.presetPromptGroups`，
+ * 兼容读取第三方 `extensions.entryGrouping`）。
+ */
+export function readPresetPromptGroups(
+  oaiSettings,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const ordered = readOrderedPromptEntries(oaiSettings, { promptManager });
+  const orderedIds = ordered.entries.map(e => e.identifier);
+  const validSet = new Set(orderedIds);
+
+  const directRaw =
+    oaiSettings?.extensions?.baibaiToolkit?.presetPromptGroups ??
+    fallbackPreset?.extensions?.baibaiToolkit?.presetPromptGroups ??
+    null;
+
+  if (directRaw && typeof directRaw === 'object') {
+    const normalized = normalizePresetPromptGroupStateInternal(directRaw, validSet);
+    if (normalized.groups.length > 0) {
+      return { ...normalized, source: 'baibai' };
+    }
+  }
+
+  const compatRaw =
+    oaiSettings?.extensions?.entryGrouping ?? fallbackPreset?.extensions?.entryGrouping ?? null;
+  if (compatRaw) {
+    const converted = parseCompatEntryGroupingToBaiBaiState(compatRaw, orderedIds);
+    if (converted && converted.groups.length > 0) {
+      return { ...converted, source: 'entryGrouping' };
+    }
+  }
+
+  return { groups: [], prompts: {}, source: 'none' };
+}
+
+/**
+ * 无损写回预设分组配置至柏宝箱同款字段 `oaiSettings.extensions.baibaiToolkit.presetPromptGroups`
+ * （严守 `{ groups, prompts: { [id]: { groupId } } }` 契约，保留其他扩展字段不动）。
+ */
+export function writePresetPromptGroups(oaiSettings, groupState) {
+  if (!oaiSettings || typeof oaiSettings !== 'object') {
+    return { groups: [], prompts: {} };
+  }
+  const normalized = normalizePresetPromptGroupStateInternal(groupState);
+  if (normalized.groups.length === 0) {
+    if (oaiSettings.extensions?.baibaiToolkit) {
+      delete oaiSettings.extensions.baibaiToolkit.presetPromptGroups;
+      if (Object.keys(oaiSettings.extensions.baibaiToolkit).length === 0) {
+        delete oaiSettings.extensions.baibaiToolkit;
+      }
+    }
+    return normalized;
+  }
+
+  if (!oaiSettings.extensions || typeof oaiSettings.extensions !== 'object') {
+    oaiSettings.extensions = {};
+  }
+  if (
+    !oaiSettings.extensions.baibaiToolkit ||
+    typeof oaiSettings.extensions.baibaiToolkit !== 'object'
+  ) {
+    oaiSettings.extensions.baibaiToolkit = {};
+  }
+  oaiSettings.extensions.baibaiToolkit.presetPromptGroups = structuredClone(normalized);
+  return normalized;
+}
+
+export function createPresetPromptGroup(
+  oaiSettings,
+  name,
+  { initialPromptIds = [], fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const cleanName = String(name || '').trim().slice(0, 60);
+  if (!cleanName || !oaiSettings || typeof oaiSettings !== 'object') {
+    return { ok: false, reason: 'invalid_name' };
+  }
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const id = `stm_pg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const group = {
+    id,
+    name: cleanName,
+    order: state.groups.length,
+    collapsed: false,
+    enabled: true,
+  };
+  state.groups.push(group);
+  for (const pid of Array.isArray(initialPromptIds) ? initialPromptIds : []) {
+    const cleanId = String(pid || '').trim();
+    if (cleanId) {
+      state.prompts[cleanId] = { groupId: id };
+    }
+  }
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, group, state: saved };
+}
+
+export function renamePresetPromptGroup(
+  oaiSettings,
+  groupId,
+  newName,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const cleanName = String(newName || '').trim().slice(0, 60);
+  if (!cleanName) return { ok: false, reason: 'invalid_name' };
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const target = state.groups.find(g => g.id === groupId);
+  if (!target) return { ok: false, reason: 'not_found' };
+  target.name = cleanName;
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, group: target, state: saved };
+}
+
+/**
+ * 解散指定预设分组（仅解除分组归属，所有提示词条目安全回到「未分组」，绝不删除任何条目本身）。
+ */
+export function deletePresetPromptGroup(
+  oaiSettings,
+  groupId,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const nextGroups = state.groups.filter(g => g.id !== groupId);
+  if (nextGroups.length === state.groups.length) {
+    return { ok: false, reason: 'not_found' };
+  }
+  const nextPrompts = {};
+  for (const [pid, meta] of Object.entries(state.prompts)) {
+    if (meta?.groupId !== groupId) {
+      nextPrompts[pid] = meta;
+    }
+  }
+  const saved = writePresetPromptGroups(oaiSettings, { groups: nextGroups, prompts: nextPrompts });
+  return { ok: true, state: saved };
+}
+
+export function setPresetPromptGroupCollapsed(
+  oaiSettings,
+  groupId,
+  collapsed,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const target = state.groups.find(g => g.id === groupId);
+  if (!target) return { ok: false, reason: 'not_found' };
+  target.collapsed = Boolean(collapsed);
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, collapsed: target.collapsed, state: saved };
+}
+
+export function setAllPresetPromptGroupsCollapsed(
+  oaiSettings,
+  collapsed,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  if (state.groups.length === 0) return { ok: false, reason: 'empty' };
+  for (const g of state.groups) {
+    g.collapsed = Boolean(collapsed);
+  }
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, state: saved };
+}
+
+/**
+ * 一键启用或停用指定分组内的全部提示词条目，并同步更新分组 `enabled` 状态。
+ */
+export function setPresetPromptGroupEnabled(
+  oaiSettings,
+  groupId,
+  enabled,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const target = state.groups.find(g => g.id === groupId);
+  if (!target) return { ok: false, reason: 'not_found' };
+  const nextEnabled = Boolean(enabled);
+  target.enabled = nextEnabled;
+  const affectedIds = [];
+  for (const [pid, meta] of Object.entries(state.prompts)) {
+    if (meta?.groupId === groupId) {
+      togglePromptEntryEnabled(oaiSettings, pid, nextEnabled, { promptManager });
+      affectedIds.push(pid);
+    }
+  }
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, enabled: nextEnabled, affectedIds, state: saved };
+}
+
+export function assignPromptToGroup(
+  oaiSettings,
+  identifier,
+  groupId,
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const cleanPid = String(identifier || '').trim();
+  if (!cleanPid) return { ok: false, reason: 'invalid_prompt' };
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const cleanGid = String(groupId || '').trim();
+  if (!cleanGid) {
+    delete state.prompts[cleanPid];
+  } else {
+    if (!state.groups.some(g => g.id === cleanGid)) {
+      return { ok: false, reason: 'group_not_found' };
+    }
+    state.prompts[cleanPid] = { groupId: cleanGid };
+  }
+  const saved = writePresetPromptGroups(oaiSettings, state);
+  return { ok: true, state: saved };
+}
+
+export function movePresetPromptGroupOrder(
+  oaiSettings,
+  groupId,
+  direction = 'up',
+  { fallbackPreset = null, promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const state = readPresetPromptGroups(oaiSettings, { fallbackPreset, promptManager });
+  const idx = state.groups.findIndex(g => g.id === groupId);
+  if (idx < 0) return false;
+  const nextIdx = direction === 'down' ? idx + 1 : idx - 1;
+  if (nextIdx < 0 || nextIdx >= state.groups.length) return false;
+  const [moved] = state.groups.splice(idx, 1);
+  state.groups.splice(nextIdx, 0, moved);
+  state.groups.forEach((g, i) => {
+    g.order = i;
+  });
+  writePresetPromptGroups(oaiSettings, state);
+  return true;
 }
 
 /**

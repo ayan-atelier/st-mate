@@ -6,14 +6,14 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.11';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.12';
 import {
   EM_ITALIC_MODES,
   TEXT_DECO_STYLES,
   hexLuminance,
   sanitizeHexColor,
-} from '../core/schema.js?v=0.9.11';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.11';
+} from '../core/schema.js?v=0.9.12';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.12';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',

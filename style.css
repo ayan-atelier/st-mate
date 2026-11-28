@@ -4146,6 +4146,39 @@ body.stm-turbo-mobile .stm-float-slot {
   white-space: nowrap;
 }
 
+.stm-float-pop-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stm-float-rescan-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  cursor: pointer;
+}
+
+.stm-float-rescan-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.stm-float-rescan-btn:hover {
+  border-color: var(--stm-accent) !important;
+  color: var(--stm-ink) !important;
+  background: color-mix(in srgb, var(--stm-accent) 16%, transparent) !important;
+}
+
 .stm-float-raw-toggle {
   appearance: none;
   padding: 2px 7px;
@@ -6414,6 +6447,173 @@ body.stm-shell-active.stm-pure-reading .stm-preset-dock {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+/* 极简条目分组（预设馆兼容柏宝箱分组 & 世界书视图分组共用细线语言，零分组时完全隐身） */
+.stm-entry-group-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px dashed var(--stm-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--stm-card-bg) 72%, transparent);
+  margin-bottom: 2px;
+}
+
+.stm-entry-group-input {
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+.stm-entry-group-bar-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.stm-entry-group-compat-tag {
+  font-size: 10.5px;
+  color: var(--stm-muted);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.stm-entry-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.stm-entry-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--stm-border);
+  background: color-mix(in srgb, var(--stm-card-bg) 52%, transparent);
+  border-radius: 7px 7px 2px 2px;
+}
+
+.stm-entry-group-section.is-ungrouped .stm-entry-group-head {
+  background: transparent;
+  border-bottom-style: dashed;
+}
+
+.stm-entry-group-toggle {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  margin: 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--stm-ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stm-entry-group-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--stm-muted);
+  transition: transform 0.14s ease;
+  transform: rotate(-90deg);
+}
+
+.stm-entry-group-section.is-open .stm-entry-group-chevron {
+  transform: rotate(0deg);
+}
+
+.stm-entry-group-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stm-entry-group-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--stm-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stm-entry-group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.stm-entry-group-rename-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stm-entry-group-rename-input {
+  flex: 1 1 110px;
+  min-width: 80px;
+}
+
+.stm-entry-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 6px;
+  border-left: 1px solid color-mix(in srgb, var(--stm-border) 72%, transparent);
+  margin-left: 4px;
+}
+
+.stm-entry-group-empty {
+  font-size: 11.5px;
+  color: var(--stm-muted);
+  padding: 6px 8px;
+}
+
+.stm-entry-group-assign-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stm-entry-group-assign-row .stm-cell-label,
+.stm-entry-group-assign-row .stm-cw-sublabel {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.stm-entry-group-assign-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.stm-cw-lib-section-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--stm-muted);
+  letter-spacing: 0.02em;
+  padding: 6px 4px 3px;
+  border-bottom: 1px dashed var(--stm-border);
+  margin-top: 2px;
+}
+
+.stm-cw-lib-section-head:first-child {
+  margin-top: 0;
+  padding-top: 2px;
 }
 
 .stm-prompt-card {

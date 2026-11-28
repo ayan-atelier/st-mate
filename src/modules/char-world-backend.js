@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.11';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.12';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.12';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.9.11';
+} from './preset-backend.js?v=0.9.12';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -3478,7 +3478,204 @@ export function deleteWorldInfoBookEntry(bookData, uid) {
   const hit = findRawEntryByUid(bookData, uid);
   if (!hit) return { ok: false, reason: 'not_found' };
   delete bookData.entries[hit.key];
+  const wg = bookData?.extensions?.stmEntryGroups;
+  if (wg?.entries && typeof wg.entries === 'object') {
+    delete wg.entries[String(uid)];
+    delete wg.entries[String(hit.key)];
+  }
   return { ok: true, deletedUid: uid };
+}
+
+// =============================================================================
+// 世界书条目极简分组（存放在 `bookData.extensions.stmEntryGroups`，绝不篡改原生 `entry.group` 互斥包含组）
+// =============================================================================
+
+function normalizeWorldInfoEntryGroupState(rawState, validUids = null) {
+  const rawGroups = Array.isArray(rawState?.groups) ? rawState.groups : [];
+  const seen = new Set();
+  const groups = rawGroups
+    .filter(g => g && typeof g === 'object' && String(g.id || '').trim())
+    .map((g, idx) => ({
+      id: String(g.id).trim(),
+      name: String(g.name || '未命名分组').trim().slice(0, 60) || '未命名分组',
+      order: Number.isFinite(Number(g.order)) ? Number(g.order) : idx,
+      collapsed: Boolean(g.collapsed),
+    }))
+    .sort((a, b) => a.order - b.order)
+    .filter(g => {
+      if (seen.has(g.id)) return false;
+      seen.add(g.id);
+      return true;
+    })
+    .map((g, idx) => ({ ...g, order: idx }));
+
+  const validGroupIds = new Set(groups.map(g => g.id));
+  const entries = {};
+  const rawMap = rawState?.entries && typeof rawState.entries === 'object' ? rawState.entries : {};
+  for (const [uidKey, meta] of Object.entries(rawMap)) {
+    const gid = typeof meta === 'string' ? meta.trim() : String(meta?.groupId || '').trim();
+    if (!gid || !validGroupIds.has(gid)) continue;
+    if (validUids instanceof Set && !validUids.has(String(uidKey))) continue;
+    entries[String(uidKey)] = { groupId: gid };
+  }
+  return { groups, entries };
+}
+
+export function readWorldInfoEntryGroups(bookData) {
+  const validUids = new Set(
+    readWorldInfoEntries(bookData).entries.map(item => String(item.uid)),
+  );
+  const raw =
+    bookData?.extensions?.stmEntryGroups ??
+    bookData?.extensions?.baibaiToolkit?.worldInfoEntryGroups ??
+    bookData?.extensions?.entryGroups ??
+    null;
+  if (!raw || typeof raw !== 'object') {
+    return { groups: [], entries: {} };
+  }
+  return normalizeWorldInfoEntryGroupState(raw, validUids);
+}
+
+export function writeWorldInfoEntryGroups(bookData, groupState) {
+  if (!bookData || typeof bookData !== 'object') {
+    return { groups: [], entries: {} };
+  }
+  const normalized = normalizeWorldInfoEntryGroupState(groupState);
+  if (normalized.groups.length === 0) {
+    if (bookData.extensions?.stmEntryGroups) {
+      delete bookData.extensions.stmEntryGroups;
+      if (Object.keys(bookData.extensions).length === 0) {
+        delete bookData.extensions;
+      }
+    }
+    return normalized;
+  }
+  if (!bookData.extensions || typeof bookData.extensions !== 'object') {
+    bookData.extensions = {};
+  }
+  bookData.extensions.stmEntryGroups = structuredClone(normalized);
+  return normalized;
+}
+
+export function createWorldInfoEntryGroup(bookData, name, { initialUids = [] } = {}) {
+  const cleanName = String(name || '').trim().slice(0, 60);
+  if (!cleanName || !bookData || typeof bookData !== 'object') {
+    return { ok: false, reason: 'invalid_name' };
+  }
+  const state = readWorldInfoEntryGroups(bookData);
+  const id = `stm_wg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const group = {
+    id,
+    name: cleanName,
+    order: state.groups.length,
+    collapsed: false,
+  };
+  state.groups.push(group);
+  for (const uid of Array.isArray(initialUids) ? initialUids : []) {
+    if (uid !== undefined && uid !== null && String(uid).trim() !== '') {
+      state.entries[String(uid)] = { groupId: id };
+    }
+  }
+  const saved = writeWorldInfoEntryGroups(bookData, state);
+  return { ok: true, group, state: saved };
+}
+
+export function renameWorldInfoEntryGroup(bookData, groupId, newName) {
+  const cleanName = String(newName || '').trim().slice(0, 60);
+  if (!cleanName) return { ok: false, reason: 'invalid_name' };
+  const state = readWorldInfoEntryGroups(bookData);
+  const target = state.groups.find(g => g.id === groupId);
+  if (!target) return { ok: false, reason: 'not_found' };
+  target.name = cleanName;
+  const saved = writeWorldInfoEntryGroups(bookData, state);
+  return { ok: true, group: target, state: saved };
+}
+
+/**
+ * 解散世界书条目分组（仅解除分组归属，绝不删除任何条目，亦不触碰原生 `entry.group`）。
+ */
+export function deleteWorldInfoEntryGroup(bookData, groupId) {
+  const state = readWorldInfoEntryGroups(bookData);
+  const nextGroups = state.groups.filter(g => g.id !== groupId);
+  if (nextGroups.length === state.groups.length) {
+    return { ok: false, reason: 'not_found' };
+  }
+  const nextEntries = {};
+  for (const [uidKey, meta] of Object.entries(state.entries)) {
+    if (meta?.groupId !== groupId) {
+      nextEntries[uidKey] = meta;
+    }
+  }
+  const saved = writeWorldInfoEntryGroups(bookData, { groups: nextGroups, entries: nextEntries });
+  return { ok: true, state: saved };
+}
+
+export function setWorldInfoEntryGroupCollapsed(bookData, groupId, collapsed) {
+  const state = readWorldInfoEntryGroups(bookData);
+  const target = state.groups.find(g => g.id === groupId);
+  if (!target) return { ok: false, reason: 'not_found' };
+  target.collapsed = Boolean(collapsed);
+  const saved = writeWorldInfoEntryGroups(bookData, state);
+  return { ok: true, collapsed: target.collapsed, state: saved };
+}
+
+export function setAllWorldInfoEntryGroupsCollapsed(bookData, collapsed) {
+  const state = readWorldInfoEntryGroups(bookData);
+  if (state.groups.length === 0) return { ok: false, reason: 'empty' };
+  for (const g of state.groups) {
+    g.collapsed = Boolean(collapsed);
+  }
+  const saved = writeWorldInfoEntryGroups(bookData, state);
+  return { ok: true, state: saved };
+}
+
+export function setWorldInfoEntryGroupEnabled(bookData, groupId, enabled) {
+  const state = readWorldInfoEntryGroups(bookData);
+  if (!state.groups.some(g => g.id === groupId)) {
+    return { ok: false, reason: 'not_found' };
+  }
+  const nextEnabled = Boolean(enabled);
+  const affectedUids = [];
+  for (const [uidKey, meta] of Object.entries(state.entries)) {
+    if (meta?.groupId === groupId) {
+      toggleWorldInfoEntryEnabled(bookData, uidKey, nextEnabled);
+      affectedUids.push(uidKey);
+    }
+  }
+  return { ok: true, enabled: nextEnabled, affectedUids };
+}
+
+export function assignWorldInfoEntryToGroup(bookData, uid, groupId) {
+  if (uid === undefined || uid === null || String(uid).trim() === '') {
+    return { ok: false, reason: 'invalid_uid' };
+  }
+  const state = readWorldInfoEntryGroups(bookData);
+  const cleanGid = String(groupId || '').trim();
+  if (!cleanGid) {
+    delete state.entries[String(uid)];
+  } else {
+    if (!state.groups.some(g => g.id === cleanGid)) {
+      return { ok: false, reason: 'group_not_found' };
+    }
+    state.entries[String(uid)] = { groupId: cleanGid };
+  }
+  const saved = writeWorldInfoEntryGroups(bookData, state);
+  return { ok: true, state: saved };
+}
+
+export function moveWorldInfoEntryGroupOrder(bookData, groupId, direction = 'up') {
+  const state = readWorldInfoEntryGroups(bookData);
+  const idx = state.groups.findIndex(g => g.id === groupId);
+  if (idx < 0) return false;
+  const nextIdx = direction === 'down' ? idx + 1 : idx - 1;
+  if (nextIdx < 0 || nextIdx >= state.groups.length) return false;
+  const [moved] = state.groups.splice(idx, 1);
+  state.groups.splice(nextIdx, 0, moved);
+  state.groups.forEach((g, i) => {
+    g.order = i;
+  });
+  writeWorldInfoEntryGroups(bookData, state);
+  return true;
 }
 
 /**

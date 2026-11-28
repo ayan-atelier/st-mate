@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.11';
-import { toastMessage } from './host-actions.js?v=0.9.11';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.12';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.12';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.12';
+import { toastMessage } from './host-actions.js?v=0.9.12';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -90,7 +90,171 @@ const CORE_BODY_EXCLUDED_IDS = new Set([
   'hp-backup-nudge',
 ]);
 
-const IGNORED_TAG_NAMES = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'LINK', 'META', 'INPUT', 'DIALOG']);
+const IGNORED_TAG_NAMES = new Set([
+  'SCRIPT',
+  'STYLE',
+  'TEMPLATE',
+  'LINK',
+  'META',
+  'INPUT',
+  'DIALOG',
+  'SVG',
+  'CANVAS',
+  'IFRAME',
+  'VIDEO',
+  'AUDIO',
+]);
+
+// 宿主本身不可直接整块吞掉（避免把同 Shadow DOM 内的弹窗一起藏掉），但允许穿透其 shadowRoot / 子树寻找内部悬浮球
+const SHADOW_TRAVERSE_ONLY_HOST_IDS = new Set([
+  'bbi-app-host',
+  'bbs-app-host',
+]);
+
+const EXCLUDED_OVERLAY_SUBTREE_IDS = new Set([
+  'stsc_floating_panel',
+  'stsc_manager_overlay',
+  'stsc_dialog_overlay',
+  'sttts-panel',
+]);
+
+const KNOWN_HOST_LABEL_MAP = Object.freeze({
+  'bbs-app-host': '柏宝书',
+  'bbi-app-host': '柏宝绘',
+});
+
+const WILD_MAX_SCAN_DEPTH = 5;
+
+function setInlineStyleProp(node, prop, value, priority = '') {
+  if (!node?.style) return;
+  if (typeof node.style.setProperty === 'function') {
+    node.style.setProperty(prop, value, priority || undefined);
+  } else {
+    node.style[prop] = value;
+  }
+}
+
+function restoreInlineStyleProp(node, prop, saved) {
+  if (!node?.style) return;
+  const val = saved?.value || '';
+  const prio = saved?.priority || '';
+  if (typeof node.style.removeProperty === 'function') {
+    node.style.removeProperty(prop);
+    if (val) {
+      node.style.setProperty(prop, val, prio || undefined);
+    }
+  } else {
+    node.style[prop] = val;
+  }
+}
+
+function readInlineStyleProp(node, prop) {
+  if (!node?.style) return { value: '', priority: '' };
+  const value =
+    typeof node.style.getPropertyValue === 'function'
+      ? node.style.getPropertyValue(prop)
+      : node.style[prop] || '';
+  const priority =
+    typeof node.style.getPropertyPriority === 'function'
+      ? node.style.getPropertyPriority(prop)
+      : '';
+  return { value: String(value || ''), priority: String(priority || '') };
+}
+
+function isNodeInShadowDom(node, doc) {
+  if (!node) return false;
+  if (node.__stmShadowHost) return true;
+  if (typeof node.getRootNode === 'function') {
+    try {
+      const rootNode = node.getRootNode();
+      if (rootNode && rootNode !== doc && rootNode.host) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return false;
+}
+
+function isExcludedOverlaySubtree(node) {
+  if (!node?.tagName) return true;
+  const id = String(node.id || '');
+  if (EXCLUDED_OVERLAY_SUBTREE_IDS.has(id)) return true;
+  const role = String(node.getAttribute?.('role') || '').toLowerCase();
+  if (role === 'dialog' || role === 'alertdialog') return true;
+  if (String(node.getAttribute?.('aria-modal') || '').toLowerCase() === 'true') return true;
+  const cls = node.classList;
+  if (
+    cls?.contains?.('popup') ||
+    cls?.contains?.('drawer') ||
+    cls?.contains?.('drawer-content') ||
+    cls?.contains?.('toast') ||
+    cls?.contains?.('ih-floating-panel') ||
+    cls?.contains?.('ih-dialog-overlay') ||
+    cls?.contains?.('ih-find-bar') ||
+    cls?.contains?.('ih-color-picker-portal') ||
+    cls?.contains?.('ih-folder-dropdown-portal') ||
+    cls?.contains?.('hp-studio-overlay') ||
+    cls?.contains?.('sttts-context-menu') ||
+    cls?.contains?.('st-esg-help-tour') ||
+    cls?.contains?.('modal-mask') ||
+    node.hasAttribute?.('data-rm-tool-menu')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function readComputedStyleSafe(node, root = globalThis) {
+  if (!node || typeof root?.getComputedStyle !== 'function') return null;
+  try {
+    return root.getComputedStyle(node) || null;
+  } catch {
+    return null;
+  }
+}
+
+function readEffectivePosition(node, root = globalThis, computed = null) {
+  const inlinePos = String(node?.style?.position || '').trim().toLowerCase();
+  if (inlinePos) return inlinePos;
+  const cs = computed || readComputedStyleSafe(node, root);
+  return String(cs?.position || '').trim().toLowerCase();
+}
+
+function readEffectiveBoxSize(node) {
+  let w = Number(node?.offsetWidth) || 0;
+  let h = Number(node?.offsetHeight) || 0;
+  if ((w <= 0 || h <= 0) && typeof node?.getBoundingClientRect === 'function') {
+    const r = node.getBoundingClientRect();
+    if (r && (r.width !== 680 || r.height !== 800)) {
+      w = r.width;
+      h = r.height;
+    }
+  }
+  const inlineW = parseFloat(String(node?.style?.width || '')) || 0;
+  const inlineH = parseFloat(String(node?.style?.height || '')) || 0;
+  return {
+    w: w > 0 ? w : inlineW,
+    h: h > 0 ? h : inlineH,
+  };
+}
+
+function isAcceptableFloatingGeometry(effW, effH, root = globalThis) {
+  if (effW < 16 || effH < 16) return false;
+  const vpW = Math.max(320, Number(root?.visualViewport?.width || root?.innerWidth || 1200));
+  const vpH = Math.max(480, Number(root?.visualViewport?.height || root?.innerHeight || 800));
+  const maxBarW = Math.min(340, Math.round(vpW * 0.72));
+  const maxStripH = Math.min(260, Math.round(vpH * 0.48));
+
+  // 1) 标准悬浮球 / 方块 / 书签挂件
+  if (effW <= 148 && effH <= 148) return true;
+  // 2) 横条悬浮胶囊 / 迷你横排快捷条
+  if (effW <= maxBarW && effH <= 76) return true;
+  // 3) 竖条悬浮条 / 窄侧边悬浮胶囊
+  if (effW <= 76 && effH <= maxStripH) return true;
+  return false;
+}
 
 function isYantaiInternalNode(node) {
   const id = String(node?.id || '');
@@ -245,8 +409,19 @@ function buildClutterDescriptor(
   hideHostEl,
   zone,
   seq,
-  { widgetKey = '', fallbackName = '卡片按钮' } = {},
+  { widgetKey = '', fallbackName = '卡片按钮', shadowHost = null } = {},
 ) {
+  const hostId = String(shadowHost?.id || '').trim();
+  const hostHint =
+    KNOWN_HOST_LABEL_MAP[hostId] ||
+    String(
+      shadowHost?.getAttribute?.('aria-label') ||
+        shadowHost?.getAttribute?.('title') ||
+        shadowHost?.title ||
+        '',
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
   const rawText = readCleanButtonText(targetEl);
   const rawTitle = String(
     targetEl.getAttribute?.('title') ||
@@ -254,12 +429,13 @@ function buildClutterDescriptor(
       targetEl.title ||
       hideHostEl?.getAttribute?.('title') ||
       hideHostEl?.getAttribute?.('aria-label') ||
+      hostHint ||
       '',
   )
     .replace(/\s+/g, ' ')
     .trim();
   const graphemes = Array.from(rawText);
-  const hint = guessIconSemantic(targetEl, fallbackName);
+  const hint = guessIconSemantic(targetEl, hostHint || fallbackName);
 
   let label = '';
   let glyphText = '';
@@ -285,156 +461,216 @@ function buildClutterDescriptor(
     widgetKey,
     targetEl,
     hideHostEl: hideHostEl || targetEl,
+    shadowHost: shadowHost || null,
   };
 }
 
 /**
- * 为外部野生 `position: fixed` 悬浮挂件生成稳定可持久化指纹键（支持按角色卡自动复现收纳）。
+ * 为外部野生 `position: fixed` 悬浮挂件（含 Shadow DOM 内部悬浮球与套壳普通球）生成稳定可持久化指纹键。
  */
-export function buildFloatingWidgetKey(node) {
+export function buildFloatingWidgetKey(node, { shadowHost = null } = {}) {
   if (!node?.tagName) return '';
   const id = String(node.id || '').trim();
+  let innerKey = '';
   if (id && !/^\d{6,}$/.test(id)) {
-    return `id:${id.slice(0, 140)}`;
-  }
-  const tag = String(node.tagName).toLowerCase();
-  const stableClasses = String(node.className || '')
-    .split(/\s+/)
-    .map(c => c.trim())
-    .filter(
-      c =>
-        c &&
-        !/dragging|open|active|hover|hidden|dark|light|mob/i.test(c) &&
-        !c.startsWith('stm-'),
+    innerKey = `id:${id.slice(0, 140)}`;
+  } else {
+    const tag = String(node.tagName).toLowerCase();
+    const stableClasses = String(node.className || '')
+      .split(/\s+/)
+      .map(c => c.trim())
+      .filter(
+        c =>
+          c &&
+          !/dragging|open|active|hover|hidden|dark|light|mob|awake|focus|collapsed|expanded|visible|show|hide|^shape-|^dock-|^side-|^is-/i.test(
+            c,
+          ) &&
+          !c.startsWith('stm-'),
+      )
+      .sort()
+      .slice(0, 4)
+      .join('.');
+    const labelSig = String(
+      node.getAttribute?.('aria-label') ||
+        node.getAttribute?.('title') ||
+        readCleanButtonText(node) ||
+        '',
     )
-    .sort()
-    .slice(0, 4)
-    .join('.');
-  const labelSig = String(
-    node.getAttribute?.('aria-label') ||
-      node.getAttribute?.('title') ||
-      readCleanButtonText(node) ||
-      '',
-  )
-    .replace(/\s+/g, '')
-    .slice(0, 24);
-  if (!stableClasses && !labelSig) return '';
-  return `sig:${tag}|${stableClasses}|${labelSig}`.slice(0, 170);
+      .replace(/\s+/g, '')
+      .slice(0, 24);
+    if (stableClasses || labelSig) {
+      innerKey = `sig:${tag}|${stableClasses}|${labelSig}`.slice(0, 170);
+    }
+  }
+
+  const host = shadowHost || node.__stmShadowHost || null;
+  if (host) {
+    const hostId = String(host.id || '').trim();
+    const hostTag = String(host.tagName || 'host').toLowerCase();
+    const hostSig = hostId && !/^\d{6,}$/.test(hostId) ? `id:${hostId.slice(0, 60)}` : `tag:${hostTag}`;
+    const fallbackInner = innerKey || `sig:${String(node.tagName).toLowerCase()}|orb`;
+    return `shadow:${hostSig}::${fallbackInner}`.slice(0, 210);
+  }
+
+  return innerKey;
 }
 
 /**
- * 检测某个 DOM 节点是否属于角色卡或第三方脚本挂载的小型野生 `position: fixed` 悬浮球/挂件：
+ * 检测某个 DOM 节点是否属于角色卡或第三方脚本挂载的野生悬浮球/横条胶囊挂件（支持 Shadow DOM 内部与套壳普通球）：
  * - 严格排除酒馆顶栏、底栏、抽屉、弹窗、通知栏与砚台自身控件；
- * - 尺寸限定在 16px ~ 132px 的小型悬浮入口，绝不误吞展开后的大面板或模态框！
+ * - 支持标准球体/方块（<=148×148）、横条胶囊（<=340×76）与竖条胶囊（<=76×260），绝不误吞大面板或模态框！
  */
-export function inspectWildFloatingCandidate(node, root = globalThis) {
+export function inspectWildFloatingCandidate(
+  node,
+  root = globalThis,
+  { allowAbsoluteInFixedOverlay = false, shadowHost = null } = {},
+) {
   if (!node?.tagName) return null;
   const tag = String(node.tagName).toUpperCase();
-  if (IGNORED_TAG_NAMES.has(tag)) return null;
+  if (IGNORED_TAG_NAMES.has(tag) || tag === 'HEADER' || tag === 'NAV' || tag === 'FOOTER') {
+    return null;
+  }
   const id = String(node.id || '');
   if (
     CORE_BODY_EXCLUDED_IDS.has(id) ||
-    id === 'stsc_floating_panel' ||
-    id === 'stsc_manager_overlay' ||
-    id === 'stsc_dialog_overlay' ||
-    id === 'sttts-panel' ||
-    id === 'bbi-app-host' ||
+    SHADOW_TRAVERSE_ONLY_HOST_IDS.has(id) ||
+    EXCLUDED_OVERLAY_SUBTREE_IDS.has(id) ||
     isYantaiInternalNode(node)
   ) {
     return null;
   }
 
-  const cls = node.classList;
-  if (
-    cls?.contains?.('popup') ||
-    cls?.contains?.('drawer') ||
-    cls?.contains?.('drawer-content') ||
-    cls?.contains?.('list-group') ||
-    cls?.contains?.('toast') ||
-    cls?.contains?.('ih-floating-panel') ||
-    cls?.contains?.('ih-dialog-overlay') ||
-    cls?.contains?.('ih-find-bar') ||
-    cls?.contains?.('ih-color-picker-portal') ||
-    cls?.contains?.('ih-folder-dropdown-portal') ||
-    cls?.contains?.('hp-studio-overlay') ||
-    cls?.contains?.('sttts-context-menu') ||
-    cls?.contains?.('st-esg-help-tour') ||
-    node.hasAttribute?.('data-rm-tool-menu')
-  ) {
+  if (isExcludedOverlaySubtree(node) || node.classList?.contains?.('list-group')) {
     return null;
   }
 
   const alreadyMarkedByUs = node.dataset?.stmClutterHidden === '1';
   if (!alreadyMarkedByUs && isIntrinsicallyHidden(node)) return null;
 
-  const inlinePos = String(node.style?.position || '').trim().toLowerCase();
-  let computedPos = inlinePos;
-  if (!computedPos && typeof root?.getComputedStyle === 'function') {
-    try {
-      computedPos = String(root.getComputedStyle(node)?.position || '').trim().toLowerCase();
-    } catch {
-      computedPos = '';
-    }
-  }
-  if (computedPos !== 'fixed') return null;
-
-  if (!alreadyMarkedByUs) {
-    let w = Number(node.offsetWidth) || 0;
-    let h = Number(node.offsetHeight) || 0;
-    if ((w <= 0 || h <= 0) && typeof node.getBoundingClientRect === 'function') {
-      const r = node.getBoundingClientRect();
-      if (r && (r.width !== 680 || r.height !== 800)) {
-        w = r.width;
-        h = r.height;
-      }
-    }
-    const inlineW = parseFloat(String(node.style?.width || '')) || 0;
-    const inlineH = parseFloat(String(node.style?.height || '')) || 0;
-    const effW = w > 0 ? w : inlineW;
-    const effH = h > 0 ? h : inlineH;
-    if (effW < 16 || effH < 16 || effW > 136 || effH > 136) {
+  const cs = readComputedStyleSafe(node, root);
+  if (!alreadyMarkedByUs && cs) {
+    const compDisp = String(cs.display || '').trim().toLowerCase();
+    const compVis = String(cs.visibility || '').trim().toLowerCase();
+    if (compDisp === 'none' || compVis === 'hidden') return null;
+    if (cs.opacity !== '' && cs.opacity !== undefined && Number(cs.opacity) === 0) return null;
+    if (
+      String(cs.pointerEvents || '').trim().toLowerCase() === 'none' &&
+      node.dataset?.stmClicking !== '1'
+    ) {
       return null;
     }
   }
 
-  const key = buildFloatingWidgetKey(node);
+  const inlinePe = String(node.style?.pointerEvents || '').trim().toLowerCase();
+  if (!alreadyMarkedByUs && inlinePe === 'none' && node.dataset?.stmClicking !== '1') {
+    return null;
+  }
+
+  const computedPos = readEffectivePosition(node, root, cs);
+  const posOk =
+    computedPos === 'fixed' || (allowAbsoluteInFixedOverlay && computedPos === 'absolute');
+  if (!posOk) return null;
+
+  if (!alreadyMarkedByUs) {
+    const { w: effW, h: effH } = readEffectiveBoxSize(node);
+    if (!isAcceptableFloatingGeometry(effW, effH, root)) {
+      return null;
+    }
+  }
+
+  const resolvedHost = shadowHost || node.__stmShadowHost || null;
+  const key = buildFloatingWidgetKey(node, { shadowHost: resolvedHost });
   if (!key) return null;
-  return { node, key };
+  if (resolvedHost && node.__stmShadowHost !== resolvedHost) {
+    node.__stmShadowHost = resolvedHost;
+  }
+  return { node, key, shadowHost: resolvedHost };
 }
 
 /**
- * 扫描页面上当前挂载的全部小型野生悬浮挂件（包含已被收纳与尚未收纳的候选项）。
+ * 扫描页面上当前挂载的全部野生悬浮挂件（穿透开放 Shadow DOM 与浅层包裹容器，支持球体/方块/横条/竖条胶囊）。
  */
 export function discoverWildFloatingWidgets(doc, root = globalThis) {
   if (!doc?.body?.children) return [];
   const found = [];
-  const seen = new Set();
+  const seenNodes = new Set();
+  const seenKeys = new Set();
 
-  const checkContainer = parent => {
-    if (!parent?.children) return;
-    for (const child of Array.from(parent.children)) {
-      if (!child?.tagName || seen.has(child)) continue;
-      if (CORE_BODY_EXCLUDED_IDS.has(String(child.id || '')) || isYantaiInternalNode(child)) {
+  const scanBranch = (container, depth, shadowHost, insideFixedOverlay) => {
+    if (!container?.children || depth > WILD_MAX_SCAN_DEPTH) return;
+
+    for (const child of Array.from(container.children)) {
+      if (!child?.tagName || seenNodes.has(child)) continue;
+      const tag = String(child.tagName).toUpperCase();
+      if (IGNORED_TAG_NAMES.has(tag)) continue;
+
+      const cid = String(child.id || '');
+      if (CORE_BODY_EXCLUDED_IDS.has(cid) || isYantaiInternalNode(child)) {
         continue;
       }
-      const info = inspectWildFloatingCandidate(child, root);
+      if (isExcludedOverlaySubtree(child)) {
+        continue;
+      }
+
+      const info = inspectWildFloatingCandidate(child, root, {
+        allowAbsoluteInFixedOverlay: insideFixedOverlay,
+        shadowHost,
+      });
       if (info) {
-        seen.add(child);
-        found.push(info);
+        seenNodes.add(child);
+        if (!seenKeys.has(info.key)) {
+          seenKeys.add(info.key);
+          found.push(info);
+        }
+        continue;
+      }
+
+      // 判断当前容器是否为透明穿透型 fixed 视口壳（如 React/Vue 的 fixed inset:0 pointer-events:none 挂载层）
+      const childCs = readComputedStyleSafe(child, root);
+      const childPos = readEffectivePosition(child, root, childCs);
+      const childPe = String(child.style?.pointerEvents || childCs?.pointerEvents || '')
+        .trim()
+        .toLowerCase();
+      const childBox = readEffectiveBoxSize(child);
+      const isTransparentFixedShell =
+        childPos === 'fixed' && (childPe === 'none' || (childBox.w === 0 && childBox.h === 0));
+      const nextInsideFixed = insideFixedOverlay || isTransparentFixedShell;
+
+      // 优先穿透开放 Shadow DOM（如柏宝书、构画、千千结、柏宝绘等）
+      if (child.shadowRoot && child.shadowRoot.children) {
+        scanBranch(child.shadowRoot, depth + 1, shadowHost || child, nextInsideFixed);
+      }
+
+      // 继续穿透普通浅层包裹容器（跳过显式隐藏的非阴影容器以省开销）
+      if (depth < WILD_MAX_SCAN_DEPTH && child.children?.length > 0) {
+        const hiddenNonShadow =
+          !child.shadowRoot &&
+          child.dataset?.stmClutterHidden !== '1' &&
+          isIntrinsicallyHidden(child);
+        if (!hiddenNonShadow) {
+          scanBranch(child, depth + 1, shadowHost, nextInsideFixed);
+        }
       }
     }
   };
 
-  checkContainer(doc.body);
+  scanBranch(doc.body, 0, null, false);
+
   const sheld = doc.getElementById?.('sheld');
   if (sheld?.children) {
     for (const child of Array.from(sheld.children)) {
       const cid = String(child?.id || '');
       if (cid === 'chat' || cid === 'form_sheld' || isYantaiInternalNode(child)) continue;
+      if (isExcludedOverlaySubtree(child)) continue;
       const info = inspectWildFloatingCandidate(child, root);
-      if (info && !seen.has(child)) {
-        seen.add(child);
+      if (info && !seenNodes.has(child) && !seenKeys.has(info.key)) {
+        seenNodes.add(child);
+        seenKeys.add(info.key);
         found.push(info);
+      } else if (child.shadowRoot?.children) {
+        scanBranch(child.shadowRoot, 1, child, false);
+      } else if (child.children?.length > 0 && !isIntrinsicallyHidden(child)) {
+        scanBranch(child, 1, null, false);
       }
     }
   }
@@ -738,6 +974,8 @@ export function createFloatCapsule({
   let bodyChildObserver = null;
   const markedHiddenNodes = new Set();
   const tempOpenHostNodes = new Set();
+  const shadowOrigDisplayMap = new WeakMap();
+  let delayedScanTimers = [];
   let cachedClutterItems = [];
   let cachedUntuckedWildItems = [];
 
@@ -846,10 +1084,44 @@ export function createFloatCapsule({
     capsuleEl?.classList?.add?.('has-quick-jump');
   }
 
+  function clearDelayedScanTimers() {
+    while (delayedScanTimers.length) {
+      clearTimeout(delayedScanTimers.pop());
+    }
+  }
+
+  function hideClutterNode(node, doc = root?.document) {
+    if (!node) return;
+    if (node.dataset) {
+      node.dataset.stmClutterHidden = '1';
+    }
+    if (isNodeInShadowDom(node, doc)) {
+      if (!shadowOrigDisplayMap.has(node)) {
+        shadowOrigDisplayMap.set(node, readInlineStyleProp(node, 'display'));
+      }
+      setInlineStyleProp(node, 'display', 'none', 'important');
+    }
+    markedHiddenNodes.add(node);
+  }
+
+  function unhideClutterNode(node) {
+    if (!node) return;
+    if (node.dataset) {
+      delete node.dataset.stmClutterHidden;
+    }
+    if (shadowOrigDisplayMap.has(node)) {
+      restoreInlineStyleProp(node, 'display', shadowOrigDisplayMap.get(node));
+      shadowOrigDisplayMap.delete(node);
+    }
+    markedHiddenNodes.delete(node);
+  }
+
   function clearAllClutterMarks() {
-    for (const node of markedHiddenNodes) {
-      delete node.dataset?.stmClutterHidden;
-      delete node.dataset?.stmClicking;
+    for (const node of Array.from(markedHiddenNodes)) {
+      unhideClutterNode(node);
+      if (node.dataset) {
+        delete node.dataset.stmClicking;
+      }
     }
     markedHiddenNodes.clear();
     for (const node of tempOpenHostNodes) {
@@ -967,6 +1239,7 @@ export function createFloatCapsule({
       const desc = buildClutterDescriptor(w.node, w.node, 'wild', 1000 + wSeq, {
         widgetKey: w.key,
         fallbackName: '悬浮挂件',
+        shadowHost: w.shadowHost || null,
       });
       wSeq += 1;
       if (tuckedKeys.has(w.key)) {
@@ -983,24 +1256,21 @@ export function createFloatCapsule({
     const currentHostSet = new Set(allHostNodes);
     for (const oldNode of Array.from(markedHiddenNodes)) {
       if (!currentHostSet.has(oldNode) || bypassClutterHide) {
-        delete oldNode.dataset?.stmClutterHidden;
-        markedHiddenNodes.delete(oldNode);
+        unhideClutterNode(oldNode);
       }
     }
 
     if (!bypassClutterHide) {
       for (const hNode of allHostNodes) {
         if (tempOpenHostNodes.has(hNode)) continue;
-        if (hNode.dataset) {
-          hNode.dataset.stmClutterHidden = '1';
-        }
-        markedHiddenNodes.add(hNode);
+        hideClutterNode(hNode, doc);
       }
     }
 
-    // 核心策略：当本卡既无任何可收纳按钮、也未处于外部悬浮球拖入态时，直接隐去中间收纳球！
+    // 核心策略：当本卡既无任何可收纳底栏按钮、也无页面野生悬浮挂件、也未处于拖入态时，隐去中间收纳球！
     const shouldShowBagSphere =
       cachedClutterItems.length > 0 ||
+      cachedUntuckedWildItems.length > 0 ||
       bypassClutterHide ||
       popoverOpen ||
       Boolean(wildDragState?.moved);
@@ -1094,38 +1364,200 @@ export function createFloatCapsule({
     }
   }
 
-  function triggerClutterItem(item) {
-    const target = item?.targetEl;
-    const hostNode = item?.hideHostEl || target;
-    closePopover();
-    if (!target) return;
+  function resolveWildClickTarget(target) {
+    if (!target) return null;
+    if (
+      isClickableControl(target) ||
+      typeof target.onclick === 'function' ||
+      target.getAttribute?.('tabindex') !== null
+    ) {
+      return target;
+    }
+    const innerButtons = [];
+    walkElements(target, sub => {
+      if (isIntrinsicallyHidden(sub)) return false;
+      if (isClickableControl(sub)) {
+        innerButtons.push(sub);
+        return false;
+      }
+      return true;
+    });
+    return innerButtons.length === 1 ? innerButtons[0] : target;
+  }
 
+  function dispatchRealisticTap(target, fallbackRect = null) {
+    if (!target) return;
+    let cx = 0;
+    let cy = 0;
+    if (typeof target.getBoundingClientRect === 'function') {
+      const r = target.getBoundingClientRect();
+      if (r && r.width > 0 && r.height > 0) {
+        cx = Math.round(r.left + r.width / 2);
+        cy = Math.round(r.top + r.height / 2);
+      }
+    }
+    if (!cx && !cy && fallbackRect) {
+      cx = Math.round((fallbackRect.left || 0) + (fallbackRect.width || 0) / 2);
+      cy = Math.round((fallbackRect.top || 0) + (fallbackRect.height || 0) / 2);
+    }
+
+    const hasOwnSetCap = Object.prototype.hasOwnProperty.call(target, 'setPointerCapture');
+    const prevSetCap = target.setPointerCapture;
+    const hasOwnRelCap = Object.prototype.hasOwnProperty.call(target, 'releasePointerCapture');
+    const prevRelCap = target.releasePointerCapture;
+
+    try {
+      // 防止 Vue/React 悬浮球（如柏宝书 FloatingOrb）在合成 PointerEvent 上调用 setPointerCapture 抛 NotFoundError
+      target.setPointerCapture = () => {};
+      target.releasePointerCapture = () => {};
+    } catch {
+      // ignore non-writable
+    }
+
+    try {
+      if (typeof target.dispatchEvent === 'function') {
+        const PtrEvt = root?.PointerEvent;
+        const MouseEvt = root?.MouseEvent || root?.Event;
+        if (typeof PtrEvt === 'function') {
+          try {
+            target.dispatchEvent(
+              new PtrEvt('pointerdown', {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                button: 0,
+                buttons: 1,
+                isPrimary: true,
+                pointerId: 1,
+                pointerType: 'mouse',
+                clientX: cx,
+                clientY: cy,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+        if (typeof MouseEvt === 'function') {
+          try {
+            target.dispatchEvent(
+              new MouseEvt('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                button: 0,
+                buttons: 1,
+                clientX: cx,
+                clientY: cy,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+        if (typeof PtrEvt === 'function') {
+          try {
+            target.dispatchEvent(
+              new PtrEvt('pointerup', {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                button: 0,
+                buttons: 0,
+                isPrimary: true,
+                pointerId: 1,
+                pointerType: 'mouse',
+                clientX: cx,
+                clientY: cy,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+        if (typeof MouseEvt === 'function') {
+          try {
+            target.dispatchEvent(
+              new MouseEvt('mouseup', {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                button: 0,
+                buttons: 0,
+                clientX: cx,
+                clientY: cy,
+              }),
+            );
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      if (typeof target.click === 'function') {
+        target.click();
+      }
+    } finally {
+      try {
+        if (hasOwnSetCap) target.setPointerCapture = prevSetCap;
+        else delete target.setPointerCapture;
+        if (hasOwnRelCap) target.releasePointerCapture = prevRelCap;
+        else delete target.releasePointerCapture;
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  function triggerClutterItem(item) {
+    const doc = root?.document;
+    const rawTarget = item?.targetEl;
+    const hostNode = item?.hideHostEl || rawTarget;
+    closePopover();
+    if (!rawTarget) return;
+
+    const inShadow = isNodeInShadowDom(hostNode, doc);
     let restoreInlineStyle = null;
+    let restoreShadowClickVis = null;
+    const capRect =
+      capsuleEl && typeof capsuleEl.getBoundingClientRect === 'function'
+        ? capsuleEl.getBoundingClientRect()
+        : null;
+
     if (hostNode?.dataset) {
       hostNode.dataset.stmClicking = '1';
-      delete hostNode.dataset.stmClutterHidden;
+      unhideClutterNode(hostNode);
 
-      // 若是拖入收纳的野生悬浮球，临时将其隐形锚点对齐到伴侣球旁，令其弹出的面板自然贴在伴侣球内侧！
-      if (item.zone === 'wild' && capsuleEl && typeof capsuleEl.getBoundingClientRect === 'function') {
-        const capRect = capsuleEl.getBoundingClientRect();
-        if (capRect && capRect.height > 0 && hostNode.style) {
-          restoreInlineStyle = {
-            left: hostNode.style.left,
-            top: hostNode.style.top,
-            right: hostNode.style.right,
-            bottom: hostNode.style.bottom,
-          };
-          hostNode.style.right = 'auto';
-          hostNode.style.bottom = 'auto';
-          hostNode.style.left = `${Math.round(capRect.left)}px`;
-          hostNode.style.top = `${Math.round(capRect.top + capRect.height / 2 - 20)}px`;
-        }
+      if (inShadow && hostNode.style) {
+        restoreShadowClickVis = {
+          visibility: readInlineStyleProp(hostNode, 'visibility'),
+          pointerEvents: readInlineStyleProp(hostNode, 'pointer-events'),
+        };
+        setInlineStyleProp(hostNode, 'visibility', 'hidden', 'important');
+        setInlineStyleProp(hostNode, 'pointer-events', 'none', 'important');
+      }
+
+      // 若是拖入收纳的 Light DOM 野生悬浮球，临时将其隐形锚点对齐到伴侣球旁，令其弹出的面板自然贴在伴侣球内侧！
+      if (item.zone === 'wild' && !inShadow && capRect && capRect.height > 0 && hostNode.style) {
+        restoreInlineStyle = {
+          left: hostNode.style.left,
+          top: hostNode.style.top,
+          right: hostNode.style.right,
+          bottom: hostNode.style.bottom,
+        };
+        hostNode.style.right = 'auto';
+        hostNode.style.bottom = 'auto';
+        hostNode.style.left = `${Math.round(capRect.left)}px`;
+        hostNode.style.top = `${Math.round(capRect.top + capRect.height / 2 - 20)}px`;
       }
     }
 
     try {
-      if (typeof target.click === 'function') {
-        target.click();
+      if (item.zone === 'wild') {
+        const clickTarget = resolveWildClickTarget(rawTarget);
+        dispatchRealisticTap(clickTarget, capRect);
+      } else if (typeof rawTarget.click === 'function') {
+        rawTarget.click();
       }
     } finally {
       const finish = () => {
@@ -1135,13 +1567,17 @@ export function createFloatCapsule({
           hostNode.style.right = restoreInlineStyle.right;
           hostNode.style.bottom = restoreInlineStyle.bottom;
         }
+        if (restoreShadowClickVis && hostNode?.style) {
+          restoreInlineStyleProp(hostNode, 'visibility', restoreShadowClickVis.visibility);
+          restoreInlineStyleProp(hostNode, 'pointer-events', restoreShadowClickVis.pointerEvents);
+        }
         if (!hostNode?.dataset) return;
         delete hostNode.dataset.stmClicking;
 
         let hasExpandedInnerPopup = false;
-        if (hostNode !== target && hostNode.children?.length > 1) {
+        if (hostNode !== rawTarget && hostNode.children?.length > 1) {
           for (const child of Array.from(hostNode.children)) {
-            if (child === target || isIntrinsicallyHidden(child)) continue;
+            if (child === rawTarget || isIntrinsicallyHidden(child)) continue;
             const h = Number(child.offsetHeight) || 0;
             const w = Number(child.offsetWidth) || 0;
             if (h > 44 && w > 60) {
@@ -1155,8 +1591,7 @@ export function createFloatCapsule({
           tempOpenHostNodes.add(hostNode);
           hostNode.dataset.stmHostPopupLive = '1';
         } else if (isActiveInChat() && !bypassClutterHide) {
-          hostNode.dataset.stmClutterHidden = '1';
-          markedHiddenNodes.add(hostNode);
+          hideClutterNode(hostNode, doc);
         }
       };
 
@@ -1175,6 +1610,18 @@ export function createFloatCapsule({
       cachedClutterItems.length > 0 ? `已收纳 (${cachedClutterItems.length})` : '收纳仓';
     head.append(el('strong', 'stm-float-pop-title', countLabel));
 
+    const headActions = el('div', 'stm-float-pop-head-actions');
+    const rescanBtn = el('button', 'stm-float-rescan-btn');
+    rescanBtn.type = 'button';
+    rescanBtn.title = '重新扫描页面上的悬浮球与底栏外挂按钮';
+    rescanBtn.setAttribute('aria-label', '重新扫描悬浮挂件');
+    rescanBtn.innerHTML = svgMarkup('refresh');
+    rescanBtn.addEventListener('click', evt => {
+      evt.stopPropagation?.();
+      syncClutterNow();
+    });
+    headActions.append(rescanBtn);
+
     if (cachedClutterItems.length > 0 || bypassClutterHide) {
       const rawToggleBtn = el(
         'button',
@@ -1189,8 +1636,9 @@ export function createFloatCapsule({
         bypassClutterHide = !bypassClutterHide;
         syncClutterNow();
       });
-      head.append(rawToggleBtn);
+      headActions.append(rawToggleBtn);
     }
+    head.append(headActions);
     popoverEl.append(head);
 
     if (cachedClutterItems.length === 0) {
@@ -1220,13 +1668,10 @@ export function createFloatCapsule({
           releaseBtn.addEventListener('click', evt => {
             evt.stopPropagation?.();
             removeTuckedWidgetKey(item.widgetKey);
-            if (item.hideHostEl?.dataset) {
-              delete item.hideHostEl.dataset.stmClutterHidden;
-              markedHiddenNodes.delete(item.hideHostEl);
-            }
+            unhideClutterNode(item.hideHostEl);
             toastMessage(`已放出悬浮挂件：${item.label}`, 'info');
             syncClutterNow();
-            if (cachedClutterItems.length === 0 && !bypassClutterHide) {
+            if (cachedClutterItems.length === 0 && cachedUntuckedWildItems.length === 0 && !bypassClutterHide) {
               closePopover();
             }
           });
@@ -1441,21 +1886,78 @@ export function createFloatCapsule({
   }
 
   /**
-   * 监听用户在页面上拖动外部野生悬浮球（如角色卡自带悬浮卷轴/小手机球），靠近伴侣球组时亮起磁吸圈，松手即吞入收纳！
+   * 监听用户在页面上拖动外部野生悬浮球（含 Shadow DOM 内部悬浮球、套壳普通球与横条胶囊），
+   * 沿 composedPath / 父链逐层向上检测，靠近伴侣球组时亮起磁吸圈，松手即吞入收纳！
    */
-  function findWildWidgetFromEventTarget(rawTarget, doc) {
-    let cur =
-      rawTarget && typeof rawTarget.closest === 'function' ? rawTarget : rawTarget?.parentElement;
+  function findWildWidgetFromEventTarget(rawTarget, doc, composedPath = null) {
     const sheld = doc?.getElementById?.('sheld');
-    while (cur && cur !== doc?.body && cur !== doc?.documentElement) {
-      if (capsuleEl?.contains?.(cur) || isYantaiInternalNode(cur)) return null;
-      if (CORE_BODY_EXCLUDED_IDS.has(String(cur.id || '')) && cur !== sheld) return null;
-      const parent = cur.parentNode || cur.parentElement;
-      if (parent === doc?.body || parent === sheld) {
-        return inspectWildFloatingCandidate(cur, root);
+    const chain = [];
+    const seen = new Set();
+
+    if (Array.isArray(composedPath) && composedPath.length > 0) {
+      for (const item of composedPath) {
+        if (!item || seen.has(item)) continue;
+        seen.add(item);
+        chain.push(item);
       }
-      cur = parent;
+    } else {
+      let cur = rawTarget;
+      let guard = 0;
+      while (cur && guard < 32) {
+        guard += 1;
+        if (!seen.has(cur)) {
+          seen.add(cur);
+          chain.push(cur);
+        }
+        cur = cur.parentNode || cur.parentElement || cur.host || null;
+      }
     }
+
+    // 预扫描链条以识别所属的 Shadow Host、是否处于透明 fixed 壳内，以及是否命中排除区域
+    let shadowHost = null;
+    let hasFixedOverlayAncestor = false;
+    for (const item of chain) {
+      if (item === doc?.body || item === doc?.documentElement || item === root) break;
+      if (!item?.tagName) {
+        if (!shadowHost && item?.host?.tagName) {
+          shadowHost = item.host;
+        }
+        continue;
+      }
+      if (capsuleEl?.contains?.(item) || isYantaiInternalNode(item)) return null;
+      const cid = String(item.id || '');
+      if (
+        (CORE_BODY_EXCLUDED_IDS.has(cid) && item !== sheld) ||
+        cid === 'chat' ||
+        cid === 'form_sheld' ||
+        isExcludedOverlaySubtree(item)
+      ) {
+        return null;
+      }
+      const pos = readEffectivePosition(item, root);
+      const pe = String(item.style?.pointerEvents || readComputedStyleSafe(item, root)?.pointerEvents || '')
+        .trim()
+        .toLowerCase();
+      if (pos === 'fixed' && pe === 'none') {
+        hasFixedOverlayAncestor = true;
+      }
+    }
+
+    for (const item of chain) {
+      if (item === doc?.body || item === doc?.documentElement || item === sheld || item === root) {
+        break;
+      }
+      if (!item?.tagName) continue;
+      const itemHost = item.__stmShadowHost || (isNodeInShadowDom(item, doc) ? shadowHost : null);
+      const hit = inspectWildFloatingCandidate(item, root, {
+        allowAbsoluteInFixedOverlay: hasFixedOverlayAncestor,
+        shadowHost: itemHost,
+      });
+      if (hit) {
+        return hit;
+      }
+    }
+
     return null;
   }
 
@@ -1542,33 +2044,43 @@ export function createFloatCapsule({
       bindCapsuleDrag(capsuleEl);
 
       const onDocPointerDown = evt => {
-        const target = evt.target;
+        const composedPath = typeof evt.composedPath === 'function' ? evt.composedPath() : null;
+        const target = (Array.isArray(composedPath) && composedPath[0]) || evt.target;
         const elTarget =
-          target && typeof target.closest === 'function' ? target : target?.parentElement;
+          target && typeof target.closest === 'function' ? target : target?.parentElement || target;
 
         if (tempOpenHostNodes.size > 0) {
           for (const hNode of Array.from(tempOpenHostNodes)) {
-            if (!elTarget || !hNode.contains?.(elTarget)) {
+            const insideTemp =
+              (elTarget && hNode.contains?.(elTarget)) ||
+              (Array.isArray(composedPath) && composedPath.includes(hNode));
+            if (!insideTemp) {
               tempOpenHostNodes.delete(hNode);
               delete hNode.dataset?.stmHostPopupLive;
-              if (isActiveInChat() && !bypassClutterHide && hNode.dataset) {
-                hNode.dataset.stmClutterHidden = '1';
-                markedHiddenNodes.add(hNode);
+              if (isActiveInChat() && !bypassClutterHide) {
+                hideClutterNode(hNode, doc);
               }
             }
           }
         }
 
-        if (capsuleEl && elTarget && capsuleEl.contains?.(elTarget)) return;
+        if (
+          capsuleEl &&
+          ((elTarget && capsuleEl.contains?.(elTarget)) ||
+            (Array.isArray(composedPath) && composedPath.includes(capsuleEl)))
+        ) {
+          return;
+        }
 
-        // 检测用户是否按住了某个野生悬浮球准备拖动
+        // 检测用户是否按住了某个野生悬浮球（含 Shadow DOM 内部与套壳普通球）准备拖动
         if (isActiveInChat() && (evt.button === undefined || evt.button === 0)) {
-          const wildCand = findWildWidgetFromEventTarget(elTarget, doc);
+          const wildCand = findWildWidgetFromEventTarget(elTarget, doc, composedPath);
           if (wildCand) {
             wildDragState = {
               pointerId: evt.pointerId,
               node: wildCand.node,
               key: wildCand.key,
+              shadowHost: wildCand.shadowHost || null,
               startX: Number(evt.clientX) || 0,
               startY: Number(evt.clientY) || 0,
               moved: false,
@@ -1625,6 +2137,7 @@ export function createFloatCapsule({
           const desc = buildClutterDescriptor(state.node, state.node, 'wild', 9999, {
             widgetKey: state.key,
             fallbackName: '悬浮挂件',
+            shadowHost: state.shadowHost || null,
           });
           addTuckedWidgetKey(state.key);
           bypassClutterHide = false;
@@ -1677,6 +2190,7 @@ export function createFloatCapsule({
 
     const active = isActiveInChat();
     if (!active) {
+      clearDelayedScanTimers();
       wildDragState = null;
       closePopover();
       clearQuickJump();
@@ -1696,9 +2210,21 @@ export function createFloatCapsule({
     }
     syncClutterNow();
     syncPositionAndBoundsNow();
+
+    // 为异步挂载的 Shadow DOM / Vue / React 悬浮球（如柏宝书、构画、千千结）安排两次轻量延迟补扫
+    clearDelayedScanTimers();
+    delayedScanTimers.push(
+      setTimeout(() => {
+        if (isActiveInChat()) syncClutterNow();
+      }, 600),
+      setTimeout(() => {
+        if (isActiveInChat()) syncClutterNow();
+      }, 1800),
+    );
   }
 
   function destroy() {
+    clearDelayedScanTimers();
     if (quickJumpTimer) {
       clearTimeout(quickJumpTimer);
       quickJumpTimer = 0;

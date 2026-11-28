@@ -7,26 +7,29 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.11';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.12';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.12';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.11';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.11';
+} from '../shell/host-actions.js?v=0.9.12';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.12';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
   PROMPT_ROLE_OPTIONS,
   UNLOCKED_MAX_CONTEXT,
   applyGenerationParams,
+  assignPromptToGroup,
   captureCurrentPresetSnapshot,
   createCustomPromptEntry,
   createPresetAutoSaver,
+  createPresetPromptGroup,
   deleteCustomPromptEntry,
   deleteHostPreset,
+  deletePresetPromptGroup,
   duplicateHostPreset,
   duplicatePromptEntry,
   exportPresetToJsonString,
@@ -37,22 +40,29 @@ import {
   getHostPresetState,
   importPresetItems,
   listBindableEntities,
+  movePresetPromptGroupOrder,
   movePromptEntryOrder,
   partitionPresetsByArchive,
   primeHostOpenAiModule,
   readGenerationParams,
   readOrderedPromptEntries,
+  readPresetPromptGroups,
+  readStoredPresetByName,
   recordPresetImportedAt,
   renameHostPreset,
+  renamePresetPromptGroup,
   saveHostPreset,
   selectHostPresetByName,
+  setAllPresetPromptGroupsCollapsed,
   setBoundPresetForEntity,
   setDefaultPresetName,
+  setPresetPromptGroupCollapsed,
+  setPresetPromptGroupEnabled,
   syncHostPromptManagerAndSettings,
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.11';
+} from './preset-backend.js?v=0.9.12';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -89,6 +99,12 @@ export function createPresetDock({
   let promptFilterMode = 'all'; // 'all' | 'enabled' | 'hide_markers'
   let expandedPromptId = '';
   let confirmDeletePromptId = '';
+  let promptGroupManageOpen = false;
+  let newPromptGroupDraft = '';
+  let renamingPromptGroupId = '';
+  let renamePromptGroupDraft = '';
+  let confirmDeletePromptGroupId = '';
+  let ungroupedPromptsCollapsed = false;
 
   // 防白改 & 防跨预设串写自动持久化状态机（绑定修改时刻的目标预设名与快照）
   let saveState = { tone: 'idle', text: '自动保存' };
@@ -102,6 +118,7 @@ export function createPresetDock({
     presetListWrap: null,
     bindCharListWrap: null,
     promptCountSpan: null,
+    promptGroupBtn: null,
     promptListWrap: null,
   };
 
@@ -822,9 +839,87 @@ export function createPresetDock({
       return;
     }
 
+    const hostState = getHostPresetState({ getContext, doc });
+    const fallbackPreset = hostState.activePreset
+      ? readStoredPresetByName(hostState.activePreset, { pm: hostState.presetManager })
+      : null;
+
     const { entries, enabledCount, totalCount } = readOrderedPromptEntries(oai);
     if (liveRefs.promptCountSpan) {
       liveRefs.promptCountSpan.textContent = `已启用 ${enabledCount} / 共 ${totalCount} 条`;
+    }
+
+    const groupState = readPresetPromptGroups(oai, { fallbackPreset });
+    if (liveRefs.promptGroupBtn) {
+      liveRefs.promptGroupBtn.textContent =
+        groupState.groups.length > 0 ? `分组 (${groupState.groups.length})` : '分组';
+      liveRefs.promptGroupBtn.classList.toggle('is-active', promptGroupManageOpen);
+    }
+
+    // 轻量分组管理微条（仅点击「分组」后按需展开，不干扰日常列表）
+    if (promptGroupManageOpen) {
+      const gBar = el('div', 'stm-entry-group-bar');
+      const gInput = el('input', 'stm-api-input stm-compact-input stm-entry-group-input');
+      gInput.type = 'text';
+      gInput.placeholder = '输入新分组名称（如：文风 / 状态栏）…';
+      gInput.value = newPromptGroupDraft;
+      gInput.addEventListener('input', () => {
+        newPromptGroupDraft = gInput.value;
+      });
+
+      const doCreateGroup = () => {
+        const clean = String(newPromptGroupDraft || gInput.value || '').trim();
+        if (!clean) {
+          toastMessage('请先输入分组名称', 'warning');
+          return;
+        }
+        const res = createPresetPromptGroup(oai, clean, { fallbackPreset });
+        if (res.ok) {
+          newPromptGroupDraft = '';
+          void syncHostPromptManagerAndSettings({ getContext, immediateRender: false });
+          scheduleAutoPersist();
+          toastMessage(`已新建分组「${res.group.name}」`, 'success');
+          renderPromptListOnly();
+        }
+      };
+
+      gInput.addEventListener('keydown', evt => {
+        if (evt.key === 'Enter') {
+          evt.preventDefault();
+          doCreateGroup();
+        }
+      });
+
+      const createBtn = el('button', 'stm-preset-mini-btn stm-prompt-group-create-btn', '+ 新建分组');
+      createBtn.type = 'button';
+      createBtn.addEventListener('click', doCreateGroup);
+
+      const barActions = el('div', 'stm-entry-group-bar-actions');
+      if (groupState.groups.length > 0) {
+        const expandAllBtn = el('button', 'stm-ghost-link', '全部展开');
+        expandAllBtn.type = 'button';
+        expandAllBtn.addEventListener('click', () => {
+          setAllPresetPromptGroupsCollapsed(oai, false, { fallbackPreset });
+          ungroupedPromptsCollapsed = false;
+          scheduleAutoPersist();
+          renderPromptListOnly();
+        });
+        const collapseAllBtn = el('button', 'stm-ghost-link', '全部收起');
+        collapseAllBtn.type = 'button';
+        collapseAllBtn.addEventListener('click', () => {
+          setAllPresetPromptGroupsCollapsed(oai, true, { fallbackPreset });
+          ungroupedPromptsCollapsed = true;
+          scheduleAutoPersist();
+          renderPromptListOnly();
+        });
+        barActions.append(expandAllBtn, collapseAllBtn);
+      }
+      if (groupState.source === 'baibai' || groupState.source === 'entryGrouping') {
+        barActions.append(el('span', 'stm-entry-group-compat-tag', '兼容柏宝箱格式'));
+      }
+
+      gBar.append(gInput, createBtn, barActions);
+      wrap.append(gBar);
     }
 
     const visibleEntries = filterPromptEntries(entries, {
@@ -842,8 +937,9 @@ export function createPresetDock({
     }
 
     const canReorderDirectly = !promptSearchQuery.trim() && promptFilterMode === 'all';
+    const hasGroups = groupState.groups.length > 0;
 
-    for (const entry of visibleEntries) {
+    const buildPromptCard = entry => {
       const isExpanded = expandedPromptId === entry.identifier;
       const itemBox = el(
         'div',
@@ -864,7 +960,7 @@ export function createPresetDock({
         togglePromptEntryEnabled(oai, entry.identifier);
         void syncHostPromptManagerAndSettings({ getContext, changedPromptId: entry.identifier });
         scheduleAutoPersist();
-        if (promptFilterMode === 'enabled') {
+        if (promptFilterMode === 'enabled' || hasGroups) {
           renderPromptListOnly();
         } else {
           const nowEnabled = !entry.enabled;
@@ -999,6 +1095,35 @@ export function createPresetDock({
       // 4) 内联编辑面板
       if (isExpanded) {
         const editor = el('div', 'stm-prompt-editor');
+
+        // 若当前预设存在分组，提供轻巧下拉一键归组/移出分组（系统槽同样适用）
+        if (hasGroups) {
+          const curGroupId = groupState.prompts[entry.identifier]?.groupId || '';
+          const assignRow = el('div', 'stm-entry-group-assign-row');
+          assignRow.append(el('span', 'stm-cell-label', '所属分组'));
+          const grpSelect = el('select', 'stm-api-select stm-compact-input stm-prompt-group-select');
+          const unOpt = el('option', '', '未分组');
+          unOpt.value = '';
+          unOpt.selected = !curGroupId;
+          grpSelect.append(unOpt);
+          for (const g of groupState.groups) {
+            const opt = el('option', '', g.name);
+            opt.value = g.id;
+            opt.selected = curGroupId === g.id;
+            grpSelect.append(opt);
+          }
+          grpSelect.addEventListener('change', () => {
+            assignPromptToGroup(oai, entry.identifier, grpSelect.value, { fallbackPreset });
+            if (grpSelect.value) {
+              setPresetPromptGroupCollapsed(oai, grpSelect.value, false, { fallbackPreset });
+            }
+            void syncHostPromptManagerAndSettings({ getContext, immediateRender: false });
+            scheduleAutoPersist();
+            renderPromptListOnly();
+          });
+          assignRow.append(grpSelect);
+          editor.append(assignRow);
+        }
 
         if (entry.isMarker) {
           editor.append(
@@ -1206,7 +1331,237 @@ export function createPresetDock({
         itemBox.append(editor);
       }
 
-      wrap.append(itemBox);
+      return itemBox;
+    };
+
+    // 无分组时：100% 保持原汁原味的清爽平铺列表
+    if (!hasGroups) {
+      for (const entry of visibleEntries) {
+        wrap.append(buildPromptCard(entry));
+      }
+      return;
+    }
+
+    // 有分组时：极简细线折叠节 + 整组总控 + 搜索命中自动临时展开
+    const isSearching = Boolean(promptSearchQuery.trim());
+    const allByGroup = new Map();
+    const visibleByGroup = new Map();
+    for (const g of groupState.groups) {
+      allByGroup.set(g.id, []);
+      visibleByGroup.set(g.id, []);
+    }
+    const visibleUngrouped = [];
+    const allUngrouped = [];
+
+    for (const entry of entries) {
+      const gid = groupState.prompts[entry.identifier]?.groupId || '';
+      if (gid && allByGroup.has(gid)) {
+        allByGroup.get(gid).push(entry);
+      } else {
+        allUngrouped.push(entry);
+      }
+    }
+    for (const entry of visibleEntries) {
+      const gid = groupState.prompts[entry.identifier]?.groupId || '';
+      if (gid && visibleByGroup.has(gid)) {
+        visibleByGroup.get(gid).push(entry);
+      } else {
+        visibleUngrouped.push(entry);
+      }
+    }
+
+    groupState.groups.forEach((group, gIdx) => {
+      const groupAll = allByGroup.get(group.id) || [];
+      const groupVisible = visibleByGroup.get(group.id) || [];
+      if (isSearching && groupVisible.length === 0) return;
+      if (promptFilterMode !== 'all' && groupVisible.length === 0 && groupAll.length > 0) return;
+
+      const enabledInGroup = groupAll.filter(e => e.enabled).length;
+      const groupOpen = isSearching ? true : !group.collapsed;
+      const sec = el('div', `stm-entry-group-section${groupOpen ? ' is-open' : ''}`);
+      sec.dataset.stmGroupId = group.id;
+
+      const head = el('div', 'stm-entry-group-head');
+
+      // 整组总开关
+      const anyOn = groupAll.length > 0 ? enabledInGroup > 0 : group.enabled;
+      const masterToggle = el('button', `stm-prompt-toggle stm-group-master-toggle${anyOn ? ' is-on' : ''}`);
+      masterToggle.type = 'button';
+      masterToggle.setAttribute('role', 'switch');
+      masterToggle.setAttribute('aria-checked', String(anyOn));
+      masterToggle.title = anyOn
+        ? `停用「${group.name}」组内全部条目`
+        : `启用「${group.name}」组内全部条目`;
+      masterToggle.append(el('span', 'stm-prompt-toggle-knob'));
+      masterToggle.addEventListener('click', evt => {
+        evt.stopPropagation();
+        setPresetPromptGroupEnabled(oai, group.id, !anyOn, { fallbackPreset });
+        void syncHostPromptManagerAndSettings({ getContext });
+        scheduleAutoPersist();
+        renderPromptListOnly();
+      });
+      head.append(masterToggle);
+
+      if (renamingPromptGroupId === group.id) {
+        const renameRow = el('div', 'stm-entry-group-rename-row');
+        const rInput = el('input', 'stm-api-input stm-compact-input stm-entry-group-rename-input');
+        rInput.type = 'text';
+        rInput.value = renamePromptGroupDraft;
+        rInput.addEventListener('input', () => {
+          renamePromptGroupDraft = rInput.value;
+        });
+        const commitRename = () => {
+          const nextName = String(renamePromptGroupDraft || rInput.value || '').trim();
+          if (nextName) {
+            renamePresetPromptGroup(oai, group.id, nextName, { fallbackPreset });
+            scheduleAutoPersist();
+          }
+          renamingPromptGroupId = '';
+          renderPromptListOnly();
+        };
+        rInput.addEventListener('keydown', evt => {
+          if (evt.key === 'Enter') {
+            evt.preventDefault();
+            commitRename();
+          } else if (evt.key === 'Escape') {
+            renamingPromptGroupId = '';
+            renderPromptListOnly();
+          }
+        });
+        const okBtn = el('button', 'stm-preset-mini-btn', '保存');
+        okBtn.type = 'button';
+        okBtn.addEventListener('click', commitRename);
+        const cancelBtn = el('button', 'stm-ghost-link', '取消');
+        cancelBtn.type = 'button';
+        cancelBtn.addEventListener('click', () => {
+          renamingPromptGroupId = '';
+          renderPromptListOnly();
+        });
+        renameRow.append(rInput, okBtn, cancelBtn);
+        head.append(renameRow);
+      } else {
+        const toggleHeadBtn = el('button', 'stm-entry-group-toggle');
+        toggleHeadBtn.type = 'button';
+        toggleHeadBtn.setAttribute('aria-expanded', String(groupOpen));
+        toggleHeadBtn.append(
+          createIconNode(doc, 'chevron', 'stm-entry-group-chevron'),
+          el('span', 'stm-entry-group-title', group.name),
+          el('span', 'stm-entry-group-count', `${enabledInGroup}/${groupAll.length}`),
+        );
+        toggleHeadBtn.addEventListener('click', () => {
+          setPresetPromptGroupCollapsed(oai, group.id, !group.collapsed, { fallbackPreset });
+          scheduleAutoPersist();
+          renderPromptListOnly();
+        });
+        head.append(toggleHeadBtn);
+
+        const gActions = el('div', 'stm-entry-group-actions');
+        if (groupState.groups.length > 1) {
+          const gUp = el('button', 'stm-prompt-order-btn');
+          gUp.type = 'button';
+          gUp.disabled = gIdx === 0;
+          gUp.title = '分组上移';
+          gUp.innerHTML = svgMarkup('arrowup');
+          gUp.addEventListener('click', evt => {
+            evt.stopPropagation();
+            if (movePresetPromptGroupOrder(oai, group.id, 'up', { fallbackPreset })) {
+              scheduleAutoPersist();
+              renderPromptListOnly();
+            }
+          });
+          const gDown = el('button', 'stm-prompt-order-btn');
+          gDown.type = 'button';
+          gDown.disabled = gIdx >= groupState.groups.length - 1;
+          gDown.title = '分组下移';
+          gDown.innerHTML = svgMarkup('arrowdown');
+          gDown.addEventListener('click', evt => {
+            evt.stopPropagation();
+            if (movePresetPromptGroupOrder(oai, group.id, 'down', { fallbackPreset })) {
+              scheduleAutoPersist();
+              renderPromptListOnly();
+            }
+          });
+          gActions.append(gUp, gDown);
+        }
+
+        const renameBtn = el('button', 'stm-ghost-link', '改名');
+        renameBtn.type = 'button';
+        renameBtn.addEventListener('click', evt => {
+          evt.stopPropagation();
+          confirmDeletePromptGroupId = '';
+          renamingPromptGroupId = group.id;
+          renamePromptGroupDraft = group.name;
+          renderPromptListOnly();
+        });
+
+        const isConfirmDel = confirmDeletePromptGroupId === group.id;
+        const delBtn = el('button', `stm-ghost-link${isConfirmDel ? ' is-danger' : ''}`, isConfirmDel ? '确认解散?' : '解散');
+        delBtn.type = 'button';
+        delBtn.title = '仅解散分组，组内提示词条目全部保留并回到未分组';
+        delBtn.addEventListener('click', evt => {
+          evt.stopPropagation();
+          if (!isConfirmDel) {
+            confirmDeletePromptGroupId = group.id;
+            renderPromptListOnly();
+            return;
+          }
+          deletePresetPromptGroup(oai, group.id, { fallbackPreset });
+          confirmDeletePromptGroupId = '';
+          scheduleAutoPersist();
+          toastMessage(`已解散分组「${group.name}」，条目已保留`, 'info');
+          renderPromptListOnly();
+        });
+
+        gActions.append(renameBtn, delBtn);
+        head.append(gActions);
+      }
+
+      sec.append(head);
+
+      if (groupOpen) {
+        const body = el('div', 'stm-entry-group-body');
+        if (groupVisible.length === 0) {
+          body.append(
+            el('div', 'stm-entry-group-empty', '暂无条目，展开任意条目后可在「所属分组」里移入此组'),
+          );
+        } else {
+          for (const entry of groupVisible) {
+            body.append(buildPromptCard(entry));
+          }
+        }
+        sec.append(body);
+      }
+
+      wrap.append(sec);
+    });
+
+    if (visibleUngrouped.length > 0) {
+      const enabledUngrouped = allUngrouped.filter(e => e.enabled).length;
+      const unOpen = isSearching ? true : !ungroupedPromptsCollapsed;
+      const unSec = el('div', `stm-entry-group-section is-ungrouped${unOpen ? ' is-open' : ''}`);
+      const unHead = el('div', 'stm-entry-group-head');
+      const unToggle = el('button', 'stm-entry-group-toggle');
+      unToggle.type = 'button';
+      unToggle.setAttribute('aria-expanded', String(unOpen));
+      unToggle.append(
+        createIconNode(doc, 'chevron', 'stm-entry-group-chevron'),
+        el('span', 'stm-entry-group-title', '未分组'),
+        el('span', 'stm-entry-group-count', `${enabledUngrouped}/${allUngrouped.length}`),
+      );
+      unToggle.addEventListener('click', () => {
+        ungroupedPromptsCollapsed = !ungroupedPromptsCollapsed;
+        renderPromptListOnly();
+      });
+      unHead.append(unToggle);
+      unSec.append(unHead);
+      if (unOpen) {
+        const unBody = el('div', 'stm-entry-group-body');
+        for (const entry of visibleUngrouped) {
+          unBody.append(buildPromptCard(entry));
+        }
+        unSec.append(unBody);
+      }
+      wrap.append(unSec);
     }
   }
 
@@ -1224,6 +1579,7 @@ export function createPresetDock({
       presetListWrap: null,
       bindCharListWrap: null,
       promptCountSpan: null,
+      promptGroupBtn: null,
       promptListWrap: null,
     };
 
@@ -1798,6 +2154,22 @@ export function createPresetDock({
       });
       filterPills.append(fBtn);
     }
+
+    const groupBtn = el(
+      'button',
+      `stm-mini-pill stm-prompt-group-btn${promptGroupManageOpen ? ' is-active' : ''}`,
+      '分组',
+    );
+    groupBtn.type = 'button';
+    groupBtn.title = '新建或整理条目分组（双向兼容柏宝箱预设分组）';
+    groupBtn.addEventListener('click', () => {
+      promptGroupManageOpen = !promptGroupManageOpen;
+      renamingPromptGroupId = '';
+      confirmDeletePromptGroupId = '';
+      renderPromptListOnly();
+    });
+    liveRefs.promptGroupBtn = groupBtn;
+    filterPills.append(groupBtn);
 
     promptFilterBar.append(pSearchBox, filterPills);
     secPrompts.append(promptFilterBar);

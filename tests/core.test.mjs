@@ -11062,3 +11062,452 @@ test('preset stream toggle + assistant SSE streaming & fallback + chat lorebook 
     globalThis.window = prevWin;
   }
 });
+
+test('float-capsule compat overhaul: Shadow DOM 悬浮球（柏宝书 pointerdown/up + setPointerCapture）、套壳普通球、横条悬浮胶囊与防误吞大面板', async () => {
+  const {
+    discoverWildFloatingWidgets,
+    inspectWildFloatingCandidate,
+    createFloatCapsule,
+  } = await import('../src/shell/float-capsule.js');
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevPointerEvent = globalThis.PointerEvent;
+  const prevMouseEvent = globalThis.MouseEvent;
+  const { doc } = createMiniDomHarness();
+
+  // 在 Node 环境提供标准 PointerEvent / MouseEvent 构造以便验证合成轻触
+  class FakePointerEvent extends Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+      this.clientX = init.clientX ?? 0;
+      this.clientY = init.clientY ?? 0;
+      this.button = init.button ?? 0;
+    }
+  }
+  const win = {
+    document: doc,
+    innerWidth: 390,
+    innerHeight: 800,
+    visualViewport: { width: 390, height: 800, offsetLeft: 0, offsetTop: 0, addEventListener() {}, removeEventListener() {} },
+    addEventListener() {},
+    removeEventListener() {},
+    requestAnimationFrame: fn => {
+      fn();
+      return 1;
+    },
+    cancelAnimationFrame() {},
+    PointerEvent: FakePointerEvent,
+    MouseEvent: FakePointerEvent,
+  };
+  globalThis.document = doc;
+  globalThis.window = win;
+  globalThis.PointerEvent = FakePointerEvent;
+  globalThis.MouseEvent = FakePointerEvent;
+
+  try {
+    const sheld = doc.createElement('div');
+    sheld.id = 'sheld';
+    const chat = doc.createElement('div');
+    chat.id = 'chat';
+    sheld.append(chat);
+    doc.body.append(sheld);
+
+    // 1. 模拟柏宝书 (#bbs-app-host display:contents + Shadow DOM + 仅靠 pointerdown/pointerup + setPointerCapture 打开)
+    const bbsHost = doc.createElement('div');
+    bbsHost.id = 'bbs-app-host';
+    bbsHost.style.display = 'contents';
+    const bbsShadow = doc.createElement('div');
+    bbsShadow.host = bbsHost;
+    bbsHost.shadowRoot = bbsShadow;
+    const bbsAppWrap = doc.createElement('div');
+    const bbsOrb = doc.createElement('div');
+    bbsOrb.className = 'bbs-orb shape-circle';
+    bbsOrb.setAttribute('role', 'button');
+    bbsOrb.setAttribute('aria-label', '打开柏宝书');
+    bbsOrb.style.position = 'fixed';
+    bbsOrb.style.setProperty('display', 'flex');
+    bbsOrb.offsetWidth = 48;
+    bbsOrb.offsetHeight = 48;
+    bbsOrb.getRootNode = () => bbsShadow;
+
+    let bbsBookOpened = 0;
+    let bbsActivePid = null;
+    bbsOrb.setPointerCapture = () => {
+      throw new Error('DOMException: NotFoundError on synthetic pointerId');
+    };
+    bbsOrb.addEventListener('pointerdown', evt => {
+      bbsActivePid = evt.pointerId;
+      bbsOrb.setPointerCapture(evt.pointerId);
+    });
+    bbsOrb.addEventListener('pointerup', evt => {
+      if (bbsActivePid === evt.pointerId) {
+        bbsActivePid = null;
+        bbsBookOpened += 1;
+      }
+    });
+
+    const bbsModal = doc.createElement('div');
+    bbsModal.className = 'bbs-modal-dialog';
+    bbsModal.setAttribute('role', 'dialog');
+    bbsModal.style.position = 'fixed';
+    bbsModal.offsetWidth = 360;
+    bbsModal.offsetHeight = 520;
+    bbsModal.getRootNode = () => bbsShadow;
+
+    bbsAppWrap.append(bbsOrb, bbsModal);
+    bbsShadow.append(bbsAppWrap);
+    doc.body.append(bbsHost);
+
+    // 2. 模拟套了 2 层壳的普通 Light DOM 悬浮球
+    const normalShell = doc.createElement('div');
+    normalShell.id = 'card-widget-root';
+    const innerShell = doc.createElement('div');
+    const nestedBall = doc.createElement('button');
+    nestedBall.id = 'nested-status-ball';
+    nestedBall.style.position = 'fixed';
+    nestedBall.offsetWidth = 44;
+    nestedBall.offsetHeight = 44;
+    nestedBall.textContent = '状态栏';
+    innerShell.append(nestedBall);
+    normalShell.append(innerShell);
+    doc.body.append(normalShell);
+
+    // 3. 模拟横条悬浮胶囊 (220×42) + 透明 fixed 壳内 absolute 悬浮球 + 应被拒收的大面板 (260×220)
+    const barPill = doc.createElement('div');
+    barPill.id = 'mini-bar-pill';
+    barPill.style.position = 'fixed';
+    barPill.offsetWidth = 220;
+    barPill.offsetHeight = 42;
+    barPill.textContent = '快捷指令条';
+    doc.body.append(barPill);
+
+    const fixedOverlay = doc.createElement('div');
+    fixedOverlay.id = 'react-overlay-root';
+    fixedOverlay.style.position = 'fixed';
+    fixedOverlay.style.pointerEvents = 'none';
+    fixedOverlay.offsetWidth = 390;
+    fixedOverlay.offsetHeight = 800;
+    const absOrb = doc.createElement('button');
+    absOrb.id = 'gouhua-orb';
+    absOrb.style.position = 'absolute';
+    absOrb.style.pointerEvents = 'auto';
+    absOrb.offsetWidth = 46;
+    absOrb.offsetHeight = 46;
+    absOrb.setAttribute('aria-label', '构画悬浮球');
+    fixedOverlay.append(absOrb);
+    doc.body.append(fixedOverlay);
+
+    const bigPanel = doc.createElement('div');
+    bigPanel.id = 'expanded-big-panel';
+    bigPanel.style.position = 'fixed';
+    bigPanel.offsetWidth = 260;
+    bigPanel.offsetHeight = 220;
+    doc.body.append(bigPanel);
+
+    const discovered = discoverWildFloatingWidgets(doc, win);
+    const keys = discovered.map(d => d.key);
+    assert.ok(
+      keys.some(k => k.startsWith('shadow:id:bbs-app-host::')),
+      '应穿透 Shadow DOM 扫到柏宝书悬浮球并生成带宿主前缀的稳定键',
+    );
+    assert.ok(keys.includes('id:nested-status-ball'), '应穿透浅层包裹容器扫到套壳普通悬浮球');
+    assert.ok(keys.includes('id:mini-bar-pill'), '应支持 220x42 横条悬浮胶囊');
+    assert.ok(keys.includes('id:gouhua-orb'), '应穿透透明 fixed 壳扫到内部 absolute 悬浮球');
+    assert.equal(keys.includes('id:expanded-big-panel'), false, '绝不误吞 260x220 大面板');
+    assert.equal(inspectWildFloatingCandidate(bbsHost, win), null, '绝不直接吞掉 #bbs-app-host 外壳');
+
+    // 4. 在零底栏外挂按钮场景下，存在野生悬浮球时中间收纳球应自动显现，且 Shadow DOM 吸纳/触发/放出闭环无误
+    const ctx = {
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'test_orb.png', name: '测试卡' }],
+      chat: [{ is_user: false, mes: '你好' }],
+      extensionSettings: { st_mate: { floatCapsuleEnabled: true } },
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const capsule = createFloatCapsule({
+      root: win,
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    capsule.refresh();
+
+    const capNode = doc.getElementById('stm-float-capsule');
+    const bagBtn = capNode.querySelector('.stm-float-bag');
+    assert.equal(bagBtn.hidden, false, '即使没有底栏按钮，扫到页面野生悬浮球时也应展示中间收纳球入口');
+
+    bagBtn.click();
+    const absorbBtns = capNode.querySelectorAll('.stm-float-absorb-btn');
+    assert.equal(absorbBtns.length, 4, '收纳仓应列出全部 4 个待收纳悬浮挂件');
+
+    // 一键吸纳柏宝书 Shadow DOM 球：验证通过内联 display:none 隐藏球体且绝不隐藏宿主或同级弹窗
+    const bbsAbsorbBtn = absorbBtns.find(b => /柏宝书/.test(b.textContent || b.title || ''));
+    assert.ok(bbsAbsorbBtn, '待收纳列表应识别出柏宝书标签');
+    bbsAbsorbBtn.click();
+
+    assert.equal(bbsOrb.dataset.stmClutterHidden, '1');
+    assert.equal(bbsOrb.style.getPropertyValue('display'), 'none', 'Shadow DOM 内部球体必须通过内联 display:none 隐藏');
+    assert.equal(bbsOrb.style.getPropertyPriority('display'), 'important');
+    assert.equal(bbsHost.style.display, 'contents', '严禁隐藏 Shadow Host 外壳');
+    assert.notEqual(bbsModal.style.getPropertyValue('display'), 'none', '严禁隐藏同一 Shadow DOM 内的弹窗节点');
+
+    // 点击收纳仓中的柏宝书项：验证合成 pointerdown/pointerup 成功打开且零 setPointerCapture 异常
+    const bbsTuckedBtn = capNode
+      .querySelector('.stm-float-tucked-chip')
+      .querySelector('.stm-float-pop-item');
+    bbsTuckedBtn.click();
+    assert.equal(bbsBookOpened, 1, '点击收纳仓内的柏宝书项应通过完整轻触事件序列成功唤醒柏宝书');
+
+    // 点击放出按钮：验证精确还原 Shadow DOM 球原始 display: flex
+    bagBtn.click();
+    capNode.querySelector('.stm-float-item-release').click();
+    assert.equal(bbsOrb.dataset.stmClutterHidden, undefined);
+    assert.equal(bbsOrb.style.getPropertyValue('display'), 'flex', '放出 Shadow DOM 悬浮球后必须精准还原其原始 display');
+
+    // 验证新挂载延迟球可通过右上角「重新扫描」立即扫出
+    const lateBall = doc.createElement('button');
+    lateBall.id = 'qianqianjie-orb';
+    lateBall.style.position = 'fixed';
+    lateBall.offsetWidth = 44;
+    lateBall.offsetHeight = 44;
+    lateBall.textContent = '千千结';
+    doc.body.append(lateBall);
+    capNode.querySelector('.stm-float-rescan-btn').click();
+    assert.ok(
+      capNode
+        .querySelectorAll('.stm-float-absorb-btn')
+        .some(b => /千千结/.test([b.title, b.textContent, ...(b.children || []).map(c => c.textContent)].join(''))),
+      '点「重新扫描」应立即发现新挂载的悬浮球',
+    );
+
+    capsule.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.PointerEvent = prevPointerEvent;
+    globalThis.MouseEvent = prevMouseEvent;
+  }
+});
+
+test('preset BaiBai-compat grouping & worldbook grouping: 柏宝箱双向兼容预设条目分组、第三方 entryGrouping 兼容与世界书两层轻分组', async () => {
+  const {
+    readPresetPromptGroups,
+    createPresetPromptGroup,
+    assignPromptToGroup,
+    setPresetPromptGroupEnabled,
+    setPresetPromptGroupCollapsed,
+    renamePresetPromptGroup,
+    movePresetPromptGroupOrder,
+    deletePresetPromptGroup,
+    duplicatePromptEntry,
+    deleteCustomPromptEntry,
+  } = await import('../src/modules/preset-backend.js');
+  const {
+    readWorldInfoEntryGroups,
+    createWorldInfoEntryGroup,
+    assignWorldInfoEntryToGroup,
+    setWorldInfoEntryGroupEnabled,
+    setWorldInfoEntryGroupCollapsed,
+    deleteWorldInfoEntryGroup,
+  } = await import('../src/modules/char-world-backend.js');
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = win;
+
+  try {
+    // 1. 验证直接读取柏宝箱 extensions.baibaiToolkit.presetPromptGroups，并保留其他扩展字段不动
+    const oai = {
+      preset_settings_openai: '重型古风预设',
+      prompts: [
+        { identifier: 'main', name: '主系统指令', role: 'system', content: '核心', system_prompt: true, marker: false },
+        { identifier: 'style_a', name: '古风文笔', role: 'system', content: '白描细写', system_prompt: false, marker: false },
+        { identifier: 'style_b', name: '对话潜台词', role: 'system', content: '克制留白', system_prompt: false, marker: false },
+        { identifier: 'status_bar', name: '顶部状态栏', role: 'system', content: '<status/>', system_prompt: false, marker: false },
+      ],
+      prompt_order: [
+        {
+          character_id: 100001,
+          order: [
+            { identifier: 'main', enabled: true },
+            { identifier: 'style_a', enabled: true },
+            { identifier: 'style_b', enabled: true },
+            { identifier: 'status_bar', enabled: false },
+          ],
+        },
+      ],
+      extensions: {
+        baibaiToolkit: {
+          presetPromptFavorites: ['style_a'],
+          presetPromptGroups: {
+            groups: [
+              { id: 'bb_style', name: '文风控制', order: 0, collapsed: true, enabled: true },
+            ],
+            prompts: {
+              style_a: { groupId: 'bb_style' },
+              style_b: { groupId: 'bb_style' },
+            },
+          },
+        },
+        otherPlugin: { keepMe: 42 },
+      },
+    };
+
+    const readBb = readPresetPromptGroups(oai);
+    assert.equal(readBb.source, 'baibai');
+    assert.equal(readBb.groups.length, 1);
+    assert.equal(readBb.groups[0].name, '文风控制');
+    assert.deepEqual(readBb.prompts.style_a, { groupId: 'bb_style' });
+
+    // 验证整组开关与复制继承分组、删除条目清理映射
+    setPresetPromptGroupEnabled(oai, 'bb_style', false);
+    const bucketOrder = oai.prompt_order[0].order;
+    assert.equal(bucketOrder.find(x => x.identifier === 'style_a').enabled, false);
+    assert.equal(bucketOrder.find(x => x.identifier === 'style_b').enabled, false);
+    assert.equal(bucketOrder.find(x => x.identifier === 'main').enabled, true, '组外条目不受整组开关影响');
+
+    const dupRes = duplicatePromptEntry(oai, 'style_a', { enabled: false });
+    assert.equal(dupRes.ok, true);
+    assert.deepEqual(
+      oai.extensions.baibaiToolkit.presetPromptGroups.prompts[dupRes.prompt.identifier],
+      { groupId: 'bb_style' },
+      '复制组内条目应自动归入同一分组且严格写回柏宝箱 { groupId } 对象契约',
+    );
+    deleteCustomPromptEntry(oai, dupRes.prompt.identifier);
+    assert.equal(
+      oai.extensions.baibaiToolkit.presetPromptGroups.prompts[dupRes.prompt.identifier],
+      undefined,
+      '删除条目后同步清理分组残余映射',
+    );
+
+    // 验证新建分组、改名、排序与解散分组（绝不删条目本身，保留其他扩展字段）
+    const createdG = createPresetPromptGroup(oai, '状态栏区', { initialPromptIds: ['status_bar'] });
+    assert.equal(createdG.ok, true);
+    renamePresetPromptGroup(oai, createdG.group.id, '界面与状态栏');
+    assert.equal(movePresetPromptGroupOrder(oai, createdG.group.id, 'up'), true);
+    assert.equal(readPresetPromptGroups(oai).groups[0].name, '界面与状态栏');
+    assert.deepEqual(oai.extensions.baibaiToolkit.presetPromptFavorites, ['style_a'], '严禁破坏柏宝箱其他子字段');
+    assert.deepEqual(oai.extensions.otherPlugin, { keepMe: 42 }, '严禁破坏其他插件扩展字段');
+
+    // 验证兼容读取第三方 extensions.entryGrouping（成员列表与起止范围两种格式）
+    const legacyRangeOai = {
+      prompts: structuredClone(oai.prompts),
+      prompt_order: structuredClone(oai.prompt_order),
+      extensions: {
+        entryGrouping: [
+          { id: 'r1', name: '区间组', startIdentifier: 'style_a', endIdentifier: 'status_bar', mode: 'inclusive' },
+        ],
+      },
+    };
+    const parsedRange = readPresetPromptGroups(legacyRangeOai);
+    assert.equal(parsedRange.source, 'entryGrouping');
+    assert.deepEqual(parsedRange.prompts.style_b, { groupId: 'r1' });
+    assert.deepEqual(parsedRange.prompts.status_bar, { groupId: 'r1' });
+
+    // 2. 验证 Preset Dock UI 渲染分组折叠头、搜索自动展开与解散保留条目
+    const ctx = {
+      characterId: 0,
+      groupId: null,
+      characters: [{ avatar: 'c1.png', name: '清砚', data: { extensions: { world: '主设定书' } } }],
+      chat: [{ is_user: false, mes: '开场' }],
+      chatMetadata: {},
+      extensionSettings: { st_mate: {} },
+      chatCompletionSettings: oai,
+      saveSettingsDebounced() {},
+      getPresetManager: () => ({
+        getPresetList: () => ({ presets: [oai], preset_names: { 重型古风预设: 0 } }),
+        getSelectedPresetName: () => '重型古风预设',
+      }),
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const pDock = createPresetDock({ getContext: () => ctx, store });
+    pDock.open();
+    const pDockEl = doc.getElementById('stm-preset-dock');
+    assert.ok(pDockEl.querySelectorAll('.stm-entry-group-section').length >= 2, '有分组数据时自动渲染细线分组折叠节');
+
+    // 文风控制组默认 collapsed: true，搜索「白描」应临时自动展开并命中「古风文笔」
+    const searchInput = pDockEl.querySelectorAll('.stm-model-combo-input').at(-1);
+    searchInput.value = '白描';
+    searchInput.dispatchEvent(new Event('input'));
+    assert.ok(
+      pDockEl.querySelectorAll('.stm-prompt-name').some(n => n.textContent === '古风文笔'),
+      '搜索关键词时应自动穿透展开折叠分组显示命中条目',
+    );
+    pDock.destroy();
+
+    // 解散全部组后验证 4 条提示词完好无损
+    deletePresetPromptGroup(oai, createdG.group.id);
+    deletePresetPromptGroup(oai, 'bb_style');
+    assert.equal(oai.prompts.length, 4, '解散分组绝不删除任何提示词条目');
+    assert.equal(oai.extensions.baibaiToolkit.presetPromptGroups, undefined, '清空全部组后干净移除空分组节点');
+    assert.deepEqual(oai.extensions.baibaiToolkit.presetPromptFavorites, ['style_a'], '清理空分组时保留柏宝箱收藏字段');
+
+    // 3. 验证世界书条目极简分组（绝不触碰原生 entry.group 互斥包含组）+ 书库按来源分节 UI
+    const bookData = {
+      entries: {
+        0: { uid: 0, comment: '女主设定', key: ['沈念'], content: '出身江南', constant: true, disable: false, group: 'native_mutex_A' },
+        1: { uid: 1, comment: '宗门地理', key: ['青云宗'], content: '山巅云海', constant: false, disable: false, group: 'native_mutex_B' },
+        2: { uid: 2, comment: '日常规矩', key: ['宵禁'], content: '亥时关门', constant: false, disable: false, group: '' },
+      },
+    };
+    assert.equal(readWorldInfoEntryGroups(bookData).groups.length, 0);
+    const wgRes = createWorldInfoEntryGroup(bookData, '核心角色', { initialUids: [0, 1] });
+    assert.equal(wgRes.ok, true);
+    setWorldInfoEntryGroupEnabled(bookData, wgRes.group.id, false);
+    assert.equal(bookData.entries[0].disable, true);
+    assert.equal(bookData.entries[1].disable, true);
+    assert.equal(bookData.entries[2].disable, false, '未分组条目不受整组开关影响');
+    assert.equal(bookData.entries[0].group, 'native_mutex_A', '世界书视图分组严禁篡改原生 entry.group 互斥包含组');
+    assert.equal(bookData.entries[1].group, 'native_mutex_B', '世界书视图分组严禁篡改原生 entry.group 互斥包含组');
+
+    setWorldInfoEntryGroupCollapsed(bookData, wgRes.group.id, true);
+    assignWorldInfoEntryToGroup(bookData, 2, wgRes.group.id);
+    assert.equal(readWorldInfoEntryGroups(bookData).entries['2'].groupId, wgRes.group.id);
+
+    // 验证世界书全部书库自动分节「当前生效中」与「其他世界书」，以及书内条目分组 UI
+    const wiSelect = doc.createElement('select');
+    wiSelect.id = 'world_editor_select';
+    for (const [val, label] of [['0', '主设定书'], ['1', '备用世界书A'], ['2', '备用世界书B']]) {
+      const opt = doc.createElement('option');
+      opt.value = val;
+      opt.textContent = label;
+      wiSelect.append(opt);
+    }
+    doc.body.append(wiSelect);
+    ctx.loadWorldInfo = async () => bookData;
+    ctx.saveWorldInfo = async () => {};
+    const cwDock = createCharWorldDock({ getContext: () => ctx, store });
+    cwDock.open('world');
+    await new Promise(r => setTimeout(r, 15));
+    const cwEl = doc.getElementById('stm-char-world-dock');
+    const libBtn = cwEl
+      .querySelectorAll('button')
+      .find(b => /全部书库/.test([b.textContent, ...(b.children || []).map(c => c.textContent)].join('')));
+    assert.ok(libBtn, '世界书页签应存在「全部书库」展开按钮');
+    libBtn.click();
+    const libHeads = cwEl.querySelectorAll('.stm-cw-lib-section-head').map(n => n.textContent);
+    assert.equal(libHeads.length, 2, '全部书库存在生效与未生效书时自动分为「当前生效中」与「其他世界书」两节');
+    assert.match(libHeads[0], /当前生效中/);
+    assert.match(libHeads[1], /其他世界书/);
+    assert.ok(cwEl.querySelector('.stm-wi-group-btn'), '世界书条目筛选栏应提供轻巧「分组」入口');
+    assert.ok(cwEl.querySelectorAll('.stm-entry-group-section').length >= 1, '已分组的世界书应呈现细线折叠分组节');
+    cwDock.destroy();
+    await new Promise(r => setTimeout(r, 15));
+
+    deleteWorldInfoEntryGroup(bookData, wgRes.group.id);
+    assert.equal(Object.keys(bookData.entries).length, 3, '解散世界书分组绝不删除任何设定条目');
+    assert.equal(bookData.extensions, undefined, '解散全部世界书分组后干净清理空 extensions');
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});

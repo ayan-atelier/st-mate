@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.11",
+  "latest": "0.9.12",
   "releases": [
+    {
+      "version": "0.9.12",
+      "branch": "release-0.9.12",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "悬浮收纳兼容性大幅升级（穿透开放 Shadow DOM 如柏宝书/构画/千千结、支持套壳普通球与横/竖条悬浮胶囊、完整模拟轻触唤醒并新增重新扫描）；预设馆新增极简条目分组（100% 双向兼容柏宝箱预设分组与第三方 entryGrouping）；世界书新增书库来源分节与书内条目极简折叠分组（零侵入原生互斥组）。"
+    },
     {
       "version": "0.9.11",
       "branch": "release-0.9.11",

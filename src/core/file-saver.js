@@ -9,9 +9,9 @@
  *      （PNG 角色卡展示完整原图供长按存相册，JSON 提供只读预览与一键复制全文），确保任何 TT 版本 100% 导得出。
  */
 
-import { detectPlatform } from './env.js?v=0.9.11';
-import { createIconNode } from './icons.js?v=0.9.11';
-import { toastMessage } from '../shell/host-actions.js?v=0.9.11';
+import { detectPlatform } from './env.js?v=0.9.12';
+import { createIconNode } from './icons.js?v=0.9.12';
+import { toastMessage } from '../shell/host-actions.js?v=0.9.12';
 
 const FALLBACK_DIALOG_ID = 'stm-export-fallback-dialog';
 

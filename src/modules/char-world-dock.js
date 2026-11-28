@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.12';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.12';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.11';
+} from '../shell/host-actions.js?v=0.9.12';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,13 +23,14 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.11';
+} from './preset-backend.js?v=0.9.12';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
   WI_POSITION_OPTIONS,
   WORLD_INFO_AUTO_SAVE_MS,
   applyGreetingToFirstChatFloor,
+  assignWorldInfoEntryToGroup,
   bindCharacterPrimaryWorldBook,
   bindChatWorldBook,
   buildAddAlternateGreetingPatch,
@@ -40,10 +41,12 @@ import {
   createHostWorldBook,
   createWorldBookAutoSaver,
   createWorldInfoBookEntry,
+  createWorldInfoEntryGroup,
   cycleWorldInfoEntryTriggerMode,
   deleteCharacterGalleryItem,
   deleteHostWorldBooks,
   deleteWorldInfoBookEntry,
+  deleteWorldInfoEntryGroup,
   enablePresetWorldInfoSlots,
   ensureCharacterUnshallowed,
   exportActiveCharacterCard,
@@ -54,25 +57,31 @@ import {
   inspectPresetWorldInfoSlots,
   inspectWorldBookActivation,
   loadHostWorldBook,
+  moveWorldInfoEntryGroupOrder,
   parseCharacterAddedAt,
   primeHostWorldInfoModule,
   readActiveCharacterProfile,
   readCharacterCoverGallery,
   readWorldInfoEntries,
+  readWorldInfoEntryGroups,
   refreshHostWorldInfoList,
   reimportEmbeddedCharacterBook,
+  renameWorldInfoEntryGroup,
   replacePrimaryCharacterAvatarFile,
   resolveGalleryImageHref,
   resolveWorldInfoActivationState,
   sanitizeHostWorldBookName,
   saveCharacterProfilePatch,
   saveHostWorldBook,
+  setAllWorldInfoEntryGroupsCollapsed,
   setGlobalWorldBookEnabled,
+  setWorldInfoEntryGroupCollapsed,
+  setWorldInfoEntryGroupEnabled,
   toggleWorldInfoEntryEnabled,
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.11';
+} from './char-world-backend.js?v=0.9.12';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -173,6 +182,12 @@ export function createCharWorldDock({
   let wiFilterMode = 'all'; // 'all' | 'constant' | 'keyword' | 'disabled'
   let expandedEntryUid = null;
   let confirmDeleteEntryUid = null;
+  let wiGroupManageOpen = false;
+  let newWiGroupDraft = '';
+  let renamingWiGroupId = '';
+  let renameWiGroupDraft = '';
+  let confirmDeleteWiGroupId = '';
+  let ungroupedWiCollapsed = false;
   const swipeSyncTimers = [];
 
   let saveBadgeState = { tone: 'idle', text: '自动保存' };
@@ -2337,8 +2352,10 @@ export function createCharWorldDock({
     }
 
     const stats = readWorldInfoEntries(loadedBookData);
+    const wiGroupState = readWorldInfoEntryGroups(loadedBookData);
+    const wiHasGroups = wiGroupState.groups.length > 0;
 
-    // 同步筛选胶囊计数
+    // 同步筛选胶囊计数 + 轻巧「分组」入口胶囊
     if (filterBarContainer) {
       filterBarContainer.replaceChildren();
       const filters = [
@@ -2364,6 +2381,83 @@ export function createCharWorldDock({
         });
         filterBarContainer.append(pill);
       }
+
+      const groupTogglePill = el(
+        'button',
+        `stm-cw-filter-pill stm-wi-group-btn${wiGroupManageOpen ? ' is-active' : ''}`,
+        wiHasGroups ? `分组 (${wiGroupState.groups.length})` : '分组',
+      );
+      groupTogglePill.type = 'button';
+      groupTogglePill.title = '新建或整理世界书条目折叠分组（仅视图归类，不触碰原生互斥组）';
+      groupTogglePill.addEventListener('click', () => {
+        wiGroupManageOpen = !wiGroupManageOpen;
+        renamingWiGroupId = '';
+        confirmDeleteWiGroupId = '';
+        renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+      });
+      filterBarContainer.append(groupTogglePill);
+    }
+
+    // 轻量世界书条目分组管理条（按需展开）
+    if (wiGroupManageOpen) {
+      const gBar = el('div', 'stm-entry-group-bar');
+      const gInput = el('input', 'stm-cw-input stm-entry-group-input');
+      gInput.type = 'text';
+      gInput.placeholder = '输入世界书分组名（如：主要人物 / 势力地点）…';
+      gInput.value = newWiGroupDraft;
+      gInput.addEventListener('input', () => {
+        newWiGroupDraft = gInput.value;
+      });
+
+      const doCreateWiGroup = () => {
+        const clean = String(newWiGroupDraft || gInput.value || '').trim();
+        if (!clean) {
+          toastMessage('请先输入分组名称', 'warning');
+          return;
+        }
+        const res = createWorldInfoEntryGroup(loadedBookData, clean);
+        if (res.ok) {
+          newWiGroupDraft = '';
+          worldAutoSaver.schedule(bookName, loadedBookData);
+          toastMessage(`已新建世界书分组「${res.group.name}」`, 'success');
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        }
+      };
+
+      gInput.addEventListener('keydown', evt => {
+        if (evt.key === 'Enter') {
+          evt.preventDefault();
+          doCreateWiGroup();
+        }
+      });
+
+      const createBtn = el('button', 'stm-cw-mini-btn stm-wi-group-create-btn', '+ 新建分组');
+      createBtn.type = 'button';
+      createBtn.addEventListener('click', doCreateWiGroup);
+
+      const barActions = el('div', 'stm-entry-group-bar-actions');
+      if (wiHasGroups) {
+        const expAllBtn = el('button', 'stm-ghost-link', '全部展开');
+        expAllBtn.type = 'button';
+        expAllBtn.addEventListener('click', () => {
+          setAllWorldInfoEntryGroupsCollapsed(loadedBookData, false);
+          ungroupedWiCollapsed = false;
+          worldAutoSaver.schedule(bookName, loadedBookData);
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+        const colAllBtn = el('button', 'stm-ghost-link', '全部收起');
+        colAllBtn.type = 'button';
+        colAllBtn.addEventListener('click', () => {
+          setAllWorldInfoEntryGroupsCollapsed(loadedBookData, true);
+          ungroupedWiCollapsed = true;
+          worldAutoSaver.schedule(bookName, loadedBookData);
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+        barActions.append(expAllBtn, colAllBtn);
+      }
+
+      gBar.append(gInput, createBtn, barActions);
+      listContainer.append(gBar);
     }
 
     const visibleEntries = filterWorldInfoEntries(stats.entries, {
@@ -2392,7 +2486,7 @@ export function createCharWorldDock({
       return;
     }
 
-    for (const item of visibleEntries) {
+    const buildWorldEntryCard = item => {
       const isExpanded = String(expandedEntryUid) === String(item.uid);
       const card = el(
         'div',
@@ -2495,6 +2589,34 @@ export function createCharWorldDock({
       // 内联编辑面板
       if (isExpanded) {
         const editor = el('div', 'stm-wi-entry-editor');
+
+        // 若本书已建分组，顶部提供轻巧「所属分组」下拉一键归组
+        if (wiHasGroups) {
+          const curWiGid = wiGroupState.entries[String(item.uid)]?.groupId || '';
+          const assignRow = el('div', 'stm-entry-group-assign-row');
+          assignRow.append(el('label', 'stm-cw-sublabel', '所属分组'));
+          const grpSelect = el('select', 'stm-cw-select stm-wi-group-select');
+          const unOpt = el('option', '', '未分组');
+          unOpt.value = '';
+          unOpt.selected = !curWiGid;
+          grpSelect.append(unOpt);
+          for (const g of wiGroupState.groups) {
+            const opt = el('option', '', g.name);
+            opt.value = g.id;
+            opt.selected = curWiGid === g.id;
+            grpSelect.append(opt);
+          }
+          grpSelect.addEventListener('change', () => {
+            assignWorldInfoEntryToGroup(loadedBookData, item.uid, grpSelect.value);
+            if (grpSelect.value) {
+              setWorldInfoEntryGroupCollapsed(loadedBookData, grpSelect.value, false);
+            }
+            worldAutoSaver.schedule(bookName, loadedBookData);
+            renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+          });
+          assignRow.append(grpSelect);
+          editor.append(assignRow);
+        }
 
         // 绿灯空词高亮引导框（输入触发词时实时自动消失！）
         const editorWarnSlot = el('div', 'stm-wi-editor-warn-slot');
@@ -2744,7 +2866,227 @@ export function createCharWorldDock({
         card.append(editor);
       }
 
-      listContainer.append(card);
+      return card;
+    };
+
+    if (!wiHasGroups) {
+      for (const item of visibleEntries) {
+        listContainer.append(buildWorldEntryCard(item));
+      }
+      return;
+    }
+
+    // 有世界书分组时：极简细线折叠节 + 整组总控 + 搜索命中自动临时展开
+    const isSearching = Boolean(wiSearchQuery.trim());
+    const allByGroup = new Map();
+    const visibleByGroup = new Map();
+    for (const g of wiGroupState.groups) {
+      allByGroup.set(g.id, []);
+      visibleByGroup.set(g.id, []);
+    }
+    const allUngrouped = [];
+    const visibleUngrouped = [];
+
+    for (const item of stats.entries) {
+      const gid = wiGroupState.entries[String(item.uid)]?.groupId || '';
+      if (gid && allByGroup.has(gid)) allByGroup.get(gid).push(item);
+      else allUngrouped.push(item);
+    }
+    for (const item of visibleEntries) {
+      const gid = wiGroupState.entries[String(item.uid)]?.groupId || '';
+      if (gid && visibleByGroup.has(gid)) visibleByGroup.get(gid).push(item);
+      else visibleUngrouped.push(item);
+    }
+
+    wiGroupState.groups.forEach((group, gIdx) => {
+      const groupAll = allByGroup.get(group.id) || [];
+      const groupVisible = visibleByGroup.get(group.id) || [];
+      if (isSearching && groupVisible.length === 0) return;
+      if (wiFilterMode !== 'all' && groupVisible.length === 0 && groupAll.length > 0) return;
+
+      const enabledInGroup = groupAll.filter(e => e.enabled).length;
+      const groupOpen = isSearching ? true : !group.collapsed;
+      const sec = el('div', `stm-entry-group-section${groupOpen ? ' is-open' : ''}`);
+      sec.dataset.stmWiGroupId = group.id;
+
+      const head = el('div', 'stm-entry-group-head');
+
+      const anyOn = groupAll.length > 0 && enabledInGroup > 0;
+      const swLabel = el('label', 'stm-wi-switch');
+      swLabel.title = anyOn
+        ? `停用「${group.name}」组内全部条目`
+        : `启用「${group.name}」组内全部条目`;
+      const swInput = el('input', 'stm-wi-switch-input stm-wi-group-master-input');
+      swInput.type = 'checkbox';
+      swInput.checked = anyOn;
+      const swTrack = el('span', 'stm-wi-switch-track');
+      swLabel.append(swInput, swTrack);
+      swLabel.addEventListener('click', evt => evt.stopPropagation());
+      swInput.addEventListener('change', () => {
+        setWorldInfoEntryGroupEnabled(loadedBookData, group.id, swInput.checked);
+        worldAutoSaver.schedule(bookName, loadedBookData);
+        renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+      });
+      head.append(swLabel);
+
+      if (renamingWiGroupId === group.id) {
+        const rRow = el('div', 'stm-entry-group-rename-row');
+        const rInput = el('input', 'stm-cw-input stm-entry-group-rename-input');
+        rInput.type = 'text';
+        rInput.value = renameWiGroupDraft;
+        rInput.addEventListener('input', () => {
+          renameWiGroupDraft = rInput.value;
+        });
+        const commitRename = () => {
+          const nextName = String(renameWiGroupDraft || rInput.value || '').trim();
+          if (nextName) {
+            renameWorldInfoEntryGroup(loadedBookData, group.id, nextName);
+            worldAutoSaver.schedule(bookName, loadedBookData);
+          }
+          renamingWiGroupId = '';
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        };
+        rInput.addEventListener('keydown', evt => {
+          if (evt.key === 'Enter') {
+            evt.preventDefault();
+            commitRename();
+          } else if (evt.key === 'Escape') {
+            renamingWiGroupId = '';
+            renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+          }
+        });
+        const okBtn = el('button', 'stm-cw-mini-btn', '保存');
+        okBtn.type = 'button';
+        okBtn.addEventListener('click', commitRename);
+        const cancelBtn = el('button', 'stm-ghost-link', '取消');
+        cancelBtn.type = 'button';
+        cancelBtn.addEventListener('click', () => {
+          renamingWiGroupId = '';
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+        rRow.append(rInput, okBtn, cancelBtn);
+        head.append(rRow);
+      } else {
+        const toggleHeadBtn = el('button', 'stm-entry-group-toggle');
+        toggleHeadBtn.type = 'button';
+        toggleHeadBtn.setAttribute('aria-expanded', String(groupOpen));
+        toggleHeadBtn.append(
+          createIconNode(doc, 'chevron', 'stm-entry-group-chevron'),
+          el('span', 'stm-entry-group-title', group.name),
+          el('span', 'stm-entry-group-count', `${enabledInGroup}/${groupAll.length}`),
+        );
+        toggleHeadBtn.addEventListener('click', () => {
+          setWorldInfoEntryGroupCollapsed(loadedBookData, group.id, !group.collapsed);
+          worldAutoSaver.schedule(bookName, loadedBookData);
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+        head.append(toggleHeadBtn);
+
+        const gActions = el('div', 'stm-entry-group-actions');
+        if (wiGroupState.groups.length > 1) {
+          const gUp = el('button', 'stm-prompt-order-btn');
+          gUp.type = 'button';
+          gUp.disabled = gIdx === 0;
+          gUp.title = '分组上移';
+          gUp.innerHTML = svgMarkup('arrowup');
+          gUp.addEventListener('click', evt => {
+            evt.stopPropagation();
+            if (moveWorldInfoEntryGroupOrder(loadedBookData, group.id, 'up')) {
+              worldAutoSaver.schedule(bookName, loadedBookData);
+              renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+            }
+          });
+          const gDown = el('button', 'stm-prompt-order-btn');
+          gDown.type = 'button';
+          gDown.disabled = gIdx >= wiGroupState.groups.length - 1;
+          gDown.title = '分组下移';
+          gDown.innerHTML = svgMarkup('arrowdown');
+          gDown.addEventListener('click', evt => {
+            evt.stopPropagation();
+            if (moveWorldInfoEntryGroupOrder(loadedBookData, group.id, 'down')) {
+              worldAutoSaver.schedule(bookName, loadedBookData);
+              renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+            }
+          });
+          gActions.append(gUp, gDown);
+        }
+
+        const renBtn = el('button', 'stm-ghost-link', '改名');
+        renBtn.type = 'button';
+        renBtn.addEventListener('click', evt => {
+          evt.stopPropagation();
+          confirmDeleteWiGroupId = '';
+          renamingWiGroupId = group.id;
+          renameWiGroupDraft = group.name;
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+
+        const isConfirmDel = confirmDeleteWiGroupId === group.id;
+        const delBtn = el('button', `stm-ghost-link${isConfirmDel ? ' is-danger' : ''}`, isConfirmDel ? '确认解散?' : '解散');
+        delBtn.type = 'button';
+        delBtn.title = '仅解散分组，条目全部保留并回到未分组';
+        delBtn.addEventListener('click', evt => {
+          evt.stopPropagation();
+          if (!isConfirmDel) {
+            confirmDeleteWiGroupId = group.id;
+            renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+            return;
+          }
+          deleteWorldInfoEntryGroup(loadedBookData, group.id);
+          confirmDeleteWiGroupId = '';
+          worldAutoSaver.schedule(bookName, loadedBookData);
+          toastMessage(`已解散分组「${group.name}」，条目已保留`, 'info');
+          renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+        });
+
+        gActions.append(renBtn, delBtn);
+        head.append(gActions);
+      }
+
+      sec.append(head);
+      if (groupOpen) {
+        const body = el('div', 'stm-entry-group-body');
+        if (groupVisible.length === 0) {
+          body.append(
+            el('div', 'stm-entry-group-empty', '暂无条目，展开任意条目后可在「所属分组」里移入此组'),
+          );
+        } else {
+          for (const item of groupVisible) {
+            body.append(buildWorldEntryCard(item));
+          }
+        }
+        sec.append(body);
+      }
+      listContainer.append(sec);
+    });
+
+    if (visibleUngrouped.length > 0) {
+      const enabledUngrouped = allUngrouped.filter(e => e.enabled).length;
+      const unOpen = isSearching ? true : !ungroupedWiCollapsed;
+      const unSec = el('div', `stm-entry-group-section is-ungrouped${unOpen ? ' is-open' : ''}`);
+      const unHead = el('div', 'stm-entry-group-head');
+      const unToggle = el('button', 'stm-entry-group-toggle');
+      unToggle.type = 'button';
+      unToggle.setAttribute('aria-expanded', String(unOpen));
+      unToggle.append(
+        createIconNode(doc, 'chevron', 'stm-entry-group-chevron'),
+        el('span', 'stm-entry-group-title', '未分组'),
+        el('span', 'stm-entry-group-count', `${enabledUngrouped}/${allUngrouped.length}`),
+      );
+      unToggle.addEventListener('click', () => {
+        ungroupedWiCollapsed = !ungroupedWiCollapsed;
+        renderWorldEntriesInto(listContainer, filterBarContainer, bookName);
+      });
+      unHead.append(unToggle);
+      unSec.append(unHead);
+      if (unOpen) {
+        const unBody = el('div', 'stm-entry-group-body');
+        for (const item of visibleUngrouped) {
+          unBody.append(buildWorldEntryCard(item));
+        }
+        unSec.append(unBody);
+      }
+      listContainer.append(unSec);
     }
   }
 
@@ -3312,7 +3654,7 @@ export function createCharWorldDock({
           return;
         }
 
-        for (const wName of filteredNames) {
+        const appendBookRow = wName => {
           const isBatchChecked = librarySelectedBooks.has(wName);
           const row = el(
             'div',
@@ -3344,7 +3686,7 @@ export function createCharWorldDock({
             }
             row.append(batchPickLabel);
             libList.append(row);
-            continue;
+            return;
           }
 
           const pickBtn = el('button', 'stm-cw-lib-pick');
@@ -3413,6 +3755,19 @@ export function createCharWorldDock({
 
           row.append(pickBtn, rowActions);
           libList.append(row);
+        };
+
+        const activeNameSet = new Set(freshAct.activeBooks.map(b => b.name));
+        const activeFiltered = filteredNames.filter(n => activeNameSet.has(n));
+        const inactiveFiltered = filteredNames.filter(n => !activeNameSet.has(n));
+
+        if (!q && activeFiltered.length > 0 && inactiveFiltered.length > 0) {
+          libList.append(el('div', 'stm-cw-lib-section-head', `当前生效中 (${activeFiltered.length})`));
+          for (const wName of activeFiltered) appendBookRow(wName);
+          libList.append(el('div', 'stm-cw-lib-section-head', `其他世界书 (${inactiveFiltered.length})`));
+          for (const wName of inactiveFiltered) appendBookRow(wName);
+        } else {
+          for (const wName of filteredNames) appendBookRow(wName);
         }
         libList.scrollTop = savedScroll;
       };
