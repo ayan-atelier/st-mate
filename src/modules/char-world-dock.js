@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.17';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.16';
+} from '../shell/host-actions.js?v=0.9.17';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,7 +23,7 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.16';
+} from './preset-backend.js?v=0.9.17';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -81,33 +81,34 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.16';
+} from './char-world-backend.js?v=0.9.17';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
     id: 'description',
     title: '角色设定描述',
     placeholder: '填写角色外貌、身份、核心过往与人物设定…',
-    rows: 6,
+    rows: 11,
     showLiveCharCount: true,
+    longDefault: true,
   },
   {
     id: 'personality',
     title: '性格特征',
     placeholder: '简明概括角色的性格底色、说话风格与行为动机…',
-    rows: 4,
+    rows: 6,
   },
   {
     id: 'scenario',
     title: '场景与背景',
     placeholder: '当前故事发生的时代、地点与开场处境…',
-    rows: 4,
+    rows: 6,
   },
   {
     id: 'creatorNotes',
     title: '作者注释 / 食用指南',
     placeholder: '仅供玩家阅读的食用说明、排雷或推荐玩法（不会发给 AI）…',
-    rows: 4,
+    rows: 6,
   },
   {
     id: 'charPrompts',
@@ -118,7 +119,7 @@ const CORE_FIELD_DEFS = Object.freeze([
     id: 'mesExample',
     title: '对话示例',
     placeholder: '<START>\n{{user}}: 你好。\n{{char}}: 抬眸看了你一眼…',
-    rows: 5,
+    rows: 7,
   },
 ]);
 
@@ -155,6 +156,7 @@ export function createCharWorldDock({
   let coverStudioOpen = false;
   let uploadingCoverBusy = false;
   const openFieldSections = new Set(); // 核心设定默认全部折叠，保持角色画册感与防剧透
+  const expandedEditorIds = new Set(); // 长文本编辑框「展开大框」态记忆
   const charDraftMap = new Map(); // avatar -> unsaved patch overlay
 
   // 世界书与未进卡角色名录局部交互状态
@@ -1762,8 +1764,13 @@ export function createCharWorldDock({
       const curGreeting = profile.greetings[selectedGreetingIndex] || profile.greetings[0];
 
       if (editingGreeting) {
-        const greetTextarea = el('textarea', 'stm-cw-textarea stm-cw-greeting-editor');
-        greetTextarea.rows = 7;
+        const greetEditorKey = `greeting:${curGreeting.index}`;
+        const greetTall = expandedEditorIds.has(greetEditorKey);
+        const greetTextarea = el(
+          'textarea',
+          `stm-cw-textarea stm-cw-greeting-editor is-long-field${greetTall ? ' is-tall' : ''}`,
+        );
+        greetTextarea.rows = 10;
         greetTextarea.placeholder = `在此编写 ${curGreeting.label} 正文（自动保存至角色卡）…`;
         greetTextarea.value = curGreeting.content;
         greetTextarea.addEventListener('input', () => {
@@ -1771,7 +1778,24 @@ export function createCharWorldDock({
           const patch = buildGreetingEditPatch(latest, curGreeting.index, greetTextarea.value);
           queueCharacterDraftPatch(latest, patch);
         });
-        greetBody.append(greetTextarea);
+        const greetToolsRow = el('div', 'stm-cw-editor-head-row');
+        greetToolsRow.append(el('span', 'stm-cw-sublabel', `${curGreeting.label} · ${countUnicodeChars(curGreeting.content)} 字`));
+        const greetExpandBtn = el(
+          'button',
+          `stm-cw-expand-editor-btn${greetTall ? ' is-active' : ''}`,
+          greetTall ? '还原高度' : '展开大框',
+        );
+        greetExpandBtn.type = 'button';
+        greetExpandBtn.addEventListener('click', () => {
+          const nextTall = !expandedEditorIds.has(greetEditorKey);
+          if (nextTall) expandedEditorIds.add(greetEditorKey);
+          else expandedEditorIds.delete(greetEditorKey);
+          greetTextarea.classList.toggle('is-tall', nextTall);
+          greetExpandBtn.classList.toggle('is-active', nextTall);
+          greetExpandBtn.textContent = nextTall ? '还原高度' : '展开大框';
+        });
+        greetToolsRow.append(greetExpandBtn);
+        greetBody.append(greetToolsRow, greetTextarea);
       } else {
         const previewBox = el(
           'div',
@@ -1915,22 +1939,52 @@ export function createCharWorldDock({
 
       if (isExpanded) {
         const bodyBox = el('div', 'stm-cw-field-body');
+        const makeEditorToggle = (editorKey, areaEl) => {
+          const isTall = expandedEditorIds.has(editorKey);
+          areaEl.classList.toggle('is-tall', isTall);
+          const toggleBtn = el(
+            'button',
+            `stm-cw-expand-editor-btn${isTall ? ' is-active' : ''}`,
+            isTall ? '还原高度' : '展开大框',
+          );
+          toggleBtn.type = 'button';
+          toggleBtn.addEventListener('click', () => {
+            const nextTall = !expandedEditorIds.has(editorKey);
+            if (nextTall) expandedEditorIds.add(editorKey);
+            else expandedEditorIds.delete(editorKey);
+            areaEl.classList.toggle('is-tall', nextTall);
+            toggleBtn.classList.toggle('is-active', nextTall);
+            toggleBtn.textContent = nextTall ? '还原高度' : '展开大框';
+          });
+          return toggleBtn;
+        };
+
         if (def.isDualPrompt) {
           const sysLabel = el('label', 'stm-cw-sublabel', '角色系统提示词');
-          const sysArea = el('textarea', 'stm-cw-textarea');
-          sysArea.rows = 4;
+          const sysArea = el(
+            'textarea',
+            `stm-cw-textarea${countUnicodeChars(profile.systemPrompt) >= 360 ? ' is-long-field' : ''}`,
+          );
+          sysArea.rows = 6;
           sysArea.placeholder = '覆盖或补充给当前角色的专属主系统提示词（留空则完全跟随预设）…';
           sysArea.value = profile.systemPrompt;
+          const sysHeadRow = el('div', 'stm-cw-editor-head-row');
+          sysHeadRow.append(sysLabel, makeEditorToggle('charPrompts:sys', sysArea));
 
           const postLabel = el(
             'label',
             'stm-cw-sublabel',
             '历史后强调指令',
           );
-          const postArea = el('textarea', 'stm-cw-textarea');
-          postArea.rows = 4;
+          const postArea = el(
+            'textarea',
+            `stm-cw-textarea${countUnicodeChars(profile.postHistoryInstructions) >= 360 ? ' is-long-field' : ''}`,
+          );
+          postArea.rows = 6;
           postArea.placeholder = '注入在聊天记录末尾的角色专属强调指令（留空则完全跟随预设）…';
           postArea.value = profile.postHistoryInstructions;
+          const postHeadRow = el('div', 'stm-cw-editor-head-row');
+          postHeadRow.append(postLabel, makeEditorToggle('charPrompts:post', postArea));
 
           const refreshDualCount = () => {
             const sum = countUnicodeChars(sysArea.value) + countUnicodeChars(postArea.value);
@@ -1947,12 +2001,14 @@ export function createCharWorldDock({
             queueCharacterDraftPatch(profile, { postHistoryInstructions: postArea.value });
           });
 
-          bodyBox.append(sysLabel, sysArea, postLabel, postArea);
+          bodyBox.append(sysHeadRow, sysArea, postHeadRow, postArea);
         } else {
-          const area = el('textarea', 'stm-cw-textarea');
-          area.rows = def.rows || 5;
+          const initialText = profile[def.id] || '';
+          const isLongField = Boolean(def.longDefault) || countUnicodeChars(initialText) >= 360;
+          const area = el('textarea', `stm-cw-textarea${isLongField ? ' is-long-field' : ''}`);
+          area.rows = def.rows || 6;
           area.placeholder = def.placeholder || '';
-          area.value = profile[def.id] || '';
+          area.value = initialText;
           area.addEventListener('input', () => {
             const len = countUnicodeChars(area.value);
             countBadge.textContent = def.showLiveCharCount
@@ -1963,7 +2019,9 @@ export function createCharWorldDock({
             countBadge.classList.toggle('has-text', len > 0);
             queueCharacterDraftPatch(profile, { [def.id]: area.value });
           });
-          bodyBox.append(area);
+          const headRow = el('div', 'stm-cw-editor-head-row is-end');
+          headRow.append(makeEditorToggle(`field:${def.id}`, area));
+          bodyBox.append(headRow, area);
         }
         card.append(bodyBox);
       }
@@ -4011,6 +4069,7 @@ export function createCharWorldDock({
       editingGreeting = false;
       confirmDeleteGreeting = false;
       exportMenuOpen = false;
+      expandedEditorIds.clear();
       const act = resolveWorldInfoActivationState({ getContext });
       selectedWorldBook = act.defaultBookName || '';
       expandedEntryUid = null;

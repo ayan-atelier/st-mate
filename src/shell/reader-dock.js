@@ -7,17 +7,17 @@
  * 4. 其它：字体切换 · 隐去头像 · 无框书页 · 右滑重Roll开关（直连酒馆底层 power_user.gestures）
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
-import { svgMarkup } from '../core/icons.js?v=0.9.16';
-import { hexLuminance, sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.9.16';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.17';
+import { svgMarkup } from '../core/icons.js?v=0.9.17';
+import { hexLuminance, sanitizeAssetUrl, sanitizeHexColor } from '../core/schema.js?v=0.9.17';
 import {
   closeAllNativeDrawers,
   getSwipeGesturesEnabled,
   setSwipeGesturesEnabled,
   toastMessage,
   uploadBackgroundAsset,
-} from './host-actions.js?v=0.9.16';
-import { openImageCropDialog } from './image-cropper.js?v=0.9.16';
+} from './host-actions.js?v=0.9.17';
+import { openImageCropDialog } from './image-cropper.js?v=0.9.17';
 
 const FONT_OPTIONS = Object.freeze([
   { id: 'default', shortLabel: '默认', label: '跟随原美化' },
@@ -562,6 +562,7 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
         desktopPaddingX: 0,
         lineHeight: 0,
         paragraphIndent: 'default',
+        paragraphIndentEm: 2,
         hideAvatars: false,
         bookPageFlow: false,
         fontChoice: 'default',
@@ -634,10 +635,43 @@ export function createReaderDock({ getContext, store, onPreviewAtmosphere, onOpe
       }),
     );
 
-    // 1-3 首行：[顶格] [缩进]（再次点击已激活项可退回原版默认）
+    // 1-3 首行：[顶格] [缩进]（选中「缩进」时在标题行右侧亮出 1~4 格微调，再次点击已激活项退回原版默认）
     const indentCell = el('div', 'stm-type-cell');
     const indentHead = el('div', 'stm-cell-head');
     indentHead.append(el('span', 'stm-cell-label', '首行'));
+
+    if (vibe.paragraphIndent === 'indent') {
+      const curIndentEm = Number.isFinite(Number(vibe.paragraphIndentEm))
+        ? Math.min(4, Math.max(1, Math.round(Number(vibe.paragraphIndentEm) * 2) / 2))
+        : 2;
+      const stepper = el('div', 'stm-indent-stepper');
+      const decBtn = el('button', 'stm-indent-step-btn', '−');
+      decBtn.type = 'button';
+      decBtn.title = '减少缩进 0.5 格';
+      decBtn.setAttribute('aria-label', '减少首行缩进格数');
+      decBtn.disabled = curIndentEm <= 1;
+      decBtn.addEventListener('click', () => {
+        const cur = Number(store.get().vibe.paragraphIndentEm) || 2;
+        const next = Math.max(1, Math.round((cur - 0.5) * 2) / 2);
+        commitVibe({ paragraphIndent: 'indent', paragraphIndentEm: next });
+      });
+
+      const valSpan = el('span', 'stm-indent-val', `${curIndentEm}格`);
+
+      const incBtn = el('button', 'stm-indent-step-btn', '+');
+      incBtn.type = 'button';
+      incBtn.title = '增加缩进 0.5 格';
+      incBtn.setAttribute('aria-label', '增加首行缩进格数');
+      incBtn.disabled = curIndentEm >= 4;
+      incBtn.addEventListener('click', () => {
+        const cur = Number(store.get().vibe.paragraphIndentEm) || 2;
+        const next = Math.min(4, Math.round((cur + 0.5) * 2) / 2);
+        commitVibe({ paragraphIndent: 'indent', paragraphIndentEm: next });
+      });
+
+      stepper.append(decBtn, valSpan, incBtn);
+      indentHead.append(stepper);
+    }
     indentCell.append(indentHead);
 
     const indentPair = el('div', 'stm-dual-toggle');

@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.16';
-import { toastMessage } from './host-actions.js?v=0.9.16';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.17';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.17';
+import { toastMessage } from './host-actions.js?v=0.9.17';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -1064,6 +1064,8 @@ export function createFloatCapsule({
   let delayedScanTimers = [];
   let cachedClutterItems = [];
   let cachedUntuckedWildItems = [];
+  let lastPopoverSignature = '';
+  let lastPopoverScrollTop = 0;
 
   let dragState = null;
   let wildDragState = null;
@@ -1394,8 +1396,27 @@ export function createFloatCapsule({
     }
 
     if (popoverOpen) {
-      renderPopoverContent();
+      const nextSig = buildPopoverSignature();
+      if (nextSig !== lastPopoverSignature) {
+        renderPopoverContent(nextSig);
+      }
     }
+  }
+
+  function buildPopoverSignature() {
+    const tuckedSig = cachedClutterItems
+      .map(
+        item =>
+          `${item.id}|${item.zone}|${item.widgetKey || ''}|${item.label || ''}|${item.glyphText || ''}|${item.iconName || ''}`,
+      )
+      .join(';;');
+    const untuckedSig = cachedUntuckedWildItems
+      .map(
+        item =>
+          `${item.id}|${item.widgetKey || ''}|${item.label || ''}|${item.glyphText || ''}`,
+      )
+      .join(';;');
+    return `${pickModeActive ? 1 : 0}:${bypassClutterHide ? 1 : 0}:${tuckedSig}::${untuckedSig}`;
   }
 
   function scheduleClutterScan() {
@@ -1741,9 +1762,16 @@ export function createFloatCapsule({
     }
   }
 
-  function renderPopoverContent() {
+  function renderPopoverContent(signatureOverride = null) {
     if (!popoverEl) return;
     const doc = root?.document;
+    const prevBody = popoverEl.querySelector?.('.stm-float-pop-body');
+    const savedScrollTop = Math.max(
+      0,
+      Number(prevBody ? prevBody.scrollTop : lastPopoverScrollTop) || 0,
+    );
+    lastPopoverScrollTop = savedScrollTop;
+    lastPopoverSignature = signatureOverride ?? buildPopoverSignature();
     popoverEl.replaceChildren();
 
     const head = el('div', 'stm-float-pop-head');
@@ -1799,8 +1827,17 @@ export function createFloatCapsule({
     head.append(headActions);
     popoverEl.append(head);
 
+    const popBody = el('div', 'stm-float-pop-body');
+    popBody.addEventListener(
+      'scroll',
+      () => {
+        lastPopoverScrollTop = Math.max(0, Number(popBody.scrollTop) || 0);
+      },
+      { passive: true },
+    );
+
     if (cachedClutterItems.length === 0) {
-      popoverEl.append(
+      popBody.append(
         el('div', 'stm-float-pop-empty', '可将页面上的悬浮小挂件直接拖进圆球收纳'),
       );
     } else {
@@ -1851,7 +1888,7 @@ export function createFloatCapsule({
           grid.append(pill);
         }
       }
-      popoverEl.append(grid);
+      popBody.append(grid);
     }
 
     // 针对不可拖动的死位置野生悬浮块：自动列出供一键收进来
@@ -1877,8 +1914,10 @@ export function createFloatCapsule({
         wildRow.append(absorbBtn);
       }
       wildZone.append(wildRow);
-      popoverEl.append(wildZone);
+      popBody.append(wildZone);
     }
+
+    popoverEl.append(popBody);
 
     const foot = el('div', 'stm-float-pop-foot');
     const topBtn = el('button', 'stm-float-foot-btn');
@@ -1902,6 +1941,16 @@ export function createFloatCapsule({
 
     foot.append(topBtn, bottomBtn);
     popoverEl.append(foot);
+
+    if (savedScrollTop > 0) {
+      popBody.scrollTop = savedScrollTop;
+      const req = root?.requestAnimationFrame || (fn => setTimeout(fn, 16));
+      req(() => {
+        if (popBody.isConnected !== false) {
+          popBody.scrollTop = savedScrollTop;
+        }
+      });
+    }
   }
 
   function openPopover() {
@@ -1910,9 +1959,13 @@ export function createFloatCapsule({
     clearQuickJump();
     popoverOpen = true;
     lastOpenedAt = Date.now();
+    lastPopoverSignature = '';
+    lastPopoverScrollTop = 0;
     syncClutterNow();
     if (popoverEl) {
-      renderPopoverContent();
+      if (!popoverEl.children || popoverEl.children.length === 0) {
+        renderPopoverContent();
+      }
       popoverEl.hidden = false;
     }
     capsuleEl?.classList?.add?.('is-open');
@@ -1923,6 +1976,8 @@ export function createFloatCapsule({
   function closePopover() {
     if (!popoverOpen) return;
     popoverOpen = false;
+    lastPopoverSignature = '';
+    lastPopoverScrollTop = 0;
     if (popoverEl) {
       popoverEl.hidden = true;
     }

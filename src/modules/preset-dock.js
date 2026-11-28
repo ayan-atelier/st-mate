@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.16';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.17';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.16';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.16';
+} from '../shell/host-actions.js?v=0.9.17';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.17';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -63,7 +63,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.16';
+} from './preset-backend.js?v=0.9.17';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -1997,14 +1997,7 @@ export function createPresetDock({
     const secPrompts = el('section', 'stm-dock-section stm-preset-detail-zone');
 
     const promptHead = el('div', 'stm-sec-head stm-preset-detail-head');
-    const promptHeadLeft = el('div', 'stm-prompt-head-left');
-    promptHeadLeft.append(el('span', 'stm-sec-title stm-preset-detail-title', '当前预设内容 · 提示词条目'));
-    const countBadge = el('span', 'stm-preset-badge is-subtle', '');
-    liveRefs.promptCountSpan = countBadge;
-    promptHeadLeft.append(countBadge);
-    const statsLine = el('span', 'stm-preset-stats-line', '');
-    liveRefs.promptStatsSpan = statsLine;
-    promptHeadLeft.append(statsLine);
+    promptHead.append(el('span', 'stm-sec-title stm-preset-detail-title', '当前预设内容 · 提示词条目'));
 
     const addPromptBtn = el('button', 'stm-station-add-btn stm-prompt-add-btn');
     addPromptBtn.type = 'button';
@@ -2033,8 +2026,16 @@ export function createPresetDock({
       }
     });
 
-    promptHead.append(promptHeadLeft, addPromptBtn);
+    promptHead.append(addPromptBtn);
     secPrompts.append(promptHead);
+
+    const metricsBar = el('div', 'stm-preset-metrics-bar');
+    const countBadge = el('span', 'stm-preset-badge is-subtle', '');
+    liveRefs.promptCountSpan = countBadge;
+    const statsLine = el('span', 'stm-preset-stats-line', '');
+    liveRefs.promptStatsSpan = statsLine;
+    metricsBar.append(countBadge, statsLine);
+    secPrompts.append(metricsBar);
 
     // 融合在「当前预设内容」标题正下方的无外框淡色单行生成参数（不抢戏，点「微调 ▾」按需展开滑杆）
     const genParams = readGenerationParams(ctx);

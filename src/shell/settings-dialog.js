@@ -14,13 +14,13 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.16';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.16';
-import { createVersionManager } from '../core/version-manager.js?v=0.9.16';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.16';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.16';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.16';
+} from '../core/companion-kit.js?v=0.9.17';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.17';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.17';
+import { createVersionManager } from '../core/version-manager.js?v=0.9.17';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.17';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.17';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.17';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -77,7 +77,7 @@ export function createSettingsDialog({
   moduleBridge,
   suiteCoordinator = null,
   versionManager = null,
-  stmVersion = '0.9.16',
+  stmVersion = '0.9.17',
   onToggleShell,
   onForcePruneTurbo = null,
   onOpenWelcomeGuide = null,

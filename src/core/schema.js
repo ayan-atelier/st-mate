@@ -157,7 +157,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
     paddingX: 0, // 手机端左右边距（0=跟随原美化；4~48px）
     desktopPaddingX: 0, // 电脑端左右边距（0=跟随原美化；8~96px，与手机端独立记忆互不干扰）
     lineHeight: 0, // 0 表示跟随原美化行距；140~240 表示 1.40~2.40 倍行高
-    paragraphIndent: 'default', // default (跟随原版) | flush (顶格) | indent (缩进两格)
+    paragraphIndent: 'default', // default (跟随原版) | flush (顶格) | indent (首行缩进)
+    paragraphIndentEm: 2, // 1 ~ 4 格（步进 0.5，默认 2 格），仅首行设为「缩进」时生效
     hideAvatars: false,
     bookPageFlow: false,
     fontChoice: 'default', // default | serif | sans | kai | custom
@@ -460,6 +461,10 @@ export function normalizeSettings(raw = {}) {
     rawVibe.paragraphIndent === 'spaced'
       ? 'flush'
       : pickEnum(rawVibe.paragraphIndent, PARAGRAPH_INDENTS, DEFAULT_SETTINGS.vibe.paragraphIndent);
+  const rawIndentEm = Number(rawVibe.paragraphIndentEm);
+  const normalizedIndentEm = Number.isFinite(rawIndentEm)
+    ? Math.min(4, Math.max(1, Math.round(rawIndentEm * 2) / 2))
+    : DEFAULT_SETTINGS.vibe.paragraphIndentEm;
 
   // 归一化 API 站子卡片列表（确保 ID 唯一、最多保留 50 张）
   const stations = [];
@@ -610,6 +615,7 @@ export function normalizeSettings(raw = {}) {
           ? 0
           : clampInt(rawVibe.lineHeight, 135, 240, 0),
       paragraphIndent: normalizedIndent,
+      paragraphIndentEm: normalizedIndentEm,
       hideAvatars: pickBool(rawVibe.hideAvatars, DEFAULT_SETTINGS.vibe.hideAvatars),
       bookPageFlow: pickBool(rawVibe.bookPageFlow, DEFAULT_SETTINGS.vibe.bookPageFlow),
       fontChoice: pickEnum(rawVibe.fontChoice, FONT_CHOICES, DEFAULT_SETTINGS.vibe.fontChoice),

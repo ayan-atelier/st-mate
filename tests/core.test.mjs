@@ -11855,3 +11855,192 @@ test('v0.9.16 float-capsule Shadow Host / html FAB + click-to-tuck & preset toke
     globalThis.MouseEvent = prevMouse;
   }
 });
+
+test('v0.9.17 UX polish: 预设两行排版、收纳仓滚动位记忆不弹顶、角色长设大框与首行缩进自定义格数', async () => {
+  // 1. 首行缩进格数 schema 归一化 + CSS 注入校验
+  const normDefault = normalizeSettings({});
+  assert.equal(normDefault.vibe.paragraphIndentEm, 2, '首行缩进默认 2 格');
+  const normCustom = normalizeSettings({ vibe: { paragraphIndent: 'indent', paragraphIndentEm: 2.6 } });
+  assert.equal(normCustom.vibe.paragraphIndentEm, 2.5, '首行缩进自动按 0.5 格步进对齐');
+  assert.equal(normalizeSettings({ vibe: { paragraphIndentEm: 0.2 } }).vibe.paragraphIndentEm, 1, '下限钳位 1 格');
+  assert.equal(normalizeSettings({ vibe: { paragraphIndentEm: 9 } }).vibe.paragraphIndentEm, 4, '上限钳位 4 格');
+
+  const css35 = buildPageOverrideCss(
+    { ...DEFAULT_SETTINGS.vibe, paragraphIndent: 'indent', paragraphIndentEm: 3.5 },
+    { readerActive: true, backdropLive: false },
+  );
+  assert.match(css35, /text-indent:\s*3\.5em\s*!important/, '首行缩进 3.5 格应输出 text-indent: 3.5em');
+
+  const { createFloatCapsule } = await import('../src/shell/float-capsule.js');
+  const { doc } = createMiniDomHarness();
+  const win = {
+    innerWidth: 393,
+    innerHeight: 820,
+    document: doc,
+    getComputedStyle(node) {
+      return {
+        display: node?.style?.display || 'block',
+        visibility: node?.style?.visibility || 'visible',
+        opacity: node?.style?.opacity || '1',
+        position: node?.style?.position || 'static',
+        pointerEvents: node?.style?.pointerEvents || 'auto',
+        zIndex: node?.style?.zIndex || 'auto',
+      };
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    requestAnimationFrame(fn) {
+      fn();
+      return 1;
+    },
+    cancelAnimationFrame() {},
+  };
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevComputed = globalThis.getComputedStyle;
+  globalThis.document = doc;
+  globalThis.window = win;
+  globalThis.getComputedStyle = win.getComputedStyle;
+
+  try {
+    const sheld = doc.createElement('div');
+    sheld.id = 'sheld';
+    const chat = doc.createElement('div');
+    chat.id = 'chat';
+    sheld.append(chat);
+    doc.body.append(sheld);
+
+    // 两个未收纳野生悬浮球，验证收纳仓滚动位置在刷新和点击吸收后绝不弹回顶部
+    for (const [id, label] of [
+      ['wild-orb-a', '挂件甲'],
+      ['wild-orb-b', '挂件乙'],
+    ]) {
+      const orb = doc.createElement('button');
+      orb.id = id;
+      orb.setAttribute('aria-label', label);
+      orb.style.position = 'fixed';
+      orb.style.width = '40px';
+      orb.style.height = '40px';
+      orb.offsetWidth = 40;
+      orb.offsetHeight = 40;
+      doc.body.append(orb);
+    }
+
+    const longDesc = '这是一段超长角色设定描述。'.repeat(50);
+    const ctx = {
+      characterId: 0,
+      characters: [
+        {
+          name: '杀生丸',
+          avatar: 'sesshomaru.png',
+          description: longDesc,
+          first_mes: '开场白示例内容',
+          data: { description: longDesc, first_mes: '开场白示例内容', alternate_greetings: [] },
+        },
+      ],
+      extensionSettings: {
+        st_mate: {
+          shellEnabled: true,
+          floatCapsuleEnabled: true,
+          vibe: { paragraphIndent: 'default', paragraphIndentEm: 2 },
+        },
+      },
+      chatCompletionSettings: {
+        prompts: [{ identifier: 'main', name: '主系统', role: 'system', content: '测试提示词内容', enabled: true }],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }] }],
+      },
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    // 2. 验证预设馆提示词头与词符统计条拆为两行，避免挤压竖排
+    const presetDock = createPresetDock({ getContext: () => ctx, store });
+    presetDock.open();
+    const detailHead = doc.querySelector('.stm-preset-detail-head');
+    const metricsBar = doc.querySelector('.stm-preset-metrics-bar');
+    assert.ok(detailHead, '应渲染独立的提示词标题行');
+    assert.ok(metricsBar, '应渲染独立的词符/字符统计第二行');
+    assert.equal(detailHead.querySelector('.stm-preset-stats-line'), null, '统计条不再与标题挤在同一行');
+    assert.ok(metricsBar.querySelector('.stm-preset-stats-line'), '词符/字符统计位于独立第二行');
+    assert.ok(detailHead.querySelector('.stm-prompt-add-btn'), '新增条目按钮稳居第一行右侧');
+    presetDock.destroy();
+
+    // 3. 验证悬浮收纳仓滚动记忆：无变化巡检不重建 DOM、点击吸收按钮后保持 scrollTop 不弹顶
+    const capsule = createFloatCapsule({
+      root: win,
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    capsule.refresh();
+    const capNode = doc.getElementById('stm-float-capsule');
+    capNode.querySelector('.stm-float-bag').click();
+    const popBody1 = capNode.querySelector('.stm-float-pop-body');
+    assert.ok(popBody1, '收纳仓应使用独立 .stm-float-pop-body 滚动区');
+    popBody1.scrollTop = 148;
+    popBody1.dispatchEvent({ type: 'scroll' });
+
+    // 内容无变化时触发 refresh，不得重建 popBody 也不得重置 scrollTop
+    capsule.refresh();
+    assert.equal(capNode.querySelector('.stm-float-pop-body'), popBody1, '清单未变时不重绘弹窗');
+    assert.equal(popBody1.scrollTop, 148, '清单未变时滚动位置纹丝不动');
+
+    // 点击吸收一个挂件（触发内容变化与重绘），应原位恢复滚动位置
+    const firstAbsorb = capNode.querySelector('.stm-float-absorb-btn');
+    assert.ok(firstAbsorb);
+    firstAbsorb.click();
+    const popBody2 = capNode.querySelector('.stm-float-pop-body');
+    assert.equal(popBody2.scrollTop, 148, '点击收纳按钮重绘后应保持原滚动位置不回顶');
+    capsule.destroy();
+
+    // 4. 验证角色设定长文本框默认展开舒展高度 + 一键「展开大框 / 还原高度」原地切换
+    const cwDock = createCharWorldDock({ getContext: () => ctx, store });
+    cwDock.open('char');
+    const cwRoot = doc.getElementById('stm-char-world-dock');
+    const descHead = cwRoot
+      .querySelectorAll('.stm-cw-field-head')
+      .find(b => /角色设定描述/.test(b.querySelector('.stm-cw-field-title')?.textContent || ''));
+    assert.ok(descHead, '角色档案应展示角色设定描述折叠栏');
+    descHead.click();
+    const openCard = cwRoot.querySelectorAll('.stm-cw-field-card').find(c => c.classList.contains('is-open'));
+    assert.ok(openCard, '点击折叠栏后卡片应进入 is-open 态');
+    const descArea = openCard.querySelector('.stm-cw-textarea');
+    assert.ok(descArea, '展开后应渲染角色设定描述文本框');
+    assert.equal(descArea.rows, 11, '角色设定描述默认行数应提升至 11 行');
+    assert.ok(descArea.classList.contains('is-long-field'), '长设定文本框应带 is-long-field 舒展默认高度');
+    const expandBtn = openCard.querySelector('.stm-cw-expand-editor-btn');
+    assert.ok(expandBtn && expandBtn.textContent === '展开大框');
+    expandBtn.click();
+    assert.ok(descArea.classList.contains('is-tall'), '点击「展开大框」应原地切换至 is-tall 大框态');
+    assert.equal(expandBtn.textContent, '还原高度');
+    expandBtn.click();
+    assert.equal(descArea.classList.contains('is-tall'), false, '再次点击应还原默认高度');
+    await new Promise(r => setTimeout(r, 20));
+    cwDock.destroy();
+
+    // 5. 验证文字排版抽屉：选中「缩进」才显示格数微调，且 +/- 按 0.5 格实时步进
+    const readerDock = createReaderDock({ getContext: () => ctx, store, onVibeChange() {} });
+    readerDock.open();
+    const readerRoot = doc.getElementById('stm-reader-dock');
+    assert.equal(readerRoot.querySelector('.stm-indent-stepper'), null, '未启用首行缩进时不显示格数微调器');
+    const indentBtn = readerRoot.querySelectorAll('.stm-toggle-pill').find(b => b.textContent === '缩进');
+    assert.ok(indentBtn);
+    indentBtn.click();
+    const stepper1 = readerRoot.querySelector('.stm-indent-stepper');
+    assert.ok(stepper1, '激活「缩进」后应在首行标题右侧显示格数微调器');
+    assert.equal(stepper1.querySelector('.stm-indent-val').textContent, '2格');
+    const stepBtns = stepper1.querySelectorAll('.stm-indent-step-btn');
+    stepBtns[1].click();
+    assert.equal(store.get().vibe.paragraphIndentEm, 2.5, '点击 + 应步进至 2.5 格');
+    assert.equal(readerRoot.querySelector('.stm-indent-val').textContent, '2.5格');
+    readerRoot.querySelectorAll('.stm-indent-step-btn')[0].click();
+    assert.equal(store.get().vibe.paragraphIndentEm, 2, '点击 − 应退回 2 格');
+    readerDock.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.getComputedStyle = prevComputed;
+  }
+});

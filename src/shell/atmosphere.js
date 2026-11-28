@@ -6,14 +6,14 @@
  * 3. 动态高优先级覆盖表 (#stm-page-overrides) 驻留于 document.head 末尾，未调项零覆盖，已调项破除主题锁定即刻生效。
  */
 
-import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.16';
+import { clarityToBlurPx, createBackdropCache } from '../core/backdrop-cache.js?v=0.9.17';
 import {
   EM_ITALIC_MODES,
   TEXT_DECO_STYLES,
   hexLuminance,
   sanitizeHexColor,
-} from '../core/schema.js?v=0.9.16';
-import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.16';
+} from '../core/schema.js?v=0.9.17';
+import { getCurrentEntityMeta, resolveAssetHref } from './host-actions.js?v=0.9.17';
 
 const LOW_FREQ_OPTION_IDS = Object.freeze([
   'option_toggle_AN',
@@ -206,9 +206,13 @@ ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p {
   }
 
   if (vibe.paragraphIndent === 'indent') {
+    const rawIndentEm = Number(vibe.paragraphIndentEm);
+    const indentEm = Number.isFinite(rawIndentEm)
+      ? Math.min(4, Math.max(1, Math.round(rawIndentEm * 2) / 2))
+      : 2;
     rules.push(`
 ${CHAT_OVERRIDE_SCOPE} > .mes:not(.smallSysMes) .mes_text p:not(:is(blockquote p, details p, li p, td p, th p)) {
-  text-indent: 2em !important;
+  text-indent: ${indentEm}em !important;
 }`);
   } else if (vibe.paragraphIndent === 'flush') {
     rules.push(`
