@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.10';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.10';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.11';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.10';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.10';
+} from '../shell/host-actions.js?v=0.9.11';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.11';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -52,7 +52,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.10';
+} from './preset-backend.js?v=0.9.11';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -117,7 +117,8 @@ export function createPresetDock({
     const tempStr = Number(gp.temperature || 0)
       .toFixed(2)
       .replace(/\.00$/, '.0');
-    return `上下文 ${formatContextShort(gp.maxContext)} · 回复 ${gp.maxTokens} · 温度 ${tempStr}`;
+    const streamStr = gp.streaming ? '流式' : '非流式';
+    return `上下文 ${formatContextShort(gp.maxContext)} · 回复 ${gp.maxTokens} · 温度 ${tempStr} · ${streamStr}`;
   }
 
   const cleanups = [];
@@ -1739,6 +1740,31 @@ export function createPresetDock({
 
       dualParams.append(tokBlock, tempBlock);
       paramCard.append(dualParams);
+
+      // 3.3 流式传输开关（同步宿主 oai_settings.stream_openai 与原生 #stream_toggle）
+      const streamRow = el('div', 'stm-param-toggle-row');
+      const streamCopy = el('div', 'stm-param-toggle-copy');
+      streamCopy.append(
+        el('span', 'stm-cell-label', '流式传输'),
+        el('small', 'stm-param-toggle-hint', '边生成边吐字，减少重型预设或中转反代等待超时断连'),
+      );
+      const streamLabel = el('label', 'stm-param-stream-switch');
+      const streamInput = el('input', 'stm-param-stream-input');
+      streamInput.type = 'checkbox';
+      streamInput.checked = Boolean(genParams.streaming);
+      streamInput.setAttribute('aria-label', '开启或关闭流式传输');
+      const streamTrack = el('span', 'stm-param-stream-track');
+      streamLabel.append(streamInput, streamTrack);
+      streamInput.addEventListener('change', () => {
+        const updated = applyGenerationParams({ streaming: streamInput.checked }, { getContext, doc });
+        if (liveRefs.paramSummaryEl) {
+          liveRefs.paramSummaryEl.textContent = formatGenParamsSummary(updated);
+        }
+        scheduleAutoPersist();
+      });
+      streamRow.append(streamCopy, streamLabel);
+      paramCard.append(streamRow);
+
       secPrompts.append(paramCard);
     }
 

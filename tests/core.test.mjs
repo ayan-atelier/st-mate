@@ -129,8 +129,10 @@ import {
   buildAssistantGenerateBody,
   createAssistantSession,
   extractAssistantPlan,
+  extractAssistantStreamDelta,
   isTemperatureForbiddenModel,
   normalizeAssistantMessages,
+  parseAssistantSseText,
   removeJsonTrailingCommas,
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
@@ -153,6 +155,7 @@ import {
   WI_POSITION_OPTIONS,
   applyGreetingToFirstChatFloor,
   bindCharacterPrimaryWorldBook,
+  bindChatWorldBook,
   buildAddAlternateGreetingPatch,
   buildCharacterMergePayload,
   buildDeleteAlternateGreetingPatch,
@@ -2338,7 +2341,7 @@ test('assistant-core: 主/副通道零干扰请求构造、reverse_proxy 独立�
   assert.equal(resAux.channel.badgeLabel, '副通道 · claude-haiku-override');
   assert.equal(capturedBodies.length, 1);
   assert.equal(capturedBodies[0].type, 'quiet');
-  assert.equal(capturedBodies[0].stream, false);
+  assert.equal(capturedBodies[0].stream, true);
   assert.equal(capturedBodies[0].chat_completion_source, 'claude');
   assert.equal(capturedBodies[0].model, 'claude-haiku-override');
   assert.equal(capturedBodies[0].secret_id, 'sec-aux-002');
@@ -10748,6 +10751,17 @@ test('home bookshelf TT theme top-gap guard: 4-ID #sheld 压制主题首页顶�
         cssNoComments.includes('html body.stm-shell-active:not(.stm-native-topbar) #top-settings-holder > .drawer > :not(.drawer-content)'),
       '伴侣顶栏模式必须连同第三方直插顶栏按钮一并收起，同时保留原生 .drawer-content 可用',
     );
+    assert.ok(
+      cssNoComments.includes('html body.stm-shell-active.jd-bookshelf-home-active #chat#chat#chat#chat.jd-bookshelf-home > .mes[mesid="0"]') &&
+        cssNoComments.includes('padding-bottom: 0 !important;') &&
+        cssNoComments.includes('html body.stm-shell-active.jd-bookshelf-home-active:not(.hp-js) #chat#chat#chat#chat.jd-bookshelf-home:not(:has(> .hp-image-banner)) > .mes[mesid="0"]'),
+      '首页 mesid=0 标尺必须采用 4-ID 清零 padding-bottom 并在非博客小站下 display:none，彻底压制《角色映幕》等主题 80px 底部留白规则误伤',
+    );
+    assert.ok(
+      cssNoComments.includes('body.stm-shell-active .jd-bookshelf .jd-card-tools .jd-favorite[aria-pressed="true"]') &&
+        cssNoComments.includes('color: #ffffff !important;'),
+      '浅色/日间主题下卡片封面深底置顶与收藏角标必须保持纯白高对比',
+    );
 
     // 2. 模拟 TT 适配主题把 #top-bar 与 #top-settings-holder 统一设了 top: 50px（刘海安全区），自身高 40px
     let simulatedBarHeight = 40;
@@ -10813,5 +10827,238 @@ test('home bookshelf TT theme top-gap guard: 4-ID #sheld 压制主题首页顶�
     globalThis.window = prevWin;
     globalThis.getComputedStyle = prevComputed;
     globalThis.ResizeObserver = prevRO;
+  }
+});
+
+test('preset stream toggle + assistant SSE streaming & fallback + chat lorebook binding: 预设流式开关、伴侣助手流式防524超时及自动降级与当前聊天世界书绑定', async () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+  globalThis.window = { innerWidth: 393, innerHeight: 759, document: doc };
+
+  try {
+    // 1. 验证预设生成参数流式开关同步 oai_settings.stream_openai 与原生 #stream_toggle
+    const nativeStreamToggle = doc.createElement('input');
+    nativeStreamToggle.id = 'stream_toggle';
+    nativeStreamToggle.type = 'checkbox';
+    nativeStreamToggle.checked = false;
+    let streamChangedCount = 0;
+    nativeStreamToggle.addEventListener('change', () => {
+      streamChangedCount += 1;
+    });
+    doc.body.append(nativeStreamToggle);
+
+    let metadataSavedCount = 0;
+    let wiSettingsEvents = 0;
+    const ctx = {
+      extensionSettings: {
+        st_mate: { shellEnabled: true },
+        yantai: { controlEnabled: true },
+      },
+      mainApi: 'openai',
+      chatCompletionSources: { openai: 'custom' },
+      chatCompletionSettings: {
+        chat_completion_source: 'custom',
+        custom_url: 'https://relay.example.com/v1',
+        custom_model: 'deepseek-r1',
+        openai_max_context: 65536,
+        openai_max_tokens: 4096,
+        temp_openai: 0.9,
+        stream_openai: false,
+        prompts: [{ identifier: 'main', name: '主提示词', role: 'system', content: '测试正文' }],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }] }],
+      },
+      characterId: 0,
+      groupId: null,
+      characters: [
+        {
+          name: '沈清晏',
+          avatar: 'shen.png',
+          data: { name: '沈清晏', extensions: { world: '' } },
+        },
+      ],
+      chat: [{ name: '沈清晏', mes: '你好' }],
+      chatMetadata: {},
+      worldInfo: { globalSelect: [], charLore: [] },
+      saveSettingsDebounced() {},
+      async saveMetadata() {
+        metadataSavedCount += 1;
+      },
+      eventTypes: { WORLDINFO_SETTINGS_UPDATED: 'worldinfo_settings_updated' },
+      eventSource: {
+        async emit(evt) {
+          if (evt === 'worldinfo_settings_updated') wiSettingsEvents += 1;
+        },
+      },
+    };
+    ctx.oai_settings = ctx.chatCompletionSettings;
+
+    // 写入原生世界书列表供 resolveWorldInfoActivationState 读取
+    const wiSelect = doc.createElement('select');
+    wiSelect.id = 'world_info';
+    for (const bookName of ['单线剧情设定书', '公共世界书']) {
+      const opt = doc.createElement('option');
+      opt.value = bookName;
+      opt.textContent = bookName;
+      wiSelect.append(opt);
+    }
+    doc.body.append(wiSelect);
+
+    assert.equal(readGenerationParams(ctx).streaming, false);
+    const toggledOn = applyGenerationParams({ streaming: true }, { getContext: () => ctx, doc });
+    assert.equal(toggledOn.streaming, true);
+    assert.equal(ctx.chatCompletionSettings.stream_openai, true);
+    assert.equal(nativeStreamToggle.checked, true);
+    assert.equal(streamChangedCount, 1, '切换流式开关时必须同步触发原生 #stream_toggle change 事件');
+
+    // 验证预设馆 UI 参数区含流式开关与摘要文本
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const presetDock = createPresetDock({ getContext: () => ctx, store });
+    presetDock.open();
+    const pDockEl = doc.getElementById('stm-preset-dock');
+    const paramBar = pDockEl.querySelector('.stm-param-summary-bar');
+    assert.match(paramBar.querySelector('.stm-param-summary-text').textContent, /流式/);
+    paramBar.click();
+    const streamInput = pDockEl.querySelector('.stm-param-stream-input');
+    assert.ok(streamInput, '展开生成参数卡后必须呈现流式传输开关');
+    assert.equal(streamInput.checked, true);
+    streamInput.checked = false;
+    streamInput.dispatchEvent(new Event('change'));
+    assert.equal(ctx.chatCompletionSettings.stream_openai, false);
+    assert.match(pDockEl.querySelector('.stm-param-summary-text').textContent, /非流式/);
+    presetDock.destroy();
+
+    // 2. 验证伴侣助手多渠道 SSE 分片提取器
+    assert.deepEqual(
+      extractAssistantStreamDelta({ choices: [{ delta: { reasoning_content: '想一想', content: '写方案' } }] }),
+      { text: '写方案', reasoning: '想一想', errorMessage: '' },
+    );
+    assert.deepEqual(
+      extractAssistantStreamDelta({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Claude片段' } }),
+      { text: 'Claude片段', reasoning: '', errorMessage: '' },
+    );
+    assert.deepEqual(
+      extractAssistantStreamDelta({
+        candidates: [{ content: { parts: [{ thought: true, text: 'Gem思考' }, { text: 'Gem正文' }] } }],
+      }),
+      { text: 'Gem正文', reasoning: 'Gem思考', errorMessage: '' },
+    );
+    const parsedRawSse = parseAssistantSseText(
+      'data: {"choices":[{"delta":{"content":"{\\"reply\\":\\"你好"}}]}\n\ndata: {"choices":[{"delta":{"content":"\\",\\"operations\\":[]}"}}]}\n\ndata: [DONE]\n',
+    );
+    assert.equal(parsedRawSse.sawSseData, true);
+    assert.equal(parsedRawSse.text, '{"reply":"你好","operations":[]}');
+
+    // 3. 验证 requestAssistantCompletion 默认 stream: true 流式读取（含跨帧拆包与 onProgress 进度回调）
+    const encoder = new TextEncoder();
+    const sseChunks = [
+      encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"分析重型预设"}}]}\n\n'),
+      encoder.encode('data: {"choices":[{"delta":{"content":"{\\"reply\\":\\"已分析'),
+      encoder.encode('完成\\",\\"operations\\":[]}"}}]}\n\ndata: [DONE]\n'),
+    ];
+    const progressEvents = [];
+    const sseSentBodies = [];
+    const sseRes = await requestAssistantCompletion({
+      messages: [{ role: 'user', content: '分析重型预设' }],
+      store,
+      getContext: () => ctx,
+      doc: null,
+      onProgress: info => progressEvents.push(info),
+      fetchImpl: async (_url, init) => {
+        sseSentBodies.push(JSON.parse(init.body));
+        let idx = 0;
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: k => (k.toLowerCase() === 'content-type' ? 'text/event-stream; charset=utf-8' : '') },
+          body: {
+            getReader() {
+              return {
+                async read() {
+                  if (idx < sseChunks.length) {
+                    return { done: false, value: sseChunks[idx++] };
+                  }
+                  return { done: true, value: undefined };
+                },
+                releaseLock() {},
+              };
+            },
+          },
+        };
+      },
+    });
+    assert.equal(sseRes.ok, true);
+    assert.equal(sseSentBodies[0].stream, true, '伴侣助手默认走 stream: true 防重型预设中转 524 掐断');
+    assert.equal(sseRes.thinkingText, '分析重型预设');
+    assert.equal(sseRes.cleanText, '{"reply":"已分析完成","operations":[]}');
+    assert.ok(progressEvents.length >= 2 && progressEvents.at(-1).textChars > 0, '流式期间应持续上报已接收字数');
+
+    // 4. 验证不支持 stream 的接口（400 + stream 报错）自动静默降级为 stream: false 重试成功
+    const fallbackBodies = [];
+    const fallbackRes = await requestAssistantCompletion({
+      messages: [{ role: 'user', content: '测试降级' }],
+      store,
+      getContext: () => ctx,
+      doc: null,
+      fetchImpl: async (_url, init) => {
+        const parsedBody = JSON.parse(init.body);
+        fallbackBodies.push(parsedBody);
+        if (parsedBody.stream) {
+          return {
+            ok: false,
+            status: 400,
+            text: async () => JSON.stringify({ error: { message: 'streaming is not supported for this model' } }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ choices: [{ message: { content: '{"reply":"降级成功","operations":[]}' } }] }),
+        };
+      },
+    });
+    assert.equal(fallbackRes.ok, true);
+    assert.equal(fallbackRes.cleanText, '{"reply":"降级成功","operations":[]}');
+    assert.deepEqual(
+      fallbackBodies.map(b => b.stream),
+      [true, false],
+      '遇到拒绝 stream 的接口必须自动静默回退 stream: false 重试一次',
+    );
+
+    // 5. 验证当前聊天世界书后端绑定/解绑 + 角色档案 UI 入口 + 世界书未启用预警「绑为当前聊天书」按钮
+    const bindRes = await bindChatWorldBook('单线剧情设定书', { getContext: () => ctx, doc });
+    assert.equal(bindRes.ok, true);
+    assert.equal(bindRes.chatBook, '单线剧情设定书');
+    assert.equal(bindRes.memoryCoexistHint, true, '开启记忆增强时返回共用槽位提示标记');
+    assert.equal(ctx.chatMetadata.world_info, '单线剧情设定书');
+    assert.equal(metadataSavedCount, 1);
+    assert.equal(wiSettingsEvents, 1);
+
+    const charWorldDock = createCharWorldDock({ getContext: () => ctx, store });
+    charWorldDock.open('char');
+    const cwEl = doc.getElementById('stm-char-world-dock');
+    const chatWorldSelect = cwEl.querySelector('.stm-cw-chat-world-select');
+    assert.ok(chatWorldSelect, '角色档案页必须呈现聊天世界书绑定下拉框');
+    assert.equal(chatWorldSelect.value, '单线剧情设定书');
+
+    // 通过下拉框解绑当前聊天世界书
+    chatWorldSelect.value = '';
+    chatWorldSelect.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(ctx.chatMetadata.world_info, undefined, '解绑后移除 chatMetadata.world_info');
+
+    // 验证未启用世界书预警条里可直接点击「绑为当前聊天书」
+    const act = resolveWorldInfoActivationState({ getContext: () => ctx, doc });
+    const diag = inspectWorldBookActivation('公共世界书', act);
+    assert.equal(diag.needsActivationWarning, true);
+    assert.equal(diag.canBindToChat, true);
+
+    charWorldDock.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
   }
 });

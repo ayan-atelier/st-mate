@@ -7,13 +7,13 @@
  * 4. 零 Emoji、1.5px 纯色细线图标内嵌助手 UI（支持窄屏独立顺滑滚动、16px 输入框防缩放、Enter 发送与流中随时停止）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.10';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.10';
-import { toastMessage } from '../shell/host-actions.js?v=0.9.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
+import { toastMessage } from '../shell/host-actions.js?v=0.9.11';
 import {
   createAssistantSession,
   resolveAssistantRuntimeChannel,
-} from './assistant-core.js?v=0.9.10';
+} from './assistant-core.js?v=0.9.11';
 import {
   PROMPT_ROLE_OPTIONS,
   UNLOCKED_MAX_CONTEXT,
@@ -34,7 +34,7 @@ import {
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.10';
+} from './preset-backend.js?v=0.9.11';
 
 export const MAX_UNDO_STEPS = 10;
 export const MAX_PERSISTED_ASSISTANT_ROUNDS = 6;
@@ -2348,10 +2348,11 @@ export function createPresetAssistantPanel({
       const bubble = el('div', 'stm-ast-bubble');
       if (msg.isPending) {
         const loadingLine = el('div', 'stm-ast-loading-line');
-        loadingLine.append(
-          el('span', 'stm-ast-pulse-dot'),
-          el('span', '', msg.text || '正在读取当前预设并分析方案…'),
-        );
+        const pendingSpan = el('span', 'stm-ast-pending-text', msg.text || '正在读取当前预设并分析方案…');
+        if (msg.id) {
+          pendingSpan.dataset.stmPendingId = msg.id;
+        }
+        loadingLine.append(el('span', 'stm-ast-pulse-dot'), pendingSpan);
         bubble.append(loadingLine);
       } else {
         bubble.append(el('div', 'stm-ast-reply-text', msg.text));
@@ -2417,7 +2418,27 @@ export function createPresetAssistantPanel({
     renderLogOnly({ stickBottom: true });
     syncToolbarStatus();
 
-    const res = await session.send(promptText);
+    let lastProgressAt = 0;
+    const onProgress = ({ textChars = 0, reasoningChars = 0 } = {}) => {
+      if (destroyed || !pendingAssistantMsg.isPending) return;
+      const now = Date.now();
+      if (now - lastProgressAt < 180) return;
+      lastProgressAt = now;
+      const nextText =
+        textChars > 0
+          ? `正在流式接收方案…（已接收 ${textChars} 字）`
+          : reasoningChars > 0
+            ? `正在思考分析中…（已推理 ${reasoningChars} 字）`
+            : pendingAssistantMsg.text;
+      if (nextText === pendingAssistantMsg.text) return;
+      pendingAssistantMsg.text = nextText;
+      const pendingNode = logEl?.querySelector?.(`.stm-ast-pending-text[data-stm-pending-id="${pendingAssistantMsg.id}"]`);
+      if (pendingNode) {
+        pendingNode.textContent = nextText;
+      }
+    };
+
+    const res = await session.send(promptText, { onProgress });
     if (destroyed) return;
 
     if (!res.ok) {

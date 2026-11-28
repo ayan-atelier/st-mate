@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.10",
+  "latest": "0.9.11",
   "releases": [
+    {
+      "version": "0.9.11",
+      "branch": "release-0.9.11",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "彻底消除《角色映幕》等主题对首页隐形占位撑出的 80px 顶空并修复日间模式下置顶/收藏角标发黑；预设馆新增「流式传输」开关、伴侣助手默认升级 SSE 流式传输（重型预设防超时且自动降级），角色档案与世界书补全「当前聊天世界书」绑定入口。"
+    },
     {
       "version": "0.9.10",
       "branch": "release-0.9.10",

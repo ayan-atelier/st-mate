@@ -7,15 +7,15 @@
  * 4. Tab 2「清爽世界书」：四源生效聚合、未启用世界书强预警一键绑定、预设世界书槽位双关自检修复、人话蓝绿灯切换、绿灯空词预警、中英文逗号关键词解析与 300ms 防串书自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.10';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.11';
 import {
   closeAllNativeDrawers,
   openNativeDrawer,
   resolveAssetHref,
   returnToHomeScreen,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.10';
+} from '../shell/host-actions.js?v=0.9.11';
 import {
   formatSubtleImportTime,
   getBoundPresetForEntity,
@@ -23,7 +23,7 @@ import {
   primeHostOpenAiModule,
   selectHostPresetByName,
   setBoundPresetForEntity,
-} from './preset-backend.js?v=0.9.10';
+} from './preset-backend.js?v=0.9.11';
 import {
   CHAR_PROFILE_AUTO_SAVE_MS,
   WI_DEPTH_ROLE_OPTIONS,
@@ -31,6 +31,7 @@ import {
   WORLD_INFO_AUTO_SAVE_MS,
   applyGreetingToFirstChatFloor,
   bindCharacterPrimaryWorldBook,
+  bindChatWorldBook,
   buildAddAlternateGreetingPatch,
   buildDeleteAlternateGreetingPatch,
   buildGreetingEditPatch,
@@ -71,7 +72,7 @@ import {
   updateWorldInfoBookEntry,
   uploadCharacterGalleryFiles,
   writeCharacterCoverGallery,
-} from './char-world-backend.js?v=0.9.10';
+} from './char-world-backend.js?v=0.9.11';
 
 const CORE_FIELD_DEFS = Object.freeze([
   {
@@ -820,6 +821,91 @@ export function createCharWorldDock({
     return box;
   }
 
+  function buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass = false } = {}) {
+    const doc = globalThis.document;
+    const currentChatBook = String(activation?.chatBook || '').trim();
+    const row = el(
+      'div',
+      `stm-cw-inline-bind-row${includeWorldRowClass ? ' is-world-row' : ''} is-chat-world-row`,
+    );
+    const label = el('span', 'stm-cw-inline-bind-label');
+    label.title = '仅对当前这条聊天存档生效（每条存档可绑定 1 本聊天世界书）';
+    label.append(
+      createIconNode(doc, 'globe', 'stm-row-icon'),
+      el('span', '', '聊天世界书'),
+    );
+
+    const right = el('div', 'stm-cw-inline-world-right');
+    const chatSelect = el('select', 'stm-cw-select is-clean stm-cw-chat-world-select');
+    chatSelect.setAttribute('aria-label', '当前聊天世界书');
+
+    const emptyOpt = el(
+      'option',
+      '',
+      currentChatBook ? '解除绑定聊天世界书' : '未绑定（仅当前存档生效）',
+    );
+    emptyOpt.value = '';
+    emptyOpt.selected = !currentChatBook;
+    chatSelect.append(emptyOpt);
+
+    const names = Array.isArray(activation?.worldNames) ? activation.worldNames : [];
+    if (currentChatBook && names.length > 0 && !names.includes(currentChatBook)) {
+      const missingOpt = el('option', '', `${currentChatBook}（书目缺失）`);
+      missingOpt.value = currentChatBook;
+      missingOpt.selected = true;
+      chatSelect.append(missingOpt);
+    }
+
+    const candidates = names.length > 0 ? names : currentChatBook ? [currentChatBook] : [];
+    for (const wName of candidates) {
+      const opt = el('option', '', wName);
+      opt.value = wName;
+      opt.selected = currentChatBook === wName;
+      chatSelect.append(opt);
+    }
+
+    chatSelect.addEventListener('change', async () => {
+      const prevBook = currentChatBook;
+      const nextBook = chatSelect.value;
+      await flushAllPendingSaves();
+      try {
+        const res = await bindChatWorldBook(nextBook, { getContext });
+        if (nextBook) {
+          selectedWorldBook = nextBook;
+          setSaveBadge('ok', `已绑聊天书：${nextBook}`);
+          const memTip = res.memoryCoexistHint
+            ? '（已开记忆增强，将与记忆条目共用当前聊天书槽位）'
+            : '';
+          toastMessage(`已为当前聊天绑定世界书：${nextBook}${memTip}`, 'success');
+        } else {
+          if (!selectedWorldBook || selectedWorldBook === prevBook) {
+            selectedWorldBook =
+              resolveWorldInfoActivationState({ getContext }).defaultBookName || '';
+          }
+          setSaveBadge('ok', '已解除聊天世界书绑定');
+          toastMessage('已解除当前聊天的世界书绑定', 'info');
+        }
+        renderHeader();
+        renderBodyPreservingScroll();
+      } catch (err) {
+        toastMessage(err?.message || '绑定聊天世界书失败', 'error');
+      }
+    });
+    right.append(chatSelect);
+
+    if (currentChatBook) {
+      const jumpBtn = el('button', 'stm-cw-inline-link', '查看 ›');
+      jumpBtn.type = 'button';
+      jumpBtn.addEventListener('click', () => {
+        void selectWorldBookAndLoad(currentChatBook, { switchToWorldTab: true });
+      });
+      right.append(jumpBtn);
+    }
+
+    row.append(label, right);
+    return row;
+  }
+
   function renderGroupProfileView(container, ctx, profile, activation) {
     const doc = globalThis.document;
 
@@ -908,7 +994,11 @@ export function createCharWorldDock({
         switchToWorldTab: true,
       });
     });
-    worldSummaryBox.append(wHead, wSummaryBtn);
+    worldSummaryBox.append(
+      wHead,
+      wSummaryBtn,
+      buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass: false }),
+    );
     bindGrid.append(worldSummaryBox);
     container.append(bindGrid);
 
@@ -1269,28 +1359,25 @@ export function createCharWorldDock({
     });
     exportRow.append(nativeCharLink);
 
-    // 3. 清爽无外框单行绑定栏：绑定预设 + 按需显示世界书（无角色书且无记忆聊天书时自动隐去，不占空间）
+    // 3. 清爽无外框单行绑定栏：绑定预设 + 角色世界书（按需显隐）+ 聊天世界书绑定
     const inlineBinds = el('div', 'stm-cw-inline-binds');
     inlineBinds.append(buildInlinePresetBindRow(ctx, profile));
 
-    const hasCharOrChatWorld = Boolean(
+    const hasCharWorld = Boolean(
       profile.primaryWorld ||
-        activation.chatBook ||
         (Array.isArray(activation.extraCharBooks) && activation.extraCharBooks.length > 0),
     );
 
-    if (hasCharOrChatWorld) {
+    if (hasCharWorld) {
       const worldRow = el('div', 'stm-cw-inline-bind-row is-world-row');
       const wLabel = el('span', 'stm-cw-inline-bind-label');
-      const isMemoryOrChatOnly = !profile.primaryWorld && Boolean(activation.chatBook);
       wLabel.append(
         createIconNode(doc, 'globe', 'stm-row-icon'),
-        el('span', '', isMemoryOrChatOnly ? '聊天/记忆书' : '角色世界书'),
+        el('span', '', '角色世界书'),
       );
 
       const targetJumpBook =
         profile.primaryWorld ||
-        activation.chatBook ||
         activation.extraCharBooks?.[0] ||
         activation.defaultBookName ||
         '';
@@ -1365,6 +1452,18 @@ export function createCharWorldDock({
 
       worldRow.append(wLabel, wRight);
       inlineBinds.append(worldRow);
+      inlineBinds.append(
+        buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass: false }),
+      );
+    } else if (activation.chatBook) {
+      // 无角色主书但存在当前聊天/记忆书时，单行直接可切换/解绑且保留 .is-world-row 语义
+      inlineBinds.append(
+        buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass: true }),
+      );
+    } else {
+      inlineBinds.append(
+        buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass: false }),
+      );
     }
 
     metaCol.append(heroTopBlock, exportRow, inlineBinds);
@@ -2980,11 +3079,12 @@ export function createCharWorldDock({
         newBookNameDraft = nameInput.value;
       });
 
-      const doCreate = async ({ bindChar = false, enableGlob = false }) => {
+      const doCreate = async ({ bindChar = false, bindChat = false, enableGlob = false }) => {
         await flushAllPendingSaves();
         try {
           const res = await createHostWorldBook(newBookNameDraft, {
             bindToCurrentChar: bindChar,
+            bindToCurrentChat: bindChat,
             enableGlobal: enableGlob,
             createStarterEntry: true,
             getContext,
@@ -3009,6 +3109,13 @@ export function createCharWorldDock({
         cRow.append(nameInput, bindCreateBtn);
       } else {
         cRow.append(nameInput);
+      }
+
+      if (activation.isSingleChar || activation.isGroup) {
+        const chatCreateBtn = el('button', 'stm-cw-secondary-btn', '新建并绑为聊天书');
+        chatCreateBtn.type = 'button';
+        chatCreateBtn.addEventListener('click', () => void doCreate({ bindChat: true }));
+        cRow.append(chatCreateBtn);
       }
 
       const globalCreateBtn = el('button', 'stm-cw-secondary-btn', '新建并全局启用');
@@ -3075,6 +3182,14 @@ export function createCharWorldDock({
         libHead.append(libHeadActions);
       }
       libBox.append(libHead);
+
+      if (activation.isSingleChar || activation.isGroup) {
+        const libChatBind = el('div', 'stm-cw-lib-chat-bind');
+        libChatBind.append(
+          buildInlineChatWorldBindRow(ctx, activation, { includeWorldRowClass: false }),
+        );
+        libBox.append(libChatBind);
+      }
 
       const batchBarSlot = el('div', 'stm-cw-lib-batch-slot');
       const libList = el('div', 'stm-cw-lib-list');
@@ -3420,6 +3535,26 @@ export function createCharWorldDock({
           renderBodyPreservingScroll();
         });
         alertActions.append(bindCharBtn);
+      }
+
+      if (bookDiag.canBindToChat) {
+        const bindChatBtn = el('button', 'stm-cw-alert-btn stm-cw-bind-chat-btn', '绑为当前聊天书');
+        bindChatBtn.type = 'button';
+        bindChatBtn.addEventListener('click', async () => {
+          await flushAllPendingSaves();
+          try {
+            const res = await bindChatWorldBook(selectedWorldBook, { getContext });
+            const memTip = res.memoryCoexistHint
+              ? '（提示：已开记忆增强，将共用当前聊天书槽位）'
+              : '';
+            toastMessage(`已将「${selectedWorldBook}」绑为当前聊天世界书，立即生效！${memTip}`, 'success');
+            renderHeader();
+            renderBodyPreservingScroll();
+          } catch (err) {
+            toastMessage(err?.message || '绑定当前聊天世界书失败', 'error');
+          }
+        });
+        alertActions.append(bindChatBtn);
       }
 
       const enableGlobalBtn = el('button', 'stm-cw-alert-btn', '开启为全局世界书');

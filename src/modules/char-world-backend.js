@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.10';
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.11';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.9.10';
+} from './preset-backend.js?v=0.9.11';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;
@@ -1806,6 +1806,7 @@ export function resolveWorldInfoActivationState({
  */
 export function inspectWorldBookActivation(bookName, activationState) {
   const clean = typeof bookName === 'string' ? bookName.trim() : '';
+  const hasActiveChat = Boolean(activationState?.isSingleChar || activationState?.isGroup);
   if (!clean) {
     return {
       bookName: '',
@@ -1815,13 +1816,16 @@ export function inspectWorldBookActivation(bookName, activationState) {
       sources: [],
       sourceLabels: [],
       badgeLabel: '',
+      isChatBook: false,
       canBindToChar: Boolean(activationState?.isSingleChar),
+      canBindToChat: hasActiveChat,
       canEnableGlobal: false,
     };
   }
 
   const hit = (activationState?.activeBooks || []).find(item => item.name === clean) || null;
   if (hit) {
+    const isChatBook = hit.sources.includes('chat');
     return {
       bookName: clean,
       isActive: true,
@@ -1830,7 +1834,9 @@ export function inspectWorldBookActivation(bookName, activationState) {
       sources: hit.sources,
       sourceLabels: hit.sourceLabels,
       badgeLabel: hit.badgeLabel,
+      isChatBook,
       canBindToChar: Boolean(activationState?.isSingleChar) && !hit.isPrimaryCharBook,
+      canBindToChat: hasActiveChat && !isChatBook,
       canEnableGlobal: !hit.isGlobal,
     };
   }
@@ -1843,7 +1849,9 @@ export function inspectWorldBookActivation(bookName, activationState) {
     sources: [],
     sourceLabels: [],
     badgeLabel: '未启用',
+    isChatBook: false,
     canBindToChar: Boolean(activationState?.isSingleChar),
+    canBindToChat: hasActiveChat,
     canEnableGlobal: true,
   };
 }
@@ -2158,6 +2166,83 @@ export async function bindCharacterPrimaryWorldBook(
   };
 }
 
+/**
+ * 为当前聊天存档绑定或解绑「聊天世界书」（`chat_metadata.world_info`，每条存档原生单槽位）。
+ * 同步写入宿主 `ctx.chatMetadata.world_info`、调用 `saveMetadata()` 落盘并通知宿主世界书更新事件。
+ */
+export async function bindChatWorldBook(
+  bookName,
+  {
+    getContext,
+    worldInfoModule = null,
+    scriptModule = null,
+    doc = globalThis.document,
+  } = {},
+) {
+  const ctx = getContext?.();
+  if (!ctx || !hasActiveChatSelection(ctx)) {
+    throw new Error('请先进入任意角色或群聊对话后再绑定聊天世界书');
+  }
+
+  const targetWorld = String(bookName || '').trim();
+  const wiMod = worldInfoModule || cachedHostWorldInfoMod;
+  if (targetWorld) {
+    ensureWorldBookRegisteredInMemoryAndDom(targetWorld, { ctx, wiMod, doc });
+  }
+
+  if (!ctx.chatMetadata || typeof ctx.chatMetadata !== 'object') {
+    ctx.chatMetadata = {};
+  }
+
+  if (targetWorld) {
+    ctx.chatMetadata.world_info = targetWorld;
+  } else {
+    delete ctx.chatMetadata.world_info;
+  }
+
+  let saved = false;
+  if (typeof ctx.saveMetadata === 'function') {
+    await ctx.saveMetadata();
+    saved = true;
+  } else if (typeof scriptModule?.saveMetadata === 'function') {
+    await scriptModule.saveMetadata();
+    saved = true;
+  } else if (typeof ctx.saveMetadataDebounced === 'function') {
+    ctx.saveMetadataDebounced();
+    saved = true;
+  } else {
+    const href = resolveHostAssetUrl('script.js', doc);
+    if (href && /^https?:\/\//i.test(href)) {
+      try {
+        const mod = await import(href);
+        if (typeof mod?.saveMetadata === 'function') {
+          await mod.saveMetadata();
+          saved = true;
+        }
+      } catch {
+        // ignore offline fallback
+      }
+    }
+  }
+
+  const evtTypes = ctx.eventTypes || ctx.event_types;
+  if (evtTypes?.WORLDINFO_SETTINGS_UPDATED && typeof ctx.eventSource?.emit === 'function') {
+    try {
+      await ctx.eventSource.emit(evtTypes.WORLDINFO_SETTINGS_UPDATED);
+    } catch {
+      // ignore
+    }
+  }
+
+  const memoryCoexistHint = Boolean(ctx?.extensionSettings?.yantai?.controlEnabled === true);
+  return {
+    ok: true,
+    chatBook: targetWorld,
+    saved,
+    memoryCoexistHint,
+  };
+}
+
 // ============================================================================
 // 三、世界书读写落盘、新建世界书、蓝绿灯条目 CRUD 与防串书自动持久化队列
 // ============================================================================
@@ -2341,6 +2426,7 @@ export async function createHostWorldBook(
   rawBookName = '',
   {
     bindToCurrentChar = false,
+    bindToCurrentChat = false,
     enableGlobal = false,
     createStarterEntry = false,
     getContext,
@@ -2460,6 +2546,14 @@ export async function createHostWorldBook(
     });
   }
 
+  if (bindToCurrentChat && hasActiveChatSelection(ctx)) {
+    await bindChatWorldBook(finalName, {
+      getContext,
+      worldInfoModule: wiMod,
+      doc,
+    });
+  }
+
   if (enableGlobal) {
     setGlobalWorldBookEnabled(finalName, true, {
       getContext,
@@ -2472,6 +2566,7 @@ export async function createHostWorldBook(
     ok: true,
     bookName: finalName,
     boundToChar: Boolean(bindToCurrentChar && profile.kind === 'char'),
+    boundToChat: Boolean(bindToCurrentChat && hasActiveChatSelection(ctx)),
     enabledGlobal: Boolean(enableGlobal),
   };
 }

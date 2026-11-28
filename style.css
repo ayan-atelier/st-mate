@@ -452,8 +452,8 @@ html body.stm-shell-active.stm-home-cloak #chat#chat.jd-bookshelf-home {
 }
 
 @media screen and (max-width: 1000px) {
-  html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld#sheld#sheld,
-  html body.stm-shell-active.stm-home-cloak:not(.movingUI) #sheld#sheld {
+  html body.stm-shell-active.stm-home-cloak #sheld#sheld#sheld#sheld,
+  html body.stm-shell-active.stm-home-cloak #sheld#sheld {
     top: 0 !important;
     height: 100vh !important;
     height: 100dvh !important;
@@ -467,7 +467,10 @@ html body.stm-shell-active.stm-home-cloak #chat#chat.jd-bookshelf-home {
 
 /* 博客小站 (QuietRoom.org) 原生兼容桥接：
    1) 书架首页保留 0 高度隐形宽度标尺，令原版 .hp-image-banner 头图与轮播自动对齐展示在书架正上方；
+      采用 4-ID 高权重压制《角色映幕》等主题的双 ID `html body #chat#chat > .mes[is_user="false"] { padding-bottom: 80px !important }`
+      对 mesid="0" 隐形标尺撑出 80px 顶部空白；非博客小站页面直接 display:none 彻底零占位；
    2) 桌面宽屏下保护首页 #hp-side 左栏高度不因 #form_sheld 收起而塌缩，并隐藏桌面端多余的书架侧栏开关钮 */
+html body.stm-shell-active.jd-bookshelf-home-active #chat#chat#chat#chat.jd-bookshelf-home > .mes[mesid="0"]:is([type="welcome"], [type="welcome_prompt"], [type="assistant_message"], [type="assistant_note"]),
 body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .mes[mesid="0"]:is([type="welcome"], [type="welcome_prompt"], [type="assistant_message"], [type="assistant_note"]) {
   display: block !important;
   visibility: hidden !important;
@@ -482,8 +485,30 @@ body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .mes[me
   max-height: 0 !important;
   margin: 0 auto !important;
   padding: 0 !important;
+  padding-top: 0 !important;
+  padding-right: 0 !important;
+  padding-bottom: 0 !important;
+  padding-left: 0 !important;
   border: 0 !important;
   overflow: hidden !important;
+}
+
+html body.stm-shell-active.jd-bookshelf-home-active:not(.hp-js) #chat#chat#chat#chat.jd-bookshelf-home:not(:has(> .hp-image-banner)) > .mes[mesid="0"]:is([type="welcome"], [type="welcome_prompt"], [type="assistant_message"], [type="assistant_note"]) {
+  display: none !important;
+}
+
+/* 浅色/日间主题兜底：角色卡封面右上角的置顶/收藏角标始终压在深色半透底托上，激活态保持纯白高对比，避免浅色主题下 --SmartThemeUnderlineColor 变黑后糊成暗圆点 */
+body.stm-shell-active .jd-bookshelf .jd-card-tools .jd-favorite[aria-pressed="true"],
+body.stm-shell-active .jd-bookshelf .jd-card-tools .jd-pin[aria-pressed="true"] {
+  background: rgba(14, 14, 18, 0.62) !important;
+  color: #ffffff !important;
+  border: 0 !important;
+}
+
+body.stm-shell-active .jd-bookshelf .jd-card-tools .jd-favorite[aria-pressed="true"] svg path,
+body.stm-shell-active .jd-bookshelf .jd-card-tools .jd-pin[aria-pressed="true"] svg path {
+  fill: currentColor;
+  fill-opacity: 0.42;
 }
 
 body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home > .hp-image-banner {
@@ -6291,6 +6316,77 @@ body.stm-shell-active.stm-pure-reading .stm-preset-dock {
   font-weight: 600;
 }
 
+.stm-param-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(128, 128, 128, 0.16);
+}
+
+.stm-param-toggle-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stm-param-toggle-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--stm-muted);
+}
+
+.stm-param-stream-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.stm-param-stream-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.stm-param-stream-track {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border);
+  background: rgba(128, 128, 128, 0.22);
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.stm-param-stream-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--stm-ink);
+  opacity: 0.78;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+}
+
+.stm-param-stream-input:checked + .stm-param-stream-track {
+  border-color: var(--stm-accent);
+  background: color-mix(in srgb, var(--stm-accent) 34%, transparent);
+}
+
+.stm-param-stream-input:checked + .stm-param-stream-track::after {
+  transform: translateX(14px);
+  opacity: 1;
+}
+
 /* 提示词条目列表与内联编辑器 */
 .stm-prompt-head-left {
   display: inline-flex;
@@ -7853,6 +7949,19 @@ body.stm-shell-active.stm-pure-reading .stm-char-world-dock {
 
 .stm-cw-inline-world-right .stm-cw-select.is-clean {
   max-width: 100%;
+}
+
+.stm-cw-lib-chat-bind {
+  margin-bottom: 6px;
+  padding: 2px 6px;
+  border-radius: 7px;
+  background: rgba(128, 128, 128, 0.06);
+}
+
+.stm-cw-lib-chat-bind .stm-cw-inline-bind-row {
+  border-bottom: 0;
+  min-height: 34px;
+  padding: 2px 0;
 }
 
 .stm-cw-world-jump-chip {

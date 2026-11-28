@@ -9,7 +9,7 @@
  * 4. 多轮精简会话控制器：维护最近 8 轮精简问答摘要（剥离历史巨型 JSON 防 Token 膨胀），支持一键清空与流中取消。
  */
 
-import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.10';
+import { normalizeApiStation, sanitizeEndpointUrl } from '../core/schema.js?v=0.9.11';
 import {
   buildHostProxyPresetName,
   buildProbeGenerateBody,
@@ -22,7 +22,7 @@ import {
   needsV1Suffix,
   resolveAuxApiChannel,
   resolveSecretKeyForStation,
-} from './api-backend.js?v=0.9.10';
+} from './api-backend.js?v=0.9.11';
 
 export const DEFAULT_ASSISTANT_TIMEOUT_MS = 90000;
 export const DEFAULT_MAX_HISTORY_TURNS = 8;
@@ -276,11 +276,12 @@ export function normalizeAssistantMessages(rawMessages = []) {
 
 /**
  * 构造发送至 `/api/backends/chat-completions/generate` 的零干扰静默生成请求体。
+ * 默认开启 `stream: true` 以流式保活，避免重型预设搭配思考模型时在 Cloudflare / 反代 60~100s 首字节超时处被掐断。
  */
 export function buildAssistantGenerateBody(
   channel,
   messages = [],
-  { oaiSettings = {}, maxTokens = 4096, temperature = 0.4 } = {},
+  { oaiSettings = {}, maxTokens = 4096, temperature = 0.4, stream = true } = {},
 ) {
   const station = channel?.station || {};
   const model = String(channel?.model || station.model || '').trim();
@@ -299,7 +300,7 @@ export function buildAssistantGenerateBody(
 
   const body = buildProbeGenerateBody(stationForCall, isolatedOai);
   body.type = 'quiet';
-  body.stream = false;
+  body.stream = Boolean(stream);
   body.messages = normalizeAssistantMessages(messages);
   body.max_tokens = clampInt(maxTokens, 128, 32768, 4096);
 
@@ -375,7 +376,271 @@ function extractErrorDetail(payload, rawText = '') {
 }
 
 /**
- * 执行一次零干扰伴侣助手补全请求（支持主/副通道自动路由、AbortController 取消、超时保护与人话报错）。
+ * 从单帧 SSE JSON 对象中提取正文增量、推理增量或内联错误（兼容 OpenAI / Claude / Gemini / Vertex / DeepSeek / OpenRouter / Cohere / Mistral）。
+ */
+export function extractAssistantStreamDelta(chunk) {
+  if (!chunk || typeof chunk !== 'object') {
+    return { text: '', reasoning: '', errorMessage: '' };
+  }
+
+  if (chunk.error) {
+    const errMsg = extractErrorDetail(chunk);
+    return { text: '', reasoning: '', errorMessage: errMsg || '流式接口返回错误' };
+  }
+
+  let text = '';
+  let reasoning = '';
+
+  // 1. Anthropic Claude Messages SSE (`content_block_delta` / `delta.text` / `delta.thinking`)
+  if (chunk.delta && typeof chunk.delta === 'object') {
+    if (typeof chunk.delta.thinking === 'string') {
+      reasoning += chunk.delta.thinking;
+    }
+    if (typeof chunk.delta.text === 'string') {
+      text += chunk.delta.text;
+    }
+    // Cohere V2 SSE (`delta.message.content.text`)
+    const cohereContent = chunk.delta.message?.content;
+    if (typeof cohereContent?.text === 'string') {
+      text += cohereContent.text;
+    } else if (Array.isArray(cohereContent)) {
+      for (const item of cohereContent) {
+        if (typeof item?.text === 'string') text += item.text;
+        else if (typeof item?.thinking === 'string') reasoning += item.thinking;
+      }
+    }
+  }
+
+  // 2. OpenAI / DeepSeek / OpenRouter / xAI / Mistral / Custom / SiliconFlow / MiniMax SSE
+  const choice0 = Array.isArray(chunk.choices) ? chunk.choices[0] : null;
+  if (choice0 && typeof choice0 === 'object') {
+    const delta = choice0.delta;
+    if (delta && typeof delta === 'object') {
+      if (typeof delta.reasoning_content === 'string') reasoning += delta.reasoning_content;
+      else if (typeof delta.reasoning === 'string') reasoning += delta.reasoning;
+
+      if (typeof delta.content === 'string') {
+        text += delta.content;
+      } else if (Array.isArray(delta.content)) {
+        for (const part of delta.content) {
+          if (!part) continue;
+          if (typeof part === 'string') {
+            text += part;
+          } else if (part.type === 'thinking' || part.type === 'reasoning' || part.thought === true) {
+            if (typeof part.thinking === 'string') reasoning += part.thinking;
+            else if (Array.isArray(part.thinking)) {
+              for (const sub of part.thinking) {
+                if (typeof sub?.text === 'string') reasoning += sub.text;
+              }
+            }
+            if (typeof part.text === 'string') reasoning += part.text;
+          } else if (typeof part.text === 'string') {
+            text += part.text;
+          }
+        }
+      }
+    } else if (choice0.message && typeof choice0.message === 'object') {
+      const msgExtracted = extractCompletionPayload({ choices: [choice0] });
+      if (msgExtracted.text) text += msgExtracted.text;
+      if (msgExtracted.reasoningText) reasoning += msgExtracted.reasoningText;
+    } else if (typeof choice0.text === 'string') {
+      text += choice0.text;
+    }
+  }
+
+  // 3. Google Gemini / MakerSuite / Vertex AI SSE (`candidates[0].content.parts`)
+  const parts = chunk?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) {
+    for (const part of parts) {
+      if (!part || typeof part !== 'object' || typeof part.text !== 'string') continue;
+      if (part.thought === true) {
+        reasoning += part.text;
+      } else {
+        text += part.text;
+      }
+    }
+  }
+
+  return { text, reasoning, errorMessage: '' };
+}
+
+/**
+ * 解析整段 SSE 文本（同时供无流式 reader 或未标 `text/event-stream` 的代理兜底复用）。
+ */
+export function parseAssistantSseText(rawText = '') {
+  const src = String(rawText || '');
+  let text = '';
+  let reasoning = '';
+  let errorMessage = '';
+  let sawSseData = false;
+
+  const lines = src.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith(':') || line.startsWith('event:')) continue;
+    if (!line.startsWith('data:')) continue;
+    sawSseData = true;
+    const dataStr = line.slice(5).trim();
+    if (!dataStr || dataStr === '[DONE]') continue;
+    try {
+      const parsed = JSON.parse(dataStr);
+      const delta = extractAssistantStreamDelta(parsed);
+      if (delta.errorMessage) errorMessage = delta.errorMessage;
+      if (delta.text) text += delta.text;
+      if (delta.reasoning) reasoning += delta.reasoning;
+    } catch {
+      // 忽略残缺注释帧或心跳帧
+    }
+  }
+
+  return { sawSseData, text, reasoning, errorMessage };
+}
+
+async function readAssistantResponseBody(res, { onProgress = null } = {}) {
+  const contentType = String(
+    typeof res?.headers?.get === 'function' ? res.headers.get('content-type') || '' : '',
+  ).toLowerCase();
+  const isEventStream = contentType.includes('text/event-stream');
+
+  if (isEventStream && res?.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const decoder = typeof globalThis.TextDecoder === 'function' ? new globalThis.TextDecoder('utf-8') : null;
+    let buffer = '';
+    let text = '';
+    let reasoning = '';
+    let errorMessage = '';
+    let sawSseData = false;
+
+    const processLine = rawLine => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith(':') || line.startsWith('event:')) return;
+      if (!line.startsWith('data:')) return;
+      sawSseData = true;
+      const dataStr = line.slice(5).trim();
+      if (!dataStr || dataStr === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(dataStr);
+        const delta = extractAssistantStreamDelta(parsed);
+        if (delta.errorMessage) errorMessage = delta.errorMessage;
+        if (delta.text) text += delta.text;
+        if (delta.reasoning) reasoning += delta.reasoning;
+      } catch {
+        // 忽略心跳帧或非 JSON 注释帧
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const decoded =
+          typeof value === 'string'
+            ? value
+            : decoder
+              ? decoder.decode(value, { stream: true })
+              : String(value || '');
+        buffer += decoded;
+
+        let nlIdx = buffer.indexOf('\n');
+        while (nlIdx >= 0) {
+          const line = buffer.slice(0, nlIdx);
+          buffer = buffer.slice(nlIdx + 1);
+          processLine(line);
+          nlIdx = buffer.indexOf('\n');
+        }
+
+        if (typeof onProgress === 'function' && (text.length > 0 || reasoning.length > 0)) {
+          onProgress({
+            textChars: text.length,
+            reasoningChars: reasoning.length,
+            totalChars: text.length + reasoning.length,
+          });
+        }
+      }
+
+      if (decoder) {
+        buffer += decoder.decode();
+      }
+      if (buffer.trim()) {
+        for (const tailLine of buffer.split(/\r?\n/)) {
+          processLine(tailLine);
+        }
+      }
+      if (typeof onProgress === 'function' && (text.length > 0 || reasoning.length > 0)) {
+        onProgress({
+          textChars: text.length,
+          reasoningChars: reasoning.length,
+          totalChars: text.length + reasoning.length,
+        });
+      }
+    } finally {
+      try {
+        reader.releaseLock?.();
+      } catch {
+        // ignore
+      }
+    }
+
+    return {
+      mode: 'sse',
+      sawSseData,
+      streamText: text,
+      streamReasoning: reasoning,
+      streamError: errorMessage,
+      payload: null,
+      rawBodyText: '',
+    };
+  }
+
+  let payload = null;
+  let rawBodyText = '';
+  if (typeof res?.text === 'function') {
+    rawBodyText = await res.text();
+    const trimmed = rawBodyText.trim();
+    if (trimmed.startsWith('data:') || trimmed.startsWith('event:') || isEventStream) {
+      const sseRes = parseAssistantSseText(rawBodyText);
+      if (sseRes.sawSseData) {
+        return {
+          mode: 'sse',
+          sawSseData: true,
+          streamText: sseRes.text,
+          streamReasoning: sseRes.reasoning,
+          streamError: sseRes.errorMessage,
+          payload: null,
+          rawBodyText,
+        };
+      }
+    }
+    try {
+      payload = rawBodyText ? JSON.parse(rawBodyText) : null;
+    } catch {
+      payload = null;
+    }
+  } else if (typeof res?.json === 'function') {
+    payload = await res.json();
+  }
+
+  return {
+    mode: 'json',
+    sawSseData: false,
+    streamText: '',
+    streamReasoning: '',
+    streamError: '',
+    payload,
+    rawBodyText,
+  };
+}
+
+function shouldFallbackFromStreamError(status, detail = '') {
+  if (status === 501) return true;
+  if ((status === 400 || status === 422) && /stream/i.test(String(detail || ''))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 执行一次零干扰伴侣助手补全请求（支持主/副通道自动路由、默认流式防重型预设 524 超时、不支持流式自动降级非流、AbortController 取消与人话报错）。
  */
 export async function requestAssistantCompletion({
   messages = [],
@@ -388,6 +653,8 @@ export async function requestAssistantCompletion({
   timeoutMs = DEFAULT_ASSISTANT_TIMEOUT_MS,
   maxTokens = 4096,
   temperature = 0.4,
+  stream = true,
+  onProgress = null,
   doc = globalThis.document,
 } = {}) {
   const channel = resolveAssistantRuntimeChannel({ store, settings, getContext, secretsMap });
@@ -473,38 +740,57 @@ export async function requestAssistantCompletion({
         ? ctx.getRequestHeaders()
         : { 'Content-Type': 'application/json' };
 
-    const reqBody = buildAssistantGenerateBody(channel, messages, {
-      oaiSettings: ctx?.chatCompletionSettings,
-      maxTokens,
-      temperature,
-    });
-
     const effectiveSignal = internalController ? internalController.signal : signal;
-    const res = await fetchImpl(resolveEndpointHref('api/backends/chat-completions/generate', doc), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-      ...(effectiveSignal ? { signal: effectiveSignal } : {}),
-    });
+    const endpointHref = resolveEndpointHref('api/backends/chat-completions/generate', doc);
 
-    const latencyMs = Math.max(1, Date.now() - startedAt);
-    let payload = null;
-    let rawBodyText = '';
+    const runSingleAttempt = async useStream => {
+      const reqBody = buildAssistantGenerateBody(channel, messages, {
+        oaiSettings: ctx?.chatCompletionSettings,
+        maxTokens,
+        temperature,
+        stream: useStream,
+      });
 
-    if (typeof res?.text === 'function') {
-      rawBodyText = await res.text();
-      try {
-        payload = rawBodyText ? JSON.parse(rawBodyText) : null;
-      } catch {
-        payload = null;
+      const res = await fetchImpl(endpointHref, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        ...(effectiveSignal ? { signal: effectiveSignal } : {}),
+      });
+
+      const parsed = await readAssistantResponseBody(res, { onProgress });
+      return { res, parsed };
+    };
+
+    const initialStream = Boolean(stream);
+    let { res, parsed } = await runSingleAttempt(initialStream);
+
+    // 若接口明确拒绝 stream 参数或流式返回了空内容（非取消/非超时），自动静默降级为非流式重试一次
+    if (initialStream && !userAborted && !timedOut) {
+      const status = Number(res?.status || 0);
+      const errDetail = parsed.streamError || extractErrorDetail(parsed.payload, parsed.rawBodyText);
+      const streamRejected =
+        (!res?.ok || parsed.payload?.error || parsed.streamError) &&
+        shouldFallbackFromStreamError(status, errDetail);
+      const emptySsePayload =
+        Boolean(res?.ok) &&
+        !parsed.payload?.error &&
+        !parsed.streamError &&
+        parsed.mode === 'sse' &&
+        !stripThinkingBlocks(parsed.streamText).cleanText;
+
+      if (streamRejected || emptySsePayload) {
+        ({ res, parsed } = await runSingleAttempt(false));
       }
-    } else if (typeof res?.json === 'function') {
-      payload = await res.json();
     }
 
-    if (!res?.ok || payload?.error) {
+    const latencyMs = Math.max(1, Date.now() - startedAt);
+    const payload = parsed.payload;
+    const rawBodyText = parsed.rawBodyText;
+
+    if (!res?.ok || payload?.error || parsed.streamError) {
       const status = Number(res?.status || 0);
-      const detail = extractErrorDetail(payload, rawBodyText);
+      const detail = parsed.streamError || extractErrorDetail(payload, rawBodyText);
       const tail = detail ? `（${detail}）` : '';
 
       if (status === 401 || status === 403) {
@@ -558,7 +844,10 @@ export async function requestAssistantCompletion({
       };
     }
 
-    const extracted = extractCompletionPayload(payload);
+    const extracted =
+      parsed.mode === 'sse'
+        ? { text: parsed.streamText, reasoningText: parsed.streamReasoning }
+        : extractCompletionPayload(payload);
     const rawText = extracted.text;
     const stripped = stripThinkingBlocks(rawText);
     const cleanText = stripped.cleanText;
@@ -987,6 +1276,8 @@ export function createAssistantSession({
       settings = null,
       secretsMap = {},
       fetchOverride = null,
+      onProgress = null,
+      stream = true,
       doc = globalThis.document,
     } = {},
   ) {
@@ -1030,6 +1321,8 @@ export function createAssistantSession({
         timeoutMs,
         maxTokens,
         temperature,
+        stream,
+        onProgress,
         doc,
       });
 

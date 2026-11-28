@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.10';
-import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.10';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.11';
+import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.11';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 
@@ -2082,7 +2082,7 @@ export async function deleteHostPreset({
 // ============================================================================
 
 /**
- * 读取当前生效的 3 个核心生成参数。
+ * 读取当前生效的核心生成参数（上下文长度、最大回复、温度、流式传输）。
  */
 export function readGenerationParams(ctx) {
   const oai = ctx?.chatCompletionSettings || {};
@@ -2091,12 +2091,14 @@ export function readGenerationParams(ctx) {
   const rawTemp = oai.temp_openai !== undefined ? oai.temp_openai : oai.temperature;
   const temperature = Math.round(clampFloat(rawTemp, 0, 2, 1) * 100) / 100;
   const maxContextUnlocked = Boolean(oai.max_context_unlocked);
+  const streaming = Boolean(oai.stream_openai);
 
   return {
     maxContext,
     maxTokens,
     temperature,
     maxContextUnlocked,
+    streaming,
   };
 }
 
@@ -2183,6 +2185,16 @@ export function applyGenerationParams(patch = {}, { getContext, doc = globalThis
     }
     if (tempCounter) {
       tempCounter.value = nextTemp.toFixed(2);
+    }
+  }
+
+  if (patch.streaming !== undefined) {
+    const nextStreaming = Boolean(patch.streaming);
+    oai.stream_openai = nextStreaming;
+    const streamToggle = doc?.getElementById?.('stream_toggle');
+    if (streamToggle) {
+      streamToggle.checked = nextStreaming;
+      streamToggle.dispatchEvent?.(new EventCtor('change', { bubbles: true }));
     }
   }
 
