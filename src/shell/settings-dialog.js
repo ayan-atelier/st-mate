@@ -14,13 +14,13 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.18';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.18';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.18';
-import { createVersionManager } from '../core/version-manager.js?v=0.9.18';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.18';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.18';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.18';
+} from '../core/companion-kit.js?v=0.9.19';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.19';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.19';
+import { createVersionManager } from '../core/version-manager.js?v=0.9.19';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.19';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.19';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.19';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -77,7 +77,7 @@ export function createSettingsDialog({
   moduleBridge,
   suiteCoordinator = null,
   versionManager = null,
-  stmVersion = '0.9.18',
+  stmVersion = '0.9.19',
   onToggleShell,
   onForcePruneTurbo = null,
   onOpenWelcomeGuide = null,
@@ -1030,6 +1030,17 @@ export function createSettingsDialog({
         checked: current.tidy?.enabled !== false,
         onChange: val => {
           updateStoreFromDialog({ tidy: { enabled: val } });
+        },
+      }),
+      makeSwitchRow({
+        helpKey: 'mod_bookshelf',
+        icon: 'shelf',
+        title: '角色书架首页',
+        desc: '首页展示 3:4 竖版角色卡画册、分类文件夹与多存档管理；关闭后保留酒馆原版主页，伴侣的文字排版、预设、API 与顶栏等功能照常使用。',
+        badgeText: resolveCompanionBadge('bookshelf', current, suiteBusy),
+        checked: current.modules.bookshelf !== false,
+        onChange: val => {
+          void toggleCompanionModule('bookshelf', val);
         },
       }),
       makeSwitchRow({

@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.18';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.18';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.18';
-import { toastMessage } from './host-actions.js?v=0.9.18';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.19';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.19';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.19';
+import { toastMessage } from './host-actions.js?v=0.9.19';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -24,12 +24,15 @@ const CORE_FORM_SHELD_IDS = new Set([
   'dialogue_del_mes',
   'send_form',
   'typing_indicator',
+  'input_helper_toolbar',
+  'input-helper-toolbar',
 ]);
 
 const CORE_SEND_FORM_IDS = new Set([
   'file_form',
   'nonQRFormItems',
   'input_helper_toolbar',
+  'input-helper-toolbar',
   'custom_buttons_container',
 ]);
 
@@ -257,6 +260,37 @@ function isAcceptableFloatingGeometry(effW, effH, root = globalThis) {
   // 3) 竖条悬浮条 / 窄侧边悬浮胶囊
   if (effW <= 76 && effH <= maxStripH) return true;
   return false;
+}
+
+function isProtectedInputToolbarNode(node) {
+  if (!node?.tagName) return false;
+  const id = String(node.id || '').trim();
+  if (
+    id === 'input_helper_toolbar' ||
+    id === 'input-helper-toolbar' ||
+    id === 'custom_buttons_container'
+  ) {
+    return true;
+  }
+  const cls = node.classList;
+  if (cls?.contains?.('st-input-helper') || cls?.contains?.('input-helper-toolbar')) {
+    return true;
+  }
+  return false;
+}
+
+function containsProtectedInputToolbar(rootNode) {
+  if (!rootNode?.children || rootNode.children.length === 0) return false;
+  let found = false;
+  walkElements(rootNode, sub => {
+    if (found) return false;
+    if (isProtectedInputToolbarNode(sub)) {
+      found = true;
+      return false;
+    }
+    return true;
+  });
+  return found;
 }
 
 function isYantaiInternalNode(node) {
@@ -589,6 +623,7 @@ export function inspectWildFloatingCandidate(
     CORE_BODY_EXCLUDED_IDS.has(id) ||
     SHADOW_TRAVERSE_ONLY_HOST_IDS.has(id) ||
     EXCLUDED_OVERLAY_SUBTREE_IDS.has(id) ||
+    isProtectedInputToolbarNode(node) ||
     isYantaiInternalNode(node)
   ) {
     return null;
@@ -783,10 +818,21 @@ export function discoverInputClutterItems(doc) {
   };
 
   const scanBarContainer = (barNode, zone) => {
-    if (!barNode || isYantaiInternalNode(barNode)) return;
+    if (!barNode || isYantaiInternalNode(barNode) || isProtectedInputToolbarNode(barNode)) return;
     const tag = String(barNode.tagName || '').toUpperCase();
     if (IGNORED_TAG_NAMES.has(tag)) return;
     if (isIntrinsicallyHidden(barNode)) return;
+
+    // 关键兼容：输入助手 (Mooooooon/st-input-helper) 会将 #input_helper_toolbar 直接挂入 #qr--bar 内部！
+    // 若容器内含受保护的输入辅助条，绝不整块隐藏外层容器，改为仅逐一扫描并收纳同级非输入助手节点（如常规 QR 按钮）。
+    if (containsProtectedInputToolbar(barNode)) {
+      for (const child of Array.from(barNode.children || [])) {
+        if (!child?.tagName) continue;
+        if (isProtectedInputToolbarNode(child)) continue;
+        scanBarContainer(child, zone);
+      }
+      return;
+    }
 
     if (isClickableControl(barNode) && barNode.id !== 'qr--bar') {
       hostNodeSet.add(barNode);
@@ -798,6 +844,7 @@ export function discoverInputClutterItems(doc) {
     walkElements(barNode, child => {
       if (child.id === 'qr--popoutTrigger') return false;
       if (child.classList?.contains?.('qr--button-expander')) return false;
+      if (isProtectedInputToolbarNode(child)) return false;
       if (isYantaiInternalNode(child) || isIntrinsicallyHidden(child)) return false;
       if (isClickableControl(child)) {
         candidates.push(child);
@@ -819,7 +866,13 @@ export function discoverInputClutterItems(doc) {
       if (!child?.tagName) continue;
       const tag = String(child.tagName).toUpperCase();
       if (IGNORED_TAG_NAMES.has(tag)) continue;
-      if (coreIdSet.has(String(child.id || '')) || isYantaiInternalNode(child)) continue;
+      if (
+        coreIdSet.has(String(child.id || '')) ||
+        isProtectedInputToolbarNode(child) ||
+        isYantaiInternalNode(child)
+      ) {
+        continue;
+      }
       if (isIntrinsicallyHidden(child)) continue;
 
       hostNodeSet.add(child);

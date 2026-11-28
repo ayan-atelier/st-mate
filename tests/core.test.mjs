@@ -7009,7 +7009,7 @@ test('v0.8.0 settings overhaul: SillyTavern 伴侣权威命名 + 双卡顶栏选
       .findAll(n => n.classList.contains('stm-switch-title'))
       .map(n => n.textContent);
     assert.equal(/v1\.1\.6|v0\.4\.0|v1\.0\.4|v1\.4\.5/.test(tab1Text), false, '配套增强列表不再显示任何子插件版本号');
-    assert.equal(tab1SwitchTitles.includes('角色书架首页'), false, '角色书架默认常驻，不再单独列出冗余开关');
+    assert.ok(tab1SwitchTitles.includes('角色书架首页'), '配套增强提供角色书架首页独立开关（支持保留原版主页）');
     assert.ok(tab1SwitchTitles.includes('重Roll回看加强'), '重Roll模块升级为直白易懂的重Roll回看加强');
 
     // 验证「人设馆系统 -> 进入」与「叙事记忆系统 -> 设置」内联按钮
@@ -12153,4 +12153,90 @@ test('v0.9.18 surface opacity guard & Android/TT safe-top dedup: 防透明主题
   const resImm = syncTauriSafeAreaGuard(immersiveRoot);
   assert.equal(resImm.applied, false, '真正沉浸式透明状态栏下必须保留 --stm-safe-top 防止顶栏撞上系统时间');
   assert.equal(docKarrisa.documentElement.style.getPropertyValue('--stm-safe-top'), '');
+});
+
+test('v0.9.19 input-helper protection inside #qr--bar & bookshelf independent toggle: 豁免输入助手快捷标点条 + 配套增强独立开关角色书架首页', async () => {
+  const { discoverInputClutterItems } = await import('../src/shell/float-capsule.js');
+  const { doc } = createMiniDomHarness();
+
+  // 1. 复现 Mooooooon/st-input-helper 真实结构：#input_helper_toolbar 挂在 #qr--bar 内部，且与普通 QR 按钮同级
+  const sendForm = doc.createElement('form');
+  sendForm.id = 'send_form';
+  const qrBar = doc.createElement('div');
+  qrBar.id = 'qr--bar';
+
+  const qrGroup = doc.createElement('div');
+  qrGroup.classList.add('qr--buttons');
+  const normalQrBtn = doc.createElement('div');
+  normalQrBtn.classList.add('qr--button', 'menu_button');
+  normalQrBtn.textContent = '猫猫的猫';
+  qrGroup.append(normalQrBtn);
+
+  const ihToolbar = doc.createElement('div');
+  ihToolbar.id = 'input_helper_toolbar';
+  ihToolbar.classList.add('qr--buttons', 'qr--color');
+  for (const [id, text, title] of [
+    ['input_asterisk_btn', '**', '插入双星号'],
+    ['input_quotes_btn', '""', '插入双引号'],
+    ['input_newline_btn', '⏎', '移动到行末并插入换行'],
+  ]) {
+    const b = doc.createElement('button');
+    b.id = id;
+    b.classList.add('qr--button', 'menu_button', 'interactable');
+    b.title = title;
+    b.textContent = text;
+    ihToolbar.append(b);
+  }
+
+  qrBar.append(qrGroup, ihToolbar);
+  sendForm.append(qrBar);
+  doc.body.append(sendForm);
+
+  const res = discoverInputClutterItems(doc);
+  assert.equal(res.hostNodes.includes(qrBar), false, '含 #input_helper_toolbar 时严禁整块隐藏外层 #qr--bar');
+  assert.equal(res.hostNodes.includes(ihToolbar), false, '严禁隐藏输入助手 #input_helper_toolbar');
+  assert.equal(res.hostNodes.includes(qrGroup), true, '同级常规 QR 按钮组仍应正常隐藏收纳');
+  assert.equal(res.items.length, 1, '收纳仓只应包含常规 QR 按钮，不含任何输入助手标点');
+  assert.equal(res.items[0].label, '猫猫的猫');
+
+  // 2. 验证设置中心「配套增强」提供「角色书架首页」独立开关，关闭后保留伴侣其余全部功能
+  const prevDoc = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const ctx = {
+      characterId: undefined,
+      characters: [],
+      extensionSettings: {
+        st_mate: { shellEnabled: true, modules: { bookshelf: true, reader: true } },
+        jingdu_bookshelf: { enabled: true },
+      },
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+    const moduleBridge = createModuleBridge({ root: globalThis, getContext: () => ctx, store });
+    const dialog = createSettingsDialog({
+      getContext: () => ctx,
+      store,
+      moduleBridge,
+      onToggleShell() {},
+    });
+    dialog.open('modules');
+    const dialogEl = doc.getElementById('stm-settings-dialog');
+    const bookshelfCard = dialogEl
+      .querySelectorAll('.stm-switch-card')
+      .find(card => /角色书架首页/.test(card.querySelector('.stm-switch-title')?.textContent || ''));
+    assert.ok(bookshelfCard, '伴侣设置「扩展功能 → 配套增强」应展示「角色书架首页」独立开关');
+    const checkbox = bookshelfCard.querySelector('input');
+    assert.equal(checkbox.checked, true);
+    checkbox.checked = false;
+    checkbox.dispatchEvent({ type: 'change' });
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(store.get().modules.bookshelf, false, '关闭书架开关应更新 modules.bookshelf 为 false');
+    assert.equal(store.get().shellEnabled, true, '关闭书架首页绝不影响伴侣总开关与排版等其他功能');
+    assert.equal(ctx.extensionSettings.jingdu_bookshelf.enabled, false, '应同步关闭角色书架扩展配置');
+    dialog.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
 });

@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.18",
+  "latest": "0.9.19",
   "releases": [
+    {
+      "version": "0.9.19",
+      "branch": "release-0.9.19",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "兼容输入助手（st-input-helper）：悬浮收纳拆分扫描 #qr--bar 子项，自动跳过 #input_helper_toolbar 快捷标点条原位保留在输入框上方，不再误收输入助手标点而只收纳常规快捷回复按钮；伴侣设置中心「配套增强」新增「角色书架首页」独立开关，关闭后可保留酒馆原版主页，同时继续完整使用伴侣的排版、预设、API 与顶栏等功能。"
+    },
     {
       "version": "0.9.18",
       "branch": "release-0.9.18",
