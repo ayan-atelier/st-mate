@@ -11442,6 +11442,15 @@ test('preset BaiBai-compat grouping & worldbook grouping: 柏宝箱双向兼容�
       pDockEl.querySelectorAll('.stm-prompt-name').some(n => n.textContent === '古风文笔'),
       '搜索关键词时应自动穿透展开折叠分组显示命中条目',
     );
+
+    // 验证伴侣助手下方「常用预设」盒子可一键折叠防误触，点标签页可自动再展开
+    const vaultCollapseBtn = pDockEl.querySelector('.stm-vault-collapse-btn');
+    assert.ok(vaultCollapseBtn, '常用预设工具栏应提供折叠按钮');
+    assert.ok(pDockEl.querySelector('.stm-preset-list'), '默认展开时展示常用预设列表');
+    vaultCollapseBtn.click();
+    assert.equal(pDockEl.querySelector('.stm-preset-list'), null, '折叠后收起常用预设列表防误触切换');
+    pDockEl.querySelector('.stm-vault-tab').click();
+    assert.ok(pDockEl.querySelector('.stm-preset-list'), '点击常用预设/仓库标签可立即重新展开列表');
     pDock.destroy();
 
     // 解散全部组后验证 4 条提示词完好无损

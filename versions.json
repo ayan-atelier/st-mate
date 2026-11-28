@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.12",
+  "latest": "0.9.13",
   "releases": [
+    {
+      "version": "0.9.13",
+      "branch": "release-0.9.13",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "预设馆「常用预设 / 预设仓库」列表新增一键折叠/展开开关并自动记住折叠态，避免滑动查看伴侣助手或调整条目时误触切换预设。"
+    },
     {
       "version": "0.9.12",
       "branch": "release-0.9.12",

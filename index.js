@@ -10,55 +10,55 @@ import {
   getHostContext,
   scheduleIdleBoot,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.9.12';
+} from './src/core/env.js?v=0.9.13';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.9.12';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.12';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.9.12';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.9.12';
+} from './src/core/file-saver.js?v=0.9.13';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.13';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.9.13';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.9.13';
 import {
   closeAllNativeDrawers,
   formatStartupToastText,
   getOpenNativeDrawerIds,
   toastMessage,
-} from './src/shell/host-actions.js?v=0.9.12';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.9.12';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.9.12';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.9.12';
-import { createFloorActions } from './src/shell/floor-actions.js?v=0.9.12';
-import { createFloatCapsule } from './src/shell/float-capsule.js?v=0.9.12';
-import { createTopbar } from './src/shell/topbar.js?v=0.9.12';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.9.12';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.9.12';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.9.12';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.9.12';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.9.12';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.9.12';
+} from './src/shell/host-actions.js?v=0.9.13';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.9.13';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.9.13';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.9.13';
+import { createFloorActions } from './src/shell/floor-actions.js?v=0.9.13';
+import { createFloatCapsule } from './src/shell/float-capsule.js?v=0.9.13';
+import { createTopbar } from './src/shell/topbar.js?v=0.9.13';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.9.13';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.9.13';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.9.13';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.9.13';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.9.13';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.9.13';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.9.12';
-import { createApiDock } from './src/modules/api-dock.js?v=0.9.12';
+} from './src/modules/assistant-core.js?v=0.9.13';
+import { createApiDock } from './src/modules/api-dock.js?v=0.9.13';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.9.12';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.9.12';
+} from './src/modules/preset-backend.js?v=0.9.13';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.9.13';
 import {
   primeHostWorldInfoModule,
   refreshHostWorldInfoList,
-} from './src/modules/char-world-backend.js?v=0.9.12';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.9.12';
-import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.9.12';
-import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.9.12';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.12';
-import { createWelcomeGuide } from './src/shell/welcome-guide.js?v=0.9.12';
+} from './src/modules/char-world-backend.js?v=0.9.13';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.9.13';
+import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.9.13';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.9.13';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.13';
+import { createWelcomeGuide } from './src/shell/welcome-guide.js?v=0.9.13';
 
-const STM_VERSION = '0.9.12';
-const STM_ASSET_REV = '0.9.12';
+const STM_VERSION = '0.9.13';
+const STM_ASSET_REV = '0.9.13';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，

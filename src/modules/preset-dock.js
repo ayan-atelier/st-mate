@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.12';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.12';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.13';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.13';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.12';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.12';
+} from '../shell/host-actions.js?v=0.9.13';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.13';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -62,7 +62,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.12';
+} from './preset-backend.js?v=0.9.13';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -93,6 +93,25 @@ export function createPresetDock({
   let renameDraft = '';
   let confirmDeletePresetName = '';
   let paramsExpanded = false; // 核心生成参数默认收起为单行摘要
+  let vaultListCollapsed = (() => {
+    try {
+      return globalThis.localStorage?.getItem?.('stm_preset_vault_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  })();
+  const persistVaultCollapsed = nextVal => {
+    vaultListCollapsed = Boolean(nextVal);
+    try {
+      if (vaultListCollapsed) {
+        globalThis.localStorage?.setItem?.('stm_preset_vault_collapsed', '1');
+      } else {
+        globalThis.localStorage?.removeItem?.('stm_preset_vault_collapsed');
+      }
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   // 提示词条目列表与内联编辑状态
   let promptSearchQuery = '';
@@ -1801,7 +1820,7 @@ export function createPresetDock({
       }
     }
 
-    const vaultToolbar = el('div', 'stm-preset-vault-bar');
+    const vaultToolbar = el('div', `stm-preset-vault-bar${vaultListCollapsed ? ' is-collapsed' : ''}`);
 
     const tabsGroup = el('div', 'stm-preset-vault-tabs');
     for (const [tabKey, iconName, labelText] of [
@@ -1815,7 +1834,11 @@ export function createPresetDock({
       tabBtn.type = 'button';
       tabBtn.append(createIconNode(doc, iconName, 'stm-inline-svg'), el('span', '', labelText));
       tabBtn.addEventListener('click', () => {
-        if (activeVaultTab === tabKey) return;
+        const wasCollapsed = vaultListCollapsed;
+        if (wasCollapsed) {
+          persistVaultCollapsed(false);
+        }
+        if (activeVaultTab === tabKey && !wasCollapsed) return;
         activeVaultTab = tabKey;
         expandedManagePreset = '';
         confirmDeletePresetName = '';
@@ -1825,25 +1848,50 @@ export function createPresetDock({
       tabsGroup.append(tabBtn);
     }
 
-    const presetSearchBox = el('div', 'stm-model-search-box stm-preset-search-box');
-    presetSearchBox.append(createIconNode(doc, 'search', 'stm-model-search-icon'));
-    const presetSearchInput = el('input', 'stm-api-input stm-model-combo-input stm-compact-input');
-    presetSearchInput.type = 'text';
-    presetSearchInput.placeholder = '搜索预设名称…';
-    presetSearchInput.value = presetSearchQuery;
-    presetSearchInput.addEventListener('input', () => {
-      presetSearchQuery = presetSearchInput.value;
-      renderPresetListOnly();
+    const collapseVaultBtn = el(
+      'button',
+      `stm-vault-collapse-btn${vaultListCollapsed ? ' is-collapsed' : ''}`,
+    );
+    collapseVaultBtn.type = 'button';
+    collapseVaultBtn.setAttribute('aria-expanded', String(!vaultListCollapsed));
+    collapseVaultBtn.title = vaultListCollapsed
+      ? '展开常用预设与预设仓库列表'
+      : '折叠常用预设列表，防止滑动或使用伴侣助手时误触切换预设';
+    collapseVaultBtn.append(
+      el('span', '', vaultListCollapsed ? '展开' : '收起'),
+      createIconNode(doc, 'chevron', 'stm-vault-collapse-chevron'),
+    );
+    collapseVaultBtn.addEventListener('click', () => {
+      persistVaultCollapsed(!vaultListCollapsed);
+      renderBodyPreservingVaultScroll();
     });
-    presetSearchBox.append(presetSearchInput);
 
-    vaultToolbar.append(tabsGroup, presetSearchBox);
-    secVault.append(vaultToolbar);
+    if (vaultListCollapsed) {
+      vaultToolbar.append(tabsGroup, collapseVaultBtn);
+      secVault.append(vaultToolbar);
+    } else {
+      const presetSearchBox = el('div', 'stm-model-search-box stm-preset-search-box');
+      presetSearchBox.append(createIconNode(doc, 'search', 'stm-model-search-icon'));
+      const presetSearchInput = el('input', 'stm-api-input stm-model-combo-input stm-compact-input');
+      presetSearchInput.type = 'text';
+      presetSearchInput.placeholder = '搜索预设名称…';
+      presetSearchInput.value = presetSearchQuery;
+      presetSearchInput.addEventListener('input', () => {
+        presetSearchQuery = presetSearchInput.value;
+        renderPresetListOnly();
+      });
+      presetSearchBox.append(presetSearchInput);
 
-    const presetListWrap = el('div', 'stm-preset-list');
-    liveRefs.presetListWrap = presetListWrap;
-    secVault.append(presetListWrap);
-    renderPresetListOnly();
+      const vaultRightTools = el('div', 'stm-preset-vault-right');
+      vaultRightTools.append(presetSearchBox, collapseVaultBtn);
+      vaultToolbar.append(tabsGroup, vaultRightTools);
+      secVault.append(vaultToolbar);
+
+      const presetListWrap = el('div', 'stm-preset-list');
+      liveRefs.presetListWrap = presetListWrap;
+      secVault.append(presetListWrap);
+      renderPresetListOnly();
+    }
 
     bodyEl.append(secVault);
 
