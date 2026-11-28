@@ -8,6 +8,7 @@ export const STM_NAMESPACE = 'st_mate';
 export const STM_SCHEMA_VERSION = 6;
 
 export const TOPBAR_MODES = Object.freeze(['rp', 'native']);
+export const UI_THEME_MODES = Object.freeze(['follow', 'dark', 'light', 'custom']);
 export const FLOAT_CAPSULE_SIDES = Object.freeze(['left', 'right']);
 export const NATIVE_TOPBAR_DRAWER_ITEMS = Object.freeze([
   { id: 'ai-config-button', label: '预设与参数', icon: 'sliders' },
@@ -121,7 +122,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   floatCapsuleEnabled: false, // 默认关闭：对话侧边独立圆球快捷组（上翻5楼 / 动态收纳球 / 下翻5楼，连戳两下浮出到顶到底）
   floatCapsuleSide: 'right',
   floatCapsuleTopPct: 62,
-  floatTuckedSelectors: Object.freeze({}), // 按角色/全局记忆被玩家拖入收纳球的野生悬浮挂件标识
+  floatTuckedSelectors: Object.freeze({}), // 全局记忆被玩家拖入/点选收纳的野生悬浮挂件标识（跨角色卡生效）
+  uiTheme: Object.freeze({
+    mode: 'follow', // follow (跟随美化) | dark (默认深色) | light (默认浅色) | custom (自定义配色)
+    surfaceColor: '#1b1d23',
+    textColor: '#eef0f5',
+    accentColor: '#88a8d8',
+  }),
   tapPureReading: false, // 新用户默认关闭防误触，已存储的老用户状态原样保留
   tapPureReadingScope: 'all',
   homeEntryMode: 'bookshelf-bar',
@@ -413,6 +420,7 @@ export function normalizeSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   const rawModules = src.modules && typeof src.modules === 'object' ? src.modules : {};
   const rawTurboConfig = src.turboConfig && typeof src.turboConfig === 'object' ? src.turboConfig : {};
+  const rawUiTheme = src.uiTheme && typeof src.uiTheme === 'object' ? src.uiTheme : {};
   const rawVibe = src.vibe && typeof src.vibe === 'object' ? src.vibe : {};
   const rawTidy = src.tidy && typeof src.tidy === 'object' ? src.tidy : {};
   const rawStudio = src.apiStudio && typeof src.apiStudio === 'object' ? src.apiStudio : {};
@@ -528,17 +536,39 @@ export function normalizeSettings(raw = {}) {
     typeof src.floatTuckedSelectors === 'object' &&
     !Array.isArray(src.floatTuckedSelectors)
   ) {
+    // 全局跨角色卡记忆：自动合并旧版按角色/群聊分存的记录至 __global__，换卡无需重收，放出时彻底清理
+    const mergedGlobalKeys = [];
+    const seenTucked = new Set();
+    const collectKeys = rawKeys => {
+      for (const k of cleanStringList(rawKeys, 64, 220)) {
+        if (seenTucked.has(k)) continue;
+        seenTucked.add(k);
+        mergedGlobalKeys.push(k);
+        if (mergedGlobalKeys.length >= 64) break;
+      }
+    };
+    if (Array.isArray(src.floatTuckedSelectors.__global__)) {
+      collectKeys(src.floatTuckedSelectors.__global__);
+    }
     let scopeCount = 0;
     for (const [rawScope, rawKeys] of Object.entries(src.floatTuckedSelectors)) {
-      if (scopeCount >= 200) break;
+      if (scopeCount >= 200 || mergedGlobalKeys.length >= 64) break;
       const scope = typeof rawScope === 'string' ? rawScope.trim().slice(0, 260) : '';
-      if (!scope || (scope !== '__global__' && !/^(?:char|group):.+/.test(scope))) continue;
-      const cleanedKeys = cleanStringList(rawKeys, 24, 180);
-      if (cleanedKeys.length === 0) continue;
-      floatTuckedSelectors[scope] = cleanedKeys;
+      if (!scope || scope === '__global__' || !/^(?:char|group):.+/.test(scope)) continue;
+      collectKeys(rawKeys);
       scopeCount += 1;
     }
+    if (mergedGlobalKeys.length > 0) {
+      floatTuckedSelectors.__global__ = mergedGlobalKeys;
+    }
   }
+
+  const uiTheme = {
+    mode: pickEnum(rawUiTheme.mode, UI_THEME_MODES, DEFAULT_SETTINGS.uiTheme.mode),
+    surfaceColor: sanitizeHexColor(rawUiTheme.surfaceColor) || DEFAULT_SETTINGS.uiTheme.surfaceColor,
+    textColor: sanitizeHexColor(rawUiTheme.textColor) || DEFAULT_SETTINGS.uiTheme.textColor,
+    accentColor: sanitizeHexColor(rawUiTheme.accentColor) || DEFAULT_SETTINGS.uiTheme.accentColor,
+  };
 
   const hasSavedObject = Boolean(raw && typeof raw === 'object' && Object.keys(raw).length > 0);
   const welcomeGuideDismissed =
@@ -562,6 +592,7 @@ export function normalizeSettings(raw = {}) {
     floatCapsuleSide: pickEnum(src.floatCapsuleSide, FLOAT_CAPSULE_SIDES, DEFAULT_SETTINGS.floatCapsuleSide),
     floatCapsuleTopPct: clampInt(src.floatCapsuleTopPct, 0, 100, DEFAULT_SETTINGS.floatCapsuleTopPct),
     floatTuckedSelectors,
+    uiTheme,
     tapPureReading: pickBool(src.tapPureReading, DEFAULT_SETTINGS.tapPureReading),
     tapPureReadingScope: 'all',
     homeEntryMode: pickEnum(src.homeEntryMode, HOME_ENTRY_MODES, DEFAULT_SETTINGS.homeEntryMode),
@@ -705,6 +736,7 @@ export function createSettingsStore({ getContext }) {
       turboConfig: patch?.turboConfig
         ? { ...cache.turboConfig, ...patch.turboConfig }
         : cache.turboConfig,
+      uiTheme: patch?.uiTheme ? { ...cache.uiTheme, ...patch.uiTheme } : cache.uiTheme,
       vibe: { ...cache.vibe, ...(patch?.vibe || {}) },
       tidy: { ...cache.tidy, ...(patch?.tidy || {}) },
       apiStudio: patch?.apiStudio ? { ...cache.apiStudio, ...patch.apiStudio } : cache.apiStudio,

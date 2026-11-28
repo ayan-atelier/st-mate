@@ -14,13 +14,14 @@ import {
   getActiveHostThemeName,
   importOrActivateYantaiPreset,
   isMoonNoteThemeName,
-} from '../core/companion-kit.js?v=0.9.21';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.21';
-import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.21';
-import { createVersionManager } from '../core/version-manager.js?v=0.9.21';
-import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.21';
-import { discoverWandEntries } from './extensions-tidy.js?v=0.9.21';
-import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.21';
+} from '../core/companion-kit.js?v=0.9.22';
+import { syncCompanionUiTheme, syncSurfaceOpacityGuard } from '../core/env.js?v=0.9.22';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.22';
+import { NATIVE_TOPBAR_DRAWER_ITEMS } from '../core/schema.js?v=0.9.22';
+import { createVersionManager } from '../core/version-manager.js?v=0.9.22';
+import { getHostPresetState } from '../modules/preset-backend.js?v=0.9.22';
+import { discoverWandEntries } from './extensions-tidy.js?v=0.9.22';
+import { closeAllNativeDrawers, openNativeDrawer, toastMessage } from './host-actions.js?v=0.9.22';
 
 const TABS = Object.freeze([
   { id: 'modules', icon: 'spark', label: '扩展功能' },
@@ -34,6 +35,26 @@ const TOPBAR_GUIDE_ITEMS = Object.freeze([
   ['API 与模型配置', '点右侧「插头」管理多站子密钥、拉取与收藏模型'],
   ['人设与排版背景', '点右侧「小人」进入人设馆，点「Aa」调字号边距与背景'],
   ['美化主题与正则', '切至本窗口上方「原生与设置」页即可一键直达'],
+]);
+
+const UI_THEME_PILL_MODES = Object.freeze([
+  { id: 'follow', label: '跟随' },
+  { id: 'dark', label: '深色' },
+  { id: 'light', label: '浅色' },
+  { id: 'custom', label: '自定义' },
+]);
+
+const UI_THEME_CUSTOM_RECIPES = Object.freeze([
+  { id: 'ink', label: '墨砚', surfaceColor: '#1b1d23', textColor: '#eef0f5', accentColor: '#88a8d8' },
+  { id: 'paper', label: '素纸', surfaceColor: '#f7f5f0', textColor: '#23262e', accentColor: '#4a6fa5' },
+  { id: 'slate', label: '石青', surfaceColor: '#1c242b', textColor: '#e9eff5', accentColor: '#7ea8c4' },
+  { id: 'tea', label: '暮茶', surfaceColor: '#f3ede5', textColor: '#362d27', accentColor: '#986954' },
+]);
+
+const UI_THEME_COLOR_SLOTS = Object.freeze([
+  { key: 'surfaceColor', label: '面板底色' },
+  { key: 'textColor', label: '文字颜色' },
+  { key: 'accentColor', label: '强调色' },
 ]);
 
 const CORE_TAKEOVER_ROWS = Object.freeze([
@@ -77,7 +98,7 @@ export function createSettingsDialog({
   moduleBridge,
   suiteCoordinator = null,
   versionManager = null,
-  stmVersion = '0.9.21',
+  stmVersion = '0.9.22',
   onToggleShell,
   onForcePruneTurbo = null,
   onOpenWelcomeGuide = null,
@@ -528,6 +549,149 @@ export function createSettingsDialog({
       }
       guideBox.append(guideTitle, guideList);
       card.append(guideBox);
+    }
+
+    return card;
+  }
+
+  function makeUiThemeRow(current) {
+    const doc = globalThis.document;
+    const helpKey = 'ui_theme_panel';
+    const isHelpOpen = expandedHelpKey === helpKey;
+    const uiTheme = current.uiTheme || {
+      mode: 'follow',
+      surfaceColor: '#1b1d23',
+      textColor: '#eef0f5',
+      accentColor: '#88a8d8',
+    };
+    const activeMode = uiTheme.mode || 'follow';
+
+    const card = el(
+      'div',
+      `stm-switch-card is-compact stm-ui-theme-row${isHelpOpen ? ' is-help-open' : ''}${activeMode === 'custom' ? ' is-custom-open' : ''}`,
+    );
+
+    const applyUiThemeImmediate = nextTheme => {
+      syncCompanionUiTheme(globalThis, nextTheme, { active: true });
+      syncSurfaceOpacityGuard(globalThis);
+    };
+
+    const bar = el('div', 'stm-switch-bar stm-ui-theme-bar');
+    const head = el('div', 'stm-switch-head');
+    head.append(
+      createIconNode(doc, 'palette', 'stm-row-icon'),
+      el('strong', 'stm-switch-title', '面板配色'),
+      makeHelpTriggerButton(helpKey, '面板配色'),
+    );
+
+    const pillSeg = el('div', 'stm-ui-theme-seg');
+    pillSeg.setAttribute('role', 'radiogroup');
+    pillSeg.setAttribute('aria-label', '伴侣面板配色模式');
+    for (const opt of UI_THEME_PILL_MODES) {
+      const selected = activeMode === opt.id;
+      const btn = el('button', `stm-ui-theme-seg-btn${selected ? ' is-active' : ''}`, opt.label);
+      btn.type = 'button';
+      btn.dataset.uiThemeMode = opt.id;
+      btn.setAttribute('role', 'radio');
+      btn.setAttribute('aria-checked', String(selected));
+      btn.addEventListener('click', evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        if (activeMode === opt.id) return;
+        const nextTheme = { ...uiTheme, mode: opt.id };
+        applyUiThemeImmediate(nextTheme);
+        updateStoreFromDialog({ uiTheme: { mode: opt.id } });
+      });
+      pillSeg.append(btn);
+    }
+
+    bar.append(head, pillSeg);
+    card.append(bar);
+
+    if (isHelpOpen) {
+      card.append(
+        el(
+          'div',
+          'stm-switch-help-pop',
+          '默认「跟随」当前酒馆美化主题变色；若美化导致伴侣界面对比度偏低或看不清，可一键切为「深色」「浅色」或「自定义」独立配色（仅影响 SillyTavern 伴侣自身面板、抽屉与顶栏，绝不动聊天正文与玩家美化）。',
+        ),
+      );
+    }
+
+    if (activeMode === 'custom') {
+      const customBox = el('div', 'stm-ui-theme-custom');
+
+      const recipeRow = el('div', 'stm-ui-theme-recipes');
+      recipeRow.append(el('span', 'stm-ui-theme-sublabel', '快捷套用'));
+      const recipeList = el('div', 'stm-ui-theme-recipe-pills');
+      for (const rec of UI_THEME_CUSTOM_RECIPES) {
+        const isMatched =
+          uiTheme.surfaceColor === rec.surfaceColor &&
+          uiTheme.textColor === rec.textColor &&
+          uiTheme.accentColor === rec.accentColor;
+        const recBtn = el('button', `stm-ui-theme-recipe-btn${isMatched ? ' is-active' : ''}`);
+        recBtn.type = 'button';
+        recBtn.dataset.uiThemeRecipe = rec.id;
+        const dot = el('span', 'stm-ui-theme-recipe-dot');
+        dot.style.background = rec.surfaceColor;
+        dot.style.borderColor = rec.accentColor;
+        recBtn.append(dot, el('span', '', rec.label));
+        recBtn.addEventListener('click', () => {
+          const nextTheme = {
+            mode: 'custom',
+            surfaceColor: rec.surfaceColor,
+            textColor: rec.textColor,
+            accentColor: rec.accentColor,
+          };
+          applyUiThemeImmediate(nextTheme);
+          updateStoreFromDialog({ uiTheme: nextTheme });
+        });
+        recipeList.append(recBtn);
+      }
+      recipeRow.append(recipeList);
+      customBox.append(recipeRow);
+
+      const slotsGrid = el('div', 'stm-ui-theme-slots');
+      for (const slot of UI_THEME_COLOR_SLOTS) {
+        const curHex = uiTheme[slot.key] || '#1b1d23';
+        const pill = el('label', 'stm-ui-theme-color-pill');
+        pill.title = `点击自定义${slot.label}`;
+        const swatch = el('span', 'stm-ui-theme-swatch');
+        swatch.style.background = curHex;
+        const textWrap = el('span', 'stm-ui-theme-slot-meta');
+        const labelSpan = el('span', 'stm-ui-theme-slot-label', slot.label);
+        const hexSpan = el('span', 'stm-ui-theme-slot-hex', curHex.toUpperCase());
+        textWrap.append(labelSpan, hexSpan);
+
+        const inputColor = el('input', 'stm-ui-theme-color-input');
+        inputColor.type = 'color';
+        inputColor.value = curHex;
+        inputColor.dataset.uiThemeSlot = slot.key;
+        inputColor.setAttribute('aria-label', slot.label);
+
+        const commitHex = (rawVal, { persistOnly = false } = {}) => {
+          const nextHex = String(rawVal || '').trim().toLowerCase();
+          if (!/^#[0-9a-f]{6}$/.test(nextHex)) return;
+          swatch.style.background = nextHex;
+          hexSpan.textContent = nextHex.toUpperCase();
+          const latest = store.get().uiTheme || uiTheme;
+          const nextTheme = { ...latest, mode: 'custom', [slot.key]: nextHex };
+          applyUiThemeImmediate(nextTheme);
+          if (persistOnly) {
+            store.update({ uiTheme: { mode: 'custom', [slot.key]: nextHex } }, { silent: true });
+          } else {
+            updateStoreFromDialog({ uiTheme: { mode: 'custom', [slot.key]: nextHex } }, { reRender: false });
+          }
+        };
+
+        inputColor.addEventListener('input', () => commitHex(inputColor.value, { persistOnly: true }));
+        inputColor.addEventListener('change', () => commitHex(inputColor.value, { persistOnly: false }));
+
+        pill.append(swatch, textWrap, inputColor);
+        slotsGrid.append(pill);
+      }
+      customBox.append(slotsGrid);
+      card.append(customBox);
     }
 
     return card;
@@ -992,7 +1156,7 @@ export function createSettingsDialog({
         helpKey: 'float_capsule',
         icon: 'capsule',
         title: '悬浮快捷栏与底栏收纳',
-        desc: '默认关闭；开启后在侧边展示一体拖动、视觉独立的轻盈小圆球（上翻 5 楼 · 动态收纳球 · 下翻 5 楼；无外挂按钮时自动隐去收纳球，连戳两下浮出「到顶 / 到底」），自动收起底栏外挂按钮，还支持把角色卡自带的野生悬浮球直接拖进来收纳！',
+        desc: '默认关闭；开启后在侧边展示一体拖动、视觉独立的轻盈小圆球（上翻 5 楼 · 动态收纳球 · 下翻 5 楼；无外挂按钮时自动隐去收纳球，连戳两下浮出「到顶 / 到底」），自动收起底栏外挂按钮，还支持拖入或点选收纳野生悬浮球（全局跨角色卡记忆，换卡无需重收）！',
         checked: Boolean(current.floatCapsuleEnabled),
         onChange: val => {
           updateStoreFromDialog({ floatCapsuleEnabled: val });
@@ -1401,7 +1565,7 @@ export function createSettingsDialog({
     }
     container.append(takeoverGroup);
 
-    container.append(el('div', 'stm-settings-subhead', '系统排障与总开关'));
+    container.append(el('div', 'stm-settings-subhead', '系统设置'));
     const footerGroup = el('div', 'stm-settings-group');
 
     const versionHelpKey = 'native_version_mgr';
@@ -1490,7 +1654,7 @@ export function createSettingsDialog({
       },
     });
 
-    footerGroup.append(versionWrap, diagWrap, masterSwitchRow);
+    footerGroup.append(makeUiThemeRow(current), versionWrap, diagWrap, masterSwitchRow);
     container.append(footerGroup);
   }
 

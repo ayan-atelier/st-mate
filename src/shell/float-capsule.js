@@ -8,13 +8,12 @@
  *    - 单点上/下圆球平滑翻动 5 楼（顶楼遇 #show_more_messages 自动续载）；750ms 内连戳两下同向圆球浮出「到顶 / 到底」小胶囊（防手快误飞）；
  * 3. 底栏自动收纳 + 野生悬浮球「直接拖入吞噬 / 一键吸纳」：
  *    - 自动原地收起 #qr--bar 及 #leftSendForm / #rightSendForm / #send_form 塞入的卡片按钮；
- *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
+ *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球、柏宝书、千千结、两三事等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳或点选收纳，全局跨角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.21';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.21';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.21';
-import { toastMessage } from './host-actions.js?v=0.9.21';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.22';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.22';
+import { toastMessage } from './host-actions.js?v=0.9.22';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -1134,32 +1133,32 @@ export function createFloatCapsule({
     return node;
   }
 
-  function getActiveScopeKey() {
-    const ctx = getContext?.();
-    return getEntityBindingKey(ctx) || '__global__';
-  }
-
   function getTuckedKeysSetForCurrentChat() {
     const map = store.get().floatTuckedSelectors || {};
-    const scope = getActiveScopeKey();
-    const list = [
-      ...(Array.isArray(map.__global__) ? map.__global__ : []),
-      ...(scope !== '__global__' && Array.isArray(map[scope]) ? map[scope] : []),
-    ];
-    return new Set(list);
+    const out = new Set();
+    for (const rawKeys of Object.values(map)) {
+      if (!Array.isArray(rawKeys)) continue;
+      for (const key of rawKeys) {
+        if (typeof key === 'string' && key) out.add(key);
+      }
+    }
+    return out;
   }
 
   function addTuckedWidgetKey(widgetKey) {
     if (!widgetKey) return;
-    const scope = getActiveScopeKey();
     const curMap = store.get().floatTuckedSelectors || {};
-    const prevList = Array.isArray(curMap[scope]) ? curMap[scope] : [];
-    if (prevList.includes(widgetKey)) return;
+    const merged = Array.from(getTuckedKeysSetForCurrentChat());
+    if (merged.includes(widgetKey) && Array.isArray(curMap.__global__) && curMap.__global__.includes(widgetKey)) {
+      return;
+    }
+    if (!merged.includes(widgetKey)) {
+      merged.push(widgetKey);
+    }
     store.update(
       {
         floatTuckedSelectors: {
-          ...curMap,
-          [scope]: [...prevList, widgetKey],
+          __global__: merged,
         },
       },
       { silent: true },
@@ -1168,18 +1167,92 @@ export function createFloatCapsule({
 
   function removeTuckedWidgetKey(widgetKey) {
     if (!widgetKey) return;
-    const scope = getActiveScopeKey();
     const curMap = store.get().floatTuckedSelectors || {};
-    const nextMap = { ...curMap };
-    if (Array.isArray(nextMap[scope])) {
-      nextMap[scope] = nextMap[scope].filter(k => k !== widgetKey);
-      if (nextMap[scope].length === 0) delete nextMap[scope];
-    }
-    if (Array.isArray(nextMap.__global__)) {
-      nextMap.__global__ = nextMap.__global__.filter(k => k !== widgetKey);
-      if (nextMap.__global__.length === 0) delete nextMap.__global__;
+    const nextMap = {};
+    for (const [scope, rawKeys] of Object.entries(curMap)) {
+      if (!Array.isArray(rawKeys)) continue;
+      const filtered = rawKeys.filter(k => k !== widgetKey);
+      if (filtered.length > 0) {
+        nextMap[scope] = filtered;
+      }
     }
     store.update({ floatTuckedSelectors: nextMap }, { silent: true });
+  }
+
+  /**
+   * 针对曾通过「点选收纳」收起的不规则定位/尺寸悬浮球：换卡或刷新后按持久化 ID 键定向找回节点，
+   * 避免常规几何扫描漏检，确保全局记忆 100% 稳定生效（严格校验非排除节点与非砚台自身元素）。
+   */
+  function resolveTuckedWidgetByStoredKey(doc, widgetKey) {
+    if (!doc || typeof widgetKey !== 'string' || !widgetKey) return null;
+    const isSafeDirectNode = node => {
+      if (!node?.tagName || node.isConnected === false) return false;
+      const tag = String(node.tagName).toUpperCase();
+      if (IGNORED_TAG_NAMES.has(tag) || tag === 'HEADER' || tag === 'NAV' || tag === 'FOOTER') {
+        return false;
+      }
+      const cid = String(node.id || '');
+      if (
+        CORE_BODY_EXCLUDED_IDS.has(cid) ||
+        SHADOW_TRAVERSE_ONLY_HOST_IDS.has(cid) ||
+        EXCLUDED_OVERLAY_SUBTREE_IDS.has(cid) ||
+        isProtectedInputToolbarNode(node) ||
+        isYantaiInternalNode(node) ||
+        isExcludedOverlaySubtree(node)
+      ) {
+        return false;
+      }
+      if (node.dataset?.stmClutterHidden !== '1' && isIntrinsicallyHidden(node)) {
+        return false;
+      }
+      return true;
+    };
+
+    if (widgetKey.startsWith('id:')) {
+      const rawId = widgetKey.slice(3);
+      if (!rawId) return null;
+      const node = doc.getElementById?.(rawId);
+      if (!isSafeDirectNode(node)) return null;
+      return { node, key: widgetKey, shadowHost: null };
+    }
+
+    if (widgetKey.startsWith('shadow:id:')) {
+      const sepIdx = widgetKey.indexOf('::');
+      if (sepIdx <= 10) return null;
+      const hostId = widgetKey.slice(10, sepIdx);
+      const innerSpec = widgetKey.slice(sepIdx + 2);
+      const hostEl = hostId ? doc.getElementById?.(hostId) : null;
+      const shadowRoot = hostEl?.shadowRoot;
+      if (!shadowRoot) return null;
+
+      let matchedNode = null;
+      if (innerSpec.startsWith('id:')) {
+        const innerId = innerSpec.slice(3);
+        matchedNode = shadowRoot.getElementById?.(innerId) || null;
+      }
+      if (!matchedNode) {
+        walkElements(
+          shadowRoot,
+          sub => {
+            if (matchedNode) return false;
+            if (!isSafeDirectNode(sub)) return true;
+            if (buildFloatingWidgetKey(sub, { shadowHost: hostEl }) === widgetKey) {
+              matchedNode = sub;
+              return false;
+            }
+            return true;
+          },
+          { includeShadow: true },
+        );
+      }
+      if (!isSafeDirectNode(matchedNode)) return null;
+      if (matchedNode.__stmShadowHost !== hostEl) {
+        matchedNode.__stmShadowHost = hostEl;
+      }
+      return { node: matchedNode, key: widgetKey, shadowHost: hostEl };
+    }
+
+    return null;
   }
 
   function readViewportBox() {
@@ -1390,6 +1463,16 @@ export function createFloatCapsule({
       if (tuckedKeys.has(pKey)) {
         seenWildKeys.add(pKey);
         wildCandidates.push(entry);
+      }
+    }
+
+    // 针对已全局记忆但换卡/刷新后未被常规几何规则命中的持久化 ID 悬浮球执行轻量定向补查
+    for (const storedKey of tuckedKeys) {
+      if (seenWildKeys.has(storedKey)) continue;
+      const directHit = resolveTuckedWidgetByStoredKey(doc, storedKey);
+      if (directHit) {
+        seenWildKeys.add(storedKey);
+        wildCandidates.push(directHit);
       }
     }
 

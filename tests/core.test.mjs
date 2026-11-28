@@ -5,12 +5,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  buildCompanionUiThemeTokens,
+  clearCompanionUiTheme,
   clearSurfaceOpacityGuard,
   clearTauriSafeAreaGuard,
   createTauriOverlayBackGuard,
   detectPlatform,
   hasActiveChatSelection,
   parseCssColorRgba,
+  syncCompanionUiTheme,
   syncSurfaceOpacityGuard,
   syncTauriSafeAreaGuard,
 } from '../src/core/env.js';
@@ -9255,7 +9258,7 @@ test('v0.8.9: 对话侧边三键悬浮胶囊（默认关闭 / 单点翻5楼 / �
     absorbBtn.click();
 
     assert.equal(wildBall.dataset?.stmClutterHidden, '1', '野生悬浮球被收纳后立即隐去');
-    assert.deepEqual(store.get().floatTuckedSelectors['char:sjm.png'], ['id:dlbao-ball']);
+    assert.deepEqual(store.get().floatTuckedSelectors.__global__, ['id:dlbao-ball']);
     assert.match(
       capNode.querySelector('.stm-float-pop-title')?.textContent || '',
       /已收纳 \(4\)/,
@@ -9271,7 +9274,7 @@ test('v0.8.9: 对话侧边三键悬浮胶囊（默认关闭 / 单点翻5楼 / �
     const releaseBtn = capNode.querySelector('.stm-float-item-release');
     releaseBtn.click();
     assert.equal(wildBall.dataset?.stmClutterHidden, undefined, '点放出后野生悬浮球恢复页面显示');
-    assert.equal(store.get().floatTuckedSelectors['char:sjm.png'], undefined);
+    assert.equal(store.get().floatTuckedSelectors.__global__, undefined);
     capsule.close();
 
     // 当卡片没有任何可收纳按钮时，中间收纳球自动隐去，只留上下两颗独立翻楼球
@@ -12373,6 +12376,238 @@ test('v0.9.21 home composer --bottomFormBlockSize guard & 美化-反色 data-th-
     await new Promise(r => setTimeout(r, 20));
     cwDock.destroy();
   } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('float capsule global tuck memory: 悬浮球全局跨角色记忆、旧分卡记录自动迁移与非标 ID 跨卡找回', async () => {
+  // 1. 旧版按角色卡分存的记录在 normalizeSettings 时平滑合并入 __global__ 并去重
+  const migrated = normalizeSettings({
+    floatTuckedSelectors: {
+      'char:alice.png': ['id:qqj-fab-host', 'shadow:id:bbs-app-host::sig:button|bbs-orb|'],
+      'char:bob.png': ['id:qqj-fab-host', 'id:tmt-fab-host'],
+    },
+  });
+  assert.deepEqual(migrated.floatTuckedSelectors, {
+    __global__: [
+      'id:qqj-fab-host',
+      'shadow:id:bbs-app-host::sig:button|bbs-orb|',
+      'id:tmt-fab-host',
+    ],
+  });
+
+  // 2. 在角色 A 收纳悬浮球，切换到角色 B 后无需重收且依然自动隐藏；在角色 B 点放出后全局清除
+  const prevDoc = globalThis.document;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+  try {
+    const { createFloatCapsule } = await import('../src/shell/float-capsule.js');
+    const ctx = {
+      characterId: 0,
+      characters: [
+        { name: '角色A', avatar: 'charA.png' },
+        { name: '角色B', avatar: 'charB.png' },
+      ],
+      extensionSettings: {
+        st_mate: {
+          shellEnabled: true,
+          floatCapsuleEnabled: true,
+        },
+      },
+      saveSettingsDebounced() {},
+    };
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const globalFab = doc.createElement('button');
+    globalFab.id = 'qqj-fab-host';
+    globalFab.setAttribute('aria-label', '千千结');
+    globalFab.style.position = 'fixed';
+    globalFab.style.width = '48px';
+    globalFab.style.height = '48px';
+    globalFab.offsetWidth = 48;
+    globalFab.offsetHeight = 48;
+    globalFab.textContent = '结';
+    doc.body.append(globalFab);
+
+    // 额外放一个非标准尺寸的 sticky ID 球，模拟用户曾通过点选收纳存入 __global__
+    const stickyBall = doc.createElement('div');
+    stickyBall.id = 'custom-sticky-orb';
+    stickyBall.style.position = 'sticky';
+    stickyBall.style.width = '180px';
+    stickyBall.style.height = '180px';
+    stickyBall.offsetWidth = 180;
+    stickyBall.offsetHeight = 180;
+    stickyBall.textContent = '粘球';
+    doc.body.append(stickyBall);
+
+    const capsule = createFloatCapsule({
+      root: win,
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    capsule.refresh();
+
+    // 在角色 A 通过收纳仓一键收起「千千结」，并模拟之前点选收纳了 stickyBall
+    const capNode = doc.getElementById('stm-float-capsule');
+    capNode.querySelector('.stm-float-bag').click();
+    capNode.querySelector('.stm-float-absorb-btn').click();
+    store.update({
+      floatTuckedSelectors: {
+        __global__: [...(store.get().floatTuckedSelectors.__global__ || []), 'id:custom-sticky-orb'],
+      },
+    });
+    capsule.refresh();
+
+    assert.equal(globalFab.dataset?.stmClutterHidden, '1', '角色 A 下千千结被收起');
+    assert.equal(stickyBall.dataset?.stmClutterHidden, '1', '非标准定位但有持久化 ID 的球也能被定向找回收起');
+    assert.deepEqual(store.get().floatTuckedSelectors.__global__, [
+      'id:qqj-fab-host',
+      'id:custom-sticky-orb',
+    ]);
+
+    // 切换至角色 B 并刷新
+    ctx.characterId = 1;
+    capsule.refresh();
+    assert.equal(globalFab.dataset?.stmClutterHidden, '1', '切换到角色 B 后全局插件球依然保持收纳，无需重收');
+    assert.equal(stickyBall.dataset?.stmClutterHidden, '1', '切换到角色 B 后非标 ID 球依然保持收纳');
+
+    // 在角色 B 放出千千结，确认全局记录同步清除且两张卡都不再隐藏
+    capsule.open();
+    const releaseBtns = capNode.querySelectorAll('.stm-float-item-release');
+    releaseBtns[0].click();
+    assert.equal(globalFab.dataset?.stmClutterHidden, undefined, '在角色 B 点放出后立即恢复显示');
+    assert.deepEqual(store.get().floatTuckedSelectors.__global__, ['id:custom-sticky-orb']);
+
+    ctx.characterId = 0;
+    capsule.refresh();
+    assert.equal(globalFab.dataset?.stmClutterHidden, undefined, '切回角色 A 后已放出的球不会幽灵重藏');
+
+    capsule.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
+test('companion uiTheme selector & light-tone clarity: 伴侣面板独立配色四档切换、浅色美化自动感知与无损清理', async () => {
+  const prevDoc = globalThis.document;
+  const { doc, win } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  // 1. 纯推导校验：follow / dark / light / custom（浅底与深底自动推导明暗基调）
+  assert.equal(buildCompanionUiThemeTokens({ mode: 'follow' }).active, false);
+  const darkTokens = buildCompanionUiThemeTokens({ mode: 'dark' });
+  assert.equal(darkTokens.active, true);
+  assert.equal(darkTokens.tone, 'dark');
+  assert.ok(darkTokens.vars['--stm-surface'].startsWith('rgba('));
+
+  const lightTokens = buildCompanionUiThemeTokens({ mode: 'light' });
+  assert.equal(lightTokens.active, true);
+  assert.equal(lightTokens.tone, 'light');
+  assert.equal(lightTokens.vars['--stm-card-bg'], '#ffffff');
+
+  const customLight = buildCompanionUiThemeTokens({
+    mode: 'custom',
+    surfaceColor: '#f3ede5',
+    textColor: '#362d27',
+    accentColor: '#986954',
+  });
+  assert.equal(customLight.tone, 'light', '自定义浅底色应自动标记 light 基调');
+  assert.equal(customLight.vars['--stm-ink'], '#362d27');
+  assert.equal(customLight.vars['--stm-accent'], '#986954');
+
+  // 2. 跟随浅色美化主题时，syncSurfaceOpacityGuard 自动探测并打上 data-stm-ui-tone="light"
+  const lightWin = {
+    ...win,
+    document: doc,
+    getComputedStyle: node => {
+      if (node === doc.documentElement) {
+        return { getPropertyValue: () => '' };
+      }
+      return {
+        backgroundColor: 'rgba(244, 246, 250, 0.94)',
+        getPropertyValue: () => '',
+      };
+    },
+  };
+  const followRes = syncSurfaceOpacityGuard(lightWin);
+  assert.equal(followRes.applied, false);
+  assert.equal(doc.documentElement.dataset.stmUiTone, 'light', '跟随浅色美化时自动识别为浅色基调');
+
+  // 3. 切至默认深色后写入独立 CSS 变量并让透明护栏礼让；再在设置弹窗验证交互切换与自定义取色
+  const ctx = {
+    extensionSettings: { st_mate: { shellEnabled: true } },
+    saveSettingsDebounced() {},
+  };
+  const store = createSettingsStore({ getContext: () => ctx });
+  store.hydrate();
+  const moduleBridge = createModuleBridge({ root: globalThis, getContext: () => ctx, store });
+
+  const dlg = createSettingsDialog({
+    getContext: () => ctx,
+    store,
+    moduleBridge,
+    onToggleShell: () => {},
+  });
+
+  try {
+    dlg.open('native');
+    const dialogEl = doc.getElementById('stm-settings-dialog');
+    const segBtns = dialogEl.querySelectorAll('.stm-ui-theme-seg-btn');
+    const followBtn = segBtns.find(b => b.dataset.uiThemeMode === 'follow');
+    const darkBtn = segBtns.find(b => b.dataset.uiThemeMode === 'dark');
+    const lightBtn = segBtns.find(b => b.dataset.uiThemeMode === 'light');
+    const customBtn = segBtns.find(b => b.dataset.uiThemeMode === 'custom');
+    assert.ok(followBtn && darkBtn && lightBtn && customBtn, '原生与设置页「系统设置」渲染四合一配色胶囊');
+    assert.equal(followBtn.classList.contains('is-active'), true, '默认选中「跟随」');
+
+    darkBtn.click();
+    assert.equal(store.get().uiTheme.mode, 'dark');
+    assert.equal(doc.documentElement.dataset.stmUiTheme, 'dark');
+    assert.equal(doc.documentElement.dataset.stmUiTone, 'dark');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-ink'), '#eef0f5');
+
+    // 独立配色激活期间，syncSurfaceOpacityGuard 不得覆盖 data-stm-ui-tone
+    syncSurfaceOpacityGuard(lightWin);
+    assert.equal(doc.documentElement.dataset.stmUiTone, 'dark', '独立配色开启时透明护栏礼让不串色');
+
+    dialogEl.querySelectorAll('.stm-ui-theme-seg-btn').find(b => b.dataset.uiThemeMode === 'light').click();
+    assert.equal(store.get().uiTheme.mode, 'light');
+    assert.equal(doc.documentElement.dataset.stmUiTone, 'light');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-ink'), '#23262e');
+
+    dialogEl.querySelectorAll('.stm-ui-theme-seg-btn').find(b => b.dataset.uiThemeMode === 'follow').click();
+    assert.equal(store.get().uiTheme.mode, 'follow');
+    assert.equal(doc.documentElement.dataset.stmUiTheme, undefined, '切回「跟随」时交还给酒馆美化主题');
+
+    dialogEl.querySelectorAll('.stm-ui-theme-seg-btn').find(b => b.dataset.uiThemeMode === 'custom').click();
+    assert.equal(store.get().uiTheme.mode, 'custom');
+    const teaRecipe = dialogEl
+      .querySelectorAll('.stm-ui-theme-recipe-btn')
+      .find(b => b.dataset.uiThemeRecipe === 'tea');
+    assert.ok(teaRecipe, '选中自定义模式后展开快捷套用色板');
+    teaRecipe.click();
+    assert.equal(store.get().uiTheme.surfaceColor, '#f3ede5');
+    assert.equal(store.get().uiTheme.accentColor, '#986954');
+    assert.equal(doc.documentElement.dataset.stmUiTone, 'light');
+
+    const surfInput = dialogEl
+      .querySelectorAll('.stm-ui-theme-color-input')
+      .find(el => el.dataset.uiThemeSlot === 'surfaceColor');
+    assert.ok(surfInput, '自定义模式展示底色/文字/强调色取色控件');
+    surfInput.value = '#182026';
+    surfInput.dispatchEvent({ type: 'input' });
+    assert.equal(store.get().uiTheme.surfaceColor, '#182026');
+    assert.equal(doc.documentElement.dataset.stmUiTone, 'dark', '自定义取色切回深底时实时同步明暗基调');
+
+    clearCompanionUiTheme(globalThis);
+    assert.equal(doc.documentElement.dataset.stmUiTheme, undefined, '停用清理后无残留属性');
+    assert.equal(doc.documentElement.style.getPropertyValue('--stm-surface'), '', '停用清理后无残留变量');
+  } finally {
+    dlg.destroy();
+    clearCompanionUiTheme(globalThis);
+    clearSurfaceOpacityGuard(globalThis);
     globalThis.document = prevDoc;
   }
 });

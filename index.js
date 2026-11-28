@@ -4,63 +4,65 @@
  */
 
 import {
+  clearCompanionUiTheme,
   clearSurfaceOpacityGuard,
   clearTauriSafeAreaGuard,
   createTauriOverlayBackGuard,
   detectPlatform,
   getHostContext,
   scheduleIdleBoot,
+  syncCompanionUiTheme,
   syncSurfaceOpacityGuard,
   syncTauriSafeAreaGuard,
-} from './src/core/env.js?v=0.9.21';
+} from './src/core/env.js?v=0.9.22';
 import {
   closeExportFallbackDialog,
   isExportFallbackDialogOpen,
-} from './src/core/file-saver.js?v=0.9.21';
-import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.21';
-import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.9.21';
-import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.9.21';
+} from './src/core/file-saver.js?v=0.9.22';
+import { STM_SCHEMA_VERSION, createSettingsStore } from './src/core/schema.js?v=0.9.22';
+import { CONTROL_REGISTRY_KEY, STM_RUNTIME_KEY, createModuleBridge, ensureControlRegistry } from './src/core/registry.js?v=0.9.22';
+import { createSuiteCoordinator, isSafeModeRequested } from './src/core/suite-guard.js?v=0.9.22';
 import {
   closeAllNativeDrawers,
   formatStartupToastText,
   getOpenNativeDrawerIds,
   toastMessage,
-} from './src/shell/host-actions.js?v=0.9.21';
-import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.9.21';
-import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.9.21';
-import { createChatVision } from './src/shell/chat-vision.js?v=0.9.21';
-import { createFloorActions } from './src/shell/floor-actions.js?v=0.9.21';
-import { createFloatCapsule } from './src/shell/float-capsule.js?v=0.9.21';
-import { createTopbar } from './src/shell/topbar.js?v=0.9.21';
-import { createHomeCloak } from './src/shell/home-cloak.js?v=0.9.21';
-import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.9.21';
-import { createAtmosphere } from './src/shell/atmosphere.js?v=0.9.21';
-import { createPerfEngine } from './src/shell/perf-engine.js?v=0.9.21';
-import { createReaderDock } from './src/shell/reader-dock.js?v=0.9.21';
-import { readSecretsMap } from './src/modules/api-backend.js?v=0.9.21';
+} from './src/shell/host-actions.js?v=0.9.22';
+import { createDrawerBridge } from './src/shell/drawer-bridge.js?v=0.9.22';
+import { createExtensionsTidy } from './src/shell/extensions-tidy.js?v=0.9.22';
+import { createChatVision } from './src/shell/chat-vision.js?v=0.9.22';
+import { createFloorActions } from './src/shell/floor-actions.js?v=0.9.22';
+import { createFloatCapsule } from './src/shell/float-capsule.js?v=0.9.22';
+import { createTopbar } from './src/shell/topbar.js?v=0.9.22';
+import { createHomeCloak } from './src/shell/home-cloak.js?v=0.9.22';
+import { createTapImmersive } from './src/shell/tap-immersive.js?v=0.9.22';
+import { createAtmosphere } from './src/shell/atmosphere.js?v=0.9.22';
+import { createPerfEngine } from './src/shell/perf-engine.js?v=0.9.22';
+import { createReaderDock } from './src/shell/reader-dock.js?v=0.9.22';
+import { readSecretsMap } from './src/modules/api-backend.js?v=0.9.22';
 import {
   requestAssistantCompletion,
   resolveAssistantRuntimeChannel,
-} from './src/modules/assistant-core.js?v=0.9.21';
-import { createApiDock } from './src/modules/api-dock.js?v=0.9.21';
+} from './src/modules/assistant-core.js?v=0.9.22';
+import { createApiDock } from './src/modules/api-dock.js?v=0.9.22';
 import {
   createActiveChatPresetSyncScheduler,
   primeHostOpenAiModule,
   syncPresetForActiveChat,
-} from './src/modules/preset-backend.js?v=0.9.21';
-import { createPresetDock } from './src/modules/preset-dock.js?v=0.9.21';
+} from './src/modules/preset-backend.js?v=0.9.22';
+import { createPresetDock } from './src/modules/preset-dock.js?v=0.9.22';
 import {
   primeHostWorldInfoModule,
   refreshHostWorldInfoList,
-} from './src/modules/char-world-backend.js?v=0.9.21';
-import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.9.21';
-import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.9.21';
-import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.9.21';
-import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.21';
-import { createWelcomeGuide } from './src/shell/welcome-guide.js?v=0.9.21';
+} from './src/modules/char-world-backend.js?v=0.9.22';
+import { createCharWorldDock } from './src/modules/char-world-dock.js?v=0.9.22';
+import { createSmartImporterController } from './src/modules/smart-importer.js?v=0.9.22';
+import { syncActiveCompanionThemeOnBoot } from './src/core/companion-kit.js?v=0.9.22';
+import { createSettingsDialog } from './src/shell/settings-dialog.js?v=0.9.22';
+import { createWelcomeGuide } from './src/shell/welcome-guide.js?v=0.9.22';
 
-const STM_VERSION = '0.9.21';
-const STM_ASSET_REV = '0.9.21';
+const STM_VERSION = '0.9.22';
+const STM_ASSET_REV = '0.9.22';
 
 /**
  * 移动端浏览器无 Ctrl+F5 强刷能力：启动时自动为 st-mate/style.css 附加当前版本号参数，
@@ -193,13 +195,18 @@ function createStMateRuntime() {
     );
   }
 
+  function syncUiThemeAndSurface() {
+    syncCompanionUiTheme(globalThis, store.get().uiTheme, { active: true });
+    syncSurfaceOpacityGuard(globalThis);
+  }
+
   function refreshAll({ shouldHydrate = false, skipExtensionReorder = false } = {}) {
     if (!enabled) return;
     if (shouldHydrate) {
       store.hydrate();
     }
     syncTauriSafeAreaGuard(globalThis);
-    syncSurfaceOpacityGuard(globalThis);
+    syncUiThemeAndSurface();
     perfEngine?.refresh();
     homeCloak?.refresh();
     tapImmersive?.refresh();
@@ -585,7 +592,7 @@ function createStMateRuntime() {
       onPreviewAtmosphere: () => atmosphere?.refresh(),
       onOpenStateChange: opened => {
         if (opened) {
-          syncSurfaceOpacityGuard(globalThis);
+          syncUiThemeAndSurface();
           apiDock?.close();
           presetDock?.close();
           charWorldDock?.close();
@@ -602,7 +609,7 @@ function createStMateRuntime() {
       getContext,
       store,
       onBeforeOpen: () => {
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
         readerDock?.close();
         presetDock?.close();
         charWorldDock?.close();
@@ -621,7 +628,7 @@ function createStMateRuntime() {
       getContext,
       store,
       onBeforeOpen: () => {
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
         readerDock?.close();
         apiDock?.close();
         charWorldDock?.close();
@@ -649,7 +656,7 @@ function createStMateRuntime() {
       getContext,
       store,
       onBeforeOpen: () => {
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
         readerDock?.close();
         apiDock?.close();
         presetDock?.close();
@@ -920,7 +927,7 @@ function createStMateRuntime() {
 
       const onViewportSafeAreaCheck = () => {
         syncTauriSafeAreaGuard(globalThis);
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
       };
       globalThis.addEventListener?.('resize', onViewportSafeAreaCheck, { passive: true });
       globalThis.visualViewport?.addEventListener?.('resize', onViewportSafeAreaCheck, { passive: true });
@@ -947,7 +954,7 @@ function createStMateRuntime() {
 
     ensureFreshStylesheet();
     syncTauriSafeAreaGuard(globalThis);
-    syncSurfaceOpacityGuard(globalThis);
+    syncUiThemeAndSurface();
     initSubsystems();
     registerSelfInControlRegistry();
 
@@ -955,7 +962,7 @@ function createStMateRuntime() {
       const tid = globalThis.setTimeout(() => {
         if (!enabled) return;
         syncTauriSafeAreaGuard(globalThis);
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
       }, delayMs);
       lateGuardTimers.push(tid);
     }
@@ -965,7 +972,7 @@ function createStMateRuntime() {
         if (!enabled) return true;
         ensureFreshStylesheet();
         syncTauriSafeAreaGuard(globalThis);
-        syncSurfaceOpacityGuard(globalThis);
+        syncUiThemeAndSurface();
         const ctx = getContext();
         if (!ctx?.extensionSettings) return false;
 
@@ -1037,6 +1044,7 @@ function createStMateRuntime() {
     ttOverlayBackGuard = null;
     closeExportFallbackDialog(globalThis.document, globalThis);
     clearTauriSafeAreaGuard(globalThis);
+    clearCompanionUiTheme(globalThis);
     clearSurfaceOpacityGuard(globalThis);
 
     while (eventCleanups.length) {

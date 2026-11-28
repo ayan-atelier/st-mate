@@ -161,17 +161,206 @@ function probeResolvedCssColor(root, doc, cssValue, cssVarName = '') {
 }
 
 /**
- * 伴侣面板防全透明保底护栏：
+ * 伴侣面板独立配色方案（仅作用于 SillyTavern 伴侣自身面板、抽屉与顶栏，绝不改动聊天正文与玩家主题）。
+ */
+export const COMPANION_UI_PRESETS = Object.freeze({
+  dark: Object.freeze({
+    tone: 'dark',
+    surfaceColor: '#1b1d23',
+    textColor: '#eef0f5',
+    accentColor: '#88a8d8',
+    vars: Object.freeze({
+      '--stm-surface': 'rgba(25, 27, 34, 0.96)',
+      '--stm-card-bg': '#22252e',
+      '--stm-sub-bg': 'rgba(255, 255, 255, 0.045)',
+      '--stm-field-bg': 'rgba(0, 0, 0, 0.28)',
+      '--stm-ink': '#eef0f5',
+      '--stm-muted': '#a5acb9',
+      '--stm-border': 'rgba(255, 255, 255, 0.14)',
+      '--stm-accent': '#88a8d8',
+    }),
+  }),
+  light: Object.freeze({
+    tone: 'light',
+    surfaceColor: '#f7f5f0',
+    textColor: '#23262e',
+    accentColor: '#4a6fa5',
+    vars: Object.freeze({
+      '--stm-surface': 'rgba(247, 245, 240, 0.97)',
+      '--stm-card-bg': '#ffffff',
+      '--stm-sub-bg': '#eeebe4',
+      '--stm-field-bg': '#ffffff',
+      '--stm-ink': '#23262e',
+      '--stm-muted': '#5d6574',
+      '--stm-border': 'rgba(35, 38, 46, 0.15)',
+      '--stm-accent': '#4a6fa5',
+    }),
+  }),
+});
+
+export const COMPANION_UI_VAR_KEYS = Object.freeze([
+  '--stm-surface',
+  '--stm-card-bg',
+  '--stm-sub-bg',
+  '--stm-field-bg',
+  '--stm-ink',
+  '--stm-muted',
+  '--stm-border',
+  '--stm-accent',
+]);
+
+function normalizeHexOrFallback(raw, fallback) {
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  const shortMatch = trimmed.match(/^#([0-9a-f]{3})$/i);
+  if (shortMatch) {
+    const [r, g, b] = shortMatch[1].toLowerCase().split('');
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed.toLowerCase() : fallback;
+}
+
+function rgbLuminance(rgb) {
+  if (!rgb) return 0;
+  return (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
+}
+
+function mixRgb(a, b, weightA) {
+  const wa = Math.min(1, Math.max(0, weightA));
+  const wb = 1 - wa;
+  return {
+    r: Math.round(a.r * wa + b.r * wb),
+    g: Math.round(a.g * wa + b.g * wb),
+    b: Math.round(a.b * wa + b.b * wb),
+  };
+}
+
+/**
+ * 根据伴侣面板配色配置推导完整的 CSS 变量集合与明暗基调（follow 模式返回 active:false 交还给美化主题）。
+ */
+export function buildCompanionUiThemeTokens(uiTheme = null) {
+  const mode = typeof uiTheme?.mode === 'string' ? uiTheme.mode : 'follow';
+  if (mode === 'dark' || mode === 'light') {
+    const preset = COMPANION_UI_PRESETS[mode];
+    return {
+      active: true,
+      mode,
+      tone: preset.tone,
+      vars: { ...preset.vars },
+    };
+  }
+  if (mode !== 'custom') {
+    return { active: false, mode: 'follow', tone: '', vars: {} };
+  }
+
+  const surfaceHex = normalizeHexOrFallback(uiTheme?.surfaceColor, '#1b1d23');
+  const textHex = normalizeHexOrFallback(uiTheme?.textColor, '#eef0f5');
+  const accentHex = normalizeHexOrFallback(uiTheme?.accentColor, '#88a8d8');
+
+  const surfRgb = parseCssColorRgba(surfaceHex) || { r: 27, g: 29, b: 35, a: 1 };
+  const textRgb = parseCssColorRgba(textHex) || { r: 238, g: 240, b: 245, a: 1 };
+  const isLight = rgbLuminance(surfRgb) >= 0.54;
+  const whiteRgb = { r: 255, g: 255, b: 255 };
+  const blackRgb = { r: 0, g: 0, b: 0 };
+
+  const mutedRgb = mixRgb(textRgb, surfRgb, isLight ? 0.68 : 0.66);
+  const cardRgb = isLight ? mixRgb(whiteRgb, surfRgb, 0.72) : mixRgb(whiteRgb, surfRgb, 0.06);
+  const subRgb = isLight ? mixRgb(textRgb, surfRgb, 0.055) : mixRgb(blackRgb, surfRgb, 0.2);
+  const fieldRgb = isLight ? mixRgb(whiteRgb, surfRgb, 0.86) : mixRgb(blackRgb, surfRgb, 0.28);
+
+  return {
+    active: true,
+    mode: 'custom',
+    tone: isLight ? 'light' : 'dark',
+    vars: {
+      '--stm-surface': `rgba(${surfRgb.r}, ${surfRgb.g}, ${surfRgb.b}, ${isLight ? 0.97 : 0.96})`,
+      '--stm-card-bg': `rgb(${cardRgb.r}, ${cardRgb.g}, ${cardRgb.b})`,
+      '--stm-sub-bg': `rgb(${subRgb.r}, ${subRgb.g}, ${subRgb.b})`,
+      '--stm-field-bg': `rgb(${fieldRgb.r}, ${fieldRgb.g}, ${fieldRgb.b})`,
+      '--stm-ink': textHex,
+      '--stm-muted': `rgb(${mutedRgb.r}, ${mutedRgb.g}, ${mutedRgb.b})`,
+      '--stm-border': `rgba(${textRgb.r}, ${textRgb.g}, ${textRgb.b}, ${isLight ? 0.16 : 0.15})`,
+      '--stm-accent': accentHex,
+    },
+  };
+}
+
+/**
+ * 将伴侣独立面板配色同步至 documentElement（仅影响 .stm-* 面板变量）；
+ * 当停用伴侣或处于 follow（跟随美化）模式时，清除自定义覆盖并交还给美化主题与透明保底护栏。
+ */
+export function syncCompanionUiTheme(root = globalThis, uiTheme = null, { active = true } = {}) {
+  const docEl = root?.document?.documentElement;
+  if (!docEl) {
+    return { applied: false, mode: 'follow', tone: '' };
+  }
+
+  const tokens = active ? buildCompanionUiThemeTokens(uiTheme) : { active: false, mode: 'follow', tone: '', vars: {} };
+
+  if (!tokens.active) {
+    for (const key of COMPANION_UI_VAR_KEYS) {
+      docEl.style?.removeProperty?.(key);
+    }
+    if (docEl.dataset) {
+      delete docEl.dataset.stmUiTheme;
+      if (!active) {
+        delete docEl.dataset.stmUiTone;
+      }
+    }
+    return { applied: false, mode: 'follow', tone: docEl.dataset?.stmUiTone || '' };
+  }
+
+  // 独立配色接管时移除透明保底覆盖，避免双重覆盖冲突
+  docEl.style?.removeProperty?.('--stm-surface-override');
+  if (docEl.dataset) {
+    delete docEl.dataset.stmSurfaceGuarded;
+    docEl.dataset.stmUiTheme = tokens.mode;
+    docEl.dataset.stmUiTone = tokens.tone;
+  }
+  for (const [key, val] of Object.entries(tokens.vars)) {
+    docEl.style?.setProperty?.(key, val);
+  }
+  return { applied: true, mode: tokens.mode, tone: tokens.tone, vars: tokens.vars };
+}
+
+/**
+ * 清理伴侣独立面板配色写入的全部内联变量与明暗标记。
+ */
+export function clearCompanionUiTheme(root = globalThis) {
+  const docEl = root?.document?.documentElement;
+  if (!docEl) return;
+  for (const key of COMPANION_UI_VAR_KEYS) {
+    docEl.style?.removeProperty?.(key);
+  }
+  if (docEl.dataset) {
+    delete docEl.dataset.stmUiTheme;
+    delete docEl.dataset.stmUiTone;
+  }
+}
+
+/**
+ * 伴侣面板防全透明保底护栏 + 跟随美化明暗自动感知：
  * 部分酒馆美化主题把 `--SmartThemeBlurTintColor` 设成全透明或极低透明度（只给原生抽屉单写实色），
  * 导致伴侣的预设馆、Aa 排版抽屉与悬浮菜单透出底下聊天正文难以阅读。
  * 当检测到 `--SmartThemeBlurTintColor` 透明度 < 0.84 时，按「原生已着色抽屉 -> ChatTintColor -> 原色提实 -> 文字明暗实底」
- * 依次采样同色系实底写入 `--stm-surface-override`；主题本身已不透明 (>= 0.84) 时零干预。
+ * 依次采样同色系实底写入 `--stm-surface-override`；主题本身已不透明 (>= 0.84) 时零干预；
+ * 同时自动识别当前有效面板底色的亮暗写入 `data-stm-ui-tone`，令浅色美化下的卡片与输入框告别脏灰暗底。
  */
 export function syncSurfaceOpacityGuard(root = globalThis) {
   const doc = root?.document;
   const docEl = doc?.documentElement;
   if (!doc?.body || !docEl) {
     return { applied: false, alpha: 1, resolved: '' };
+  }
+
+  // 若用户已选用伴侣独立配色（默认深色 / 默认浅色 / 自定义），直接礼让不干扰
+  if (docEl.dataset?.stmUiTheme && docEl.dataset.stmUiTheme !== 'follow') {
+    return {
+      applied: false,
+      alpha: 1,
+      resolved: '',
+      tone: docEl.dataset.stmUiTone || 'dark',
+    };
   }
 
   const blurColor = probeResolvedCssColor(
@@ -181,12 +370,35 @@ export function syncSurfaceOpacityGuard(root = globalThis) {
     '--SmartThemeBlurTintColor',
   );
 
+  const syncFollowTone = sampleBg => {
+    let isLight = false;
+    if (sampleBg && sampleBg.a >= 0.45) {
+      isLight = rgbLuminance(sampleBg) >= 0.56;
+    } else {
+      const bodyText = probeResolvedCssColor(
+        root,
+        doc,
+        'var(--SmartThemeBodyColor, #ebedf2)',
+        '--SmartThemeBodyColor',
+      );
+      if (bodyText) {
+        isLight = rgbLuminance(bodyText) < 0.48;
+      }
+    }
+    const tone = isLight ? 'light' : 'dark';
+    if (docEl.dataset) {
+      docEl.dataset.stmUiTone = tone;
+    }
+    return tone;
+  };
+
   if (!blurColor || blurColor.a >= 0.84) {
     if (docEl.dataset?.stmSurfaceGuarded === '1') {
       docEl.style?.removeProperty?.('--stm-surface-override');
       delete docEl.dataset.stmSurfaceGuarded;
     }
-    return { applied: false, alpha: blurColor?.a ?? 1, resolved: '' };
+    const tone = syncFollowTone(blurColor);
+    return { applied: false, alpha: blurColor?.a ?? 1, resolved: '', tone };
   }
 
   let picked = null;
@@ -235,7 +447,8 @@ export function syncSurfaceOpacityGuard(root = globalThis) {
   if (docEl.dataset) {
     docEl.dataset.stmSurfaceGuarded = '1';
   }
-  return { applied: true, alpha: blurColor.a, resolved };
+  const tone = syncFollowTone(picked);
+  return { applied: true, alpha: blurColor.a, resolved, tone };
 }
 
 /**
@@ -247,6 +460,9 @@ export function clearSurfaceOpacityGuard(root = globalThis) {
   docEl.style?.removeProperty?.('--stm-surface-override');
   if (docEl.dataset) {
     delete docEl.dataset.stmSurfaceGuarded;
+    if (!docEl.dataset.stmUiTheme) {
+      delete docEl.dataset.stmUiTone;
+    }
   }
 }
 
