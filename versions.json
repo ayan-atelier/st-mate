@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "extension": "st-mate",
-  "latest": "0.9.15",
+  "latest": "0.9.16",
   "releases": [
+    {
+      "version": "0.9.16",
+      "branch": "release-0.9.16",
+      "settings_schema": 1,
+      "minimum_client_version": "1.12.0",
+      "notes": "修复 iOS Safari/WKWebView 下 inline-flex 内细线 SVG 图标塌缩为 0x0 隐身的问题（彻底恢复 iPhone 楼底「··· / 复制 / 编辑」、人话菜单、折叠箭头与导览图标）；悬浮收纳原生穿透千千结等 Shadow Host 内部按钮、覆盖两三事等 <html> 挂载球，并新增「点选收纳」一戳收起任意悬浮球；预设馆新增已启用总词符数（酒馆精确分词器异步回填）与启用/全预设总字符数实时统计。"
+    },
     {
       "version": "0.9.15",
       "branch": "release-0.9.15",

@@ -11,10 +11,10 @@
  *    - 页面上若有角色卡或外部脚本挂出的小型 position:fixed 野生悬浮球（如大梁邸报卷轴球等），按住它直接拖到伴侣圆球上松手即可「吞入收纳」（亦支持在收纳面板内一键吸纳不可拖动的死位置悬浮块，按角色卡自动记忆，随时可点「放出」还原）。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.15';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.15';
-import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.15';
-import { toastMessage } from './host-actions.js?v=0.9.15';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
+import { getEntityBindingKey } from '../modules/preset-backend.js?v=0.9.16';
+import { toastMessage } from './host-actions.js?v=0.9.16';
 
 export const DEFAULT_STEP_FLOORS = 5;
 export const DOUBLE_TAP_WINDOW_MS = 750;
@@ -121,6 +121,9 @@ const EXCLUDED_OVERLAY_SUBTREE_IDS = new Set([
 const KNOWN_HOST_LABEL_MAP = Object.freeze({
   'bbs-app-host': '柏宝书',
   'bbi-app-host': '柏宝绘',
+  'qqj-fab-host': '千千结',
+  'tmt-fab-host': '两三事',
+  'tmt-card-fab-host': '两三事·随卡',
 });
 
 const WILD_MAX_SCAN_DEPTH = 5;
@@ -292,15 +295,60 @@ function isIntrinsicallyHidden(node) {
   return false;
 }
 
-function walkElements(root, visitor) {
-  if (!root?.children) return;
+function needsInlineHideNode(node, doc) {
+  if (!node) return false;
+  if (isNodeInShadowDom(node, doc)) return true;
+  if (node.shadowRoot) return true;
+  if (doc?.body && typeof doc.body.contains === 'function') {
+    try {
+      if (!doc.body.contains(node)) return true;
+    } catch {
+      // ignore mock DOM
+    }
+  }
+  return false;
+}
+
+function walkElements(root, visitor, { includeShadow = false } = {}) {
+  if (!root) return;
+  if (includeShadow && root.shadowRoot?.children) {
+    walkElements(root.shadowRoot, visitor, { includeShadow: true });
+  }
+  if (!root.children) return;
   for (const child of Array.from(root.children)) {
     if (!child || !child.tagName) continue;
     const dive = visitor(child);
     if (dive !== false) {
-      walkElements(child, visitor);
+      walkElements(child, visitor, { includeShadow });
     }
   }
+}
+
+function findShadowPrimaryControl(node) {
+  if (!node?.shadowRoot?.children) return null;
+  const controls = [];
+  walkElements(
+    node.shadowRoot,
+    sub => {
+      if (isIntrinsicallyHidden(sub)) return false;
+      if (
+        isClickableControl(sub) ||
+        typeof sub.onclick === 'function' ||
+        sub.getAttribute?.('tabindex') !== null
+      ) {
+        controls.push(sub);
+        return false;
+      }
+      return true;
+    },
+    { includeShadow: true },
+  );
+  if (controls.length === 1) return controls[0];
+  if (controls.length > 1) {
+    const primaryBtn = controls.find(c => String(c.tagName || '').toUpperCase() === 'BUTTON');
+    return primaryBtn || controls[0];
+  }
+  return null;
 }
 
 function isClickableControl(node) {
@@ -409,9 +457,11 @@ function buildClutterDescriptor(
   hideHostEl,
   zone,
   seq,
-  { widgetKey = '', fallbackName = '卡片按钮', shadowHost = null } = {},
+  { widgetKey = '', fallbackName = '卡片按钮', shadowHost = null, triggerEl = null } = {},
 ) {
-  const hostId = String(shadowHost?.id || '').trim();
+  const shadowPrimary = targetEl?.shadowRoot ? findShadowPrimaryControl(targetEl) : null;
+  const labelSourceEl = triggerEl || shadowPrimary || targetEl;
+  const hostId = String(shadowHost?.id || targetEl?.id || hideHostEl?.id || '').trim();
   const hostHint =
     KNOWN_HOST_LABEL_MAP[hostId] ||
     String(
@@ -422,9 +472,12 @@ function buildClutterDescriptor(
     )
       .replace(/\s+/g, ' ')
       .trim();
-  const rawText = readCleanButtonText(targetEl);
+  const rawText = readCleanButtonText(labelSourceEl) || readCleanButtonText(targetEl);
   const rawTitle = String(
-    targetEl.getAttribute?.('title') ||
+    labelSourceEl?.getAttribute?.('title') ||
+      labelSourceEl?.getAttribute?.('aria-label') ||
+      labelSourceEl?.title ||
+      targetEl.getAttribute?.('title') ||
       targetEl.getAttribute?.('aria-label') ||
       targetEl.title ||
       hideHostEl?.getAttribute?.('title') ||
@@ -435,7 +488,7 @@ function buildClutterDescriptor(
     .replace(/\s+/g, ' ')
     .trim();
   const graphemes = Array.from(rawText);
-  const hint = guessIconSemantic(targetEl, hostHint || fallbackName);
+  const hint = guessIconSemantic(labelSourceEl || targetEl, hostHint || fallbackName);
 
   let label = '';
   let glyphText = '';
@@ -460,6 +513,7 @@ function buildClutterDescriptor(
     zone,
     widgetKey,
     targetEl,
+    triggerEl: triggerEl || shadowPrimary || null,
     hideHostEl: hideHostEl || targetEl,
     shadowHost: shadowHost || null,
   };
@@ -655,6 +709,33 @@ export function discoverWildFloatingWidgets(doc, root = globalThis) {
   };
 
   scanBranch(doc.body, 0, null, false);
+
+  // 兼容挂载在 <html> (document.documentElement) 下的悬浮球宿主（如两三事 #tmt-fab-host / #tmt-card-fab-host）
+  if (doc.documentElement?.children) {
+    for (const child of Array.from(doc.documentElement.children)) {
+      if (!child?.tagName || seenNodes.has(child)) continue;
+      const tag = String(child.tagName).toUpperCase();
+      if (tag === 'HEAD' || tag === 'BODY' || IGNORED_TAG_NAMES.has(tag)) continue;
+      const cid = String(child.id || '');
+      if (CORE_BODY_EXCLUDED_IDS.has(cid) || isYantaiInternalNode(child)) continue;
+      if (isExcludedOverlaySubtree(child)) continue;
+
+      const info = inspectWildFloatingCandidate(child, root);
+      if (info) {
+        seenNodes.add(child);
+        if (!seenKeys.has(info.key)) {
+          seenKeys.add(info.key);
+          found.push(info);
+        }
+        continue;
+      }
+      if (child.shadowRoot?.children) {
+        scanBranch(child.shadowRoot, 1, child, false);
+      } else if (child.children?.length > 0 && !isIntrinsicallyHidden(child)) {
+        scanBranch(child, 1, null, false);
+      }
+    }
+  }
 
   const sheld = doc.getElementById?.('sheld');
   if (sheld?.children) {
@@ -972,9 +1053,14 @@ export function createFloatCapsule({
   let formObserver = null;
   let observedFormRoot = null;
   let bodyChildObserver = null;
+  let docElChildObserver = null;
   const markedHiddenNodes = new Set();
   const tempOpenHostNodes = new Set();
   const shadowOrigDisplayMap = new WeakMap();
+  const pickedWildMap = new Map();
+  let pickModeActive = false;
+  let pickBannerEl = null;
+  let pickSuppressUntil = 0;
   let delayedScanTimers = [];
   let cachedClutterItems = [];
   let cachedUntuckedWildItems = [];
@@ -1095,7 +1181,7 @@ export function createFloatCapsule({
     if (node.dataset) {
       node.dataset.stmClutterHidden = '1';
     }
-    if (isNodeInShadowDom(node, doc)) {
+    if (needsInlineHideNode(node, doc)) {
       if (!shadowOrigDisplayMap.has(node)) {
         shadowOrigDisplayMap.set(node, readInlineStyleProp(node, 'display'));
       }
@@ -1230,6 +1316,28 @@ export function createFloatCapsule({
     const wildCandidates = discoverWildFloatingWidgets(doc, root);
     const tuckedKeys = getTuckedKeysSetForCurrentChat();
 
+    // 合并通过「点选收纳」捕获到的非标准悬浮球（若原节点仍挂载在页面上且未被常规扫描命中）
+    const seenWildKeys = new Set(wildCandidates.map(w => w.key));
+    for (const [pKey, entry] of Array.from(pickedWildMap.entries())) {
+      if (!entry?.node || entry.node.isConnected === false) {
+        pickedWildMap.delete(pKey);
+        continue;
+      }
+      if (seenWildKeys.has(pKey)) {
+        if (entry.triggerEl && entry.triggerEl.isConnected !== false) {
+          const matched = wildCandidates.find(w => w.key === pKey);
+          if (matched && !matched.triggerEl) {
+            matched.triggerEl = entry.triggerEl;
+          }
+        }
+        continue;
+      }
+      if (tuckedKeys.has(pKey)) {
+        seenWildKeys.add(pKey);
+        wildCandidates.push(entry);
+      }
+    }
+
     const tuckedWildItems = [];
     const untuckedWildItems = [];
     const allHostNodes = [...hostNodes];
@@ -1240,6 +1348,7 @@ export function createFloatCapsule({
         widgetKey: w.key,
         fallbackName: '悬浮挂件',
         shadowHost: w.shadowHost || null,
+        triggerEl: w.triggerEl || null,
       });
       wSeq += 1;
       if (tuckedKeys.has(w.key)) {
@@ -1267,12 +1376,13 @@ export function createFloatCapsule({
       }
     }
 
-    // 核心策略：当本卡既无任何可收纳底栏按钮、也无页面野生悬浮挂件、也未处于拖入态时，隐去中间收纳球！
+    // 核心策略：当本卡既无任何可收纳底栏按钮、也无页面野生悬浮挂件、也未处于拖入/点选态时，隐去中间收纳球！
     const shouldShowBagSphere =
       cachedClutterItems.length > 0 ||
       cachedUntuckedWildItems.length > 0 ||
       bypassClutterHide ||
       popoverOpen ||
+      pickModeActive ||
       Boolean(wildDragState?.moved);
 
     if (bagBtn) {
@@ -1335,6 +1445,16 @@ export function createFloatCapsule({
       });
       bodyChildObserver.observe(doc.body, { childList: true });
     }
+
+    if (!docElChildObserver && doc?.documentElement && typeof root?.MutationObserver === 'function') {
+      docElChildObserver = new root.MutationObserver(mutations => {
+        const addedOrRemoved = mutations.some(m => m.type === 'childList');
+        if (addedOrRemoved) {
+          scheduleClutterScan();
+        }
+      });
+      docElChildObserver.observe(doc.documentElement, { childList: true });
+    }
   }
 
   function jumpChatExtreme(mode) {
@@ -1366,6 +1486,11 @@ export function createFloatCapsule({
 
   function resolveWildClickTarget(target) {
     if (!target) return null;
+    // 优先穿透开放 Shadow Host（如千千结 #qqj-fab-host / 两三事 #tmt-fab-host：外层是 fixed div，真正点击事件绑在 shadowRoot 内部 button 上）
+    if (target.shadowRoot?.children) {
+      const shadowBtn = findShadowPrimaryControl(target);
+      if (shadowBtn) return shadowBtn;
+    }
     if (
       isClickableControl(target) ||
       typeof target.onclick === 'function' ||
@@ -1374,14 +1499,18 @@ export function createFloatCapsule({
       return target;
     }
     const innerButtons = [];
-    walkElements(target, sub => {
-      if (isIntrinsicallyHidden(sub)) return false;
-      if (isClickableControl(sub)) {
-        innerButtons.push(sub);
-        return false;
-      }
-      return true;
-    });
+    walkElements(
+      target,
+      sub => {
+        if (isIntrinsicallyHidden(sub)) return false;
+        if (isClickableControl(sub)) {
+          innerButtons.push(sub);
+          return false;
+        }
+        return true;
+      },
+      { includeShadow: true },
+    );
     return innerButtons.length === 1 ? innerButtons[0] : target;
   }
 
@@ -1517,6 +1646,8 @@ export function createFloatCapsule({
     if (!rawTarget) return;
 
     const inShadow = isNodeInShadowDom(hostNode, doc);
+    const isShadowHost = Boolean(hostNode?.shadowRoot);
+    const needsInlineVis = needsInlineHideNode(hostNode, doc);
     let restoreInlineStyle = null;
     let restoreShadowClickVis = null;
     const capRect =
@@ -1528,7 +1659,7 @@ export function createFloatCapsule({
       hostNode.dataset.stmClicking = '1';
       unhideClutterNode(hostNode);
 
-      if (inShadow && hostNode.style) {
+      if (needsInlineVis && hostNode.style) {
         restoreShadowClickVis = {
           visibility: readInlineStyleProp(hostNode, 'visibility'),
           pointerEvents: readInlineStyleProp(hostNode, 'pointer-events'),
@@ -1537,8 +1668,16 @@ export function createFloatCapsule({
         setInlineStyleProp(hostNode, 'pointer-events', 'none', 'important');
       }
 
-      // 若是拖入收纳的 Light DOM 野生悬浮球，临时将其隐形锚点对齐到伴侣球旁，令其弹出的面板自然贴在伴侣球内侧！
-      if (item.zone === 'wild' && !inShadow && capRect && capRect.height > 0 && hostNode.style) {
+      // 若是拖入收纳的普通 Light DOM 野生悬浮球，临时将其隐形锚点对齐到伴侣球旁，令其弹出的面板自然贴在伴侣球内侧！
+      // Shadow DOM 内部球与独立 Shadow Host（如千千结/两三事）不改其 left/top，避免干扰其自有坐标记忆
+      if (
+        item.zone === 'wild' &&
+        !inShadow &&
+        !isShadowHost &&
+        capRect &&
+        capRect.height > 0 &&
+        hostNode.style
+      ) {
         restoreInlineStyle = {
           left: hostNode.style.left,
           top: hostNode.style.top,
@@ -1554,7 +1693,9 @@ export function createFloatCapsule({
 
     try {
       if (item.zone === 'wild') {
-        const clickTarget = resolveWildClickTarget(rawTarget);
+        const preferredTrigger =
+          item.triggerEl && item.triggerEl.isConnected !== false ? item.triggerEl : null;
+        const clickTarget = preferredTrigger || resolveWildClickTarget(rawTarget);
         dispatchRealisticTap(clickTarget, capRect);
       } else if (typeof rawTarget.click === 'function') {
         rawTarget.click();
@@ -1611,6 +1752,23 @@ export function createFloatCapsule({
     head.append(el('strong', 'stm-float-pop-title', countLabel));
 
     const headActions = el('div', 'stm-float-pop-head-actions');
+    const pickBtn = el(
+      'button',
+      `stm-float-pick-btn${pickModeActive ? ' is-active' : ''}`,
+      pickModeActive ? '退出点选' : '点选收纳',
+    );
+    pickBtn.type = 'button';
+    pickBtn.title = '进入点选模式：直接轻点屏幕上任意悬浮球即可将其收进收纳仓';
+    pickBtn.addEventListener('click', evt => {
+      evt.stopPropagation?.();
+      if (pickModeActive) {
+        stopPickMode();
+      } else {
+        startPickMode();
+      }
+    });
+    headActions.append(pickBtn);
+
     const rescanBtn = el('button', 'stm-float-rescan-btn');
     rescanBtn.type = 'button';
     rescanBtn.title = '重新扫描页面上的悬浮球与底栏外挂按钮';
@@ -1668,6 +1826,7 @@ export function createFloatCapsule({
           releaseBtn.addEventListener('click', evt => {
             evt.stopPropagation?.();
             removeTuckedWidgetKey(item.widgetKey);
+            pickedWildMap.delete(item.widgetKey);
             unhideClutterNode(item.hideHostEl);
             toastMessage(`已放出悬浮挂件：${item.label}`, 'info');
             syncClutterNow();
@@ -1961,6 +2120,165 @@ export function createFloatCapsule({
     return null;
   }
 
+  function isAcceptablePickedGeometry(effW, effH) {
+    if (effW < 14 || effH < 14) return false;
+    const vp = readViewportBox();
+    const maxBarW = Math.min(380, Math.round(vp.w * 0.85));
+    const maxStripH = Math.min(280, Math.round(vp.h * 0.56));
+    if (effW <= 240 && effH <= 240) return true;
+    if (effW <= maxBarW && effH <= 96) return true;
+    if (effW <= 96 && effH <= maxStripH) return true;
+    return false;
+  }
+
+  /**
+   * 「点选收纳」宽松目标解析器：
+   * 1) 优先复用常规悬浮球识别（穿透 Shadow DOM 与 <html> 挂载）；
+   * 2) 若遇到尺寸/定位不规则的第三方球（如汪汪来报、自定义卡片浮件等），沿 composedPath 向上找到独立浮层宿主，
+   *    同时精准记住用户点中的内层真实按钮作为 triggerEl，确保收得进去也点得开。
+   */
+  function resolvePickableFloatingTarget(rawTarget, doc, composedPath = null) {
+    const sheld = doc?.getElementById?.('sheld');
+    const chain = [];
+    const seen = new Set();
+
+    if (Array.isArray(composedPath) && composedPath.length > 0) {
+      for (const item of composedPath) {
+        if (!item || seen.has(item)) continue;
+        seen.add(item);
+        chain.push(item);
+      }
+    } else {
+      let cur = rawTarget;
+      let guard = 0;
+      while (cur && guard < 36) {
+        guard += 1;
+        if (!seen.has(cur)) {
+          seen.add(cur);
+          chain.push(cur);
+        }
+        cur = cur.parentNode || cur.parentElement || cur.host || null;
+      }
+    }
+
+    let clickedTrigger = null;
+    let shadowHost = null;
+    for (const item of chain) {
+      if (item === doc?.body || item === doc?.documentElement || item === root) break;
+      if (!item?.tagName) {
+        if (!shadowHost && item?.host?.tagName) {
+          shadowHost = item.host;
+        }
+        continue;
+      }
+      if (
+        capsuleEl?.contains?.(item) ||
+        pickBannerEl?.contains?.(item) ||
+        isYantaiInternalNode(item)
+      ) {
+        return null;
+      }
+      const cid = String(item.id || '');
+      if (
+        (CORE_BODY_EXCLUDED_IDS.has(cid) && item !== sheld) ||
+        cid === 'chat' ||
+        cid === 'form_sheld' ||
+        isExcludedOverlaySubtree(item)
+      ) {
+        return null;
+      }
+      if (!clickedTrigger && (isClickableControl(item) || typeof item.onclick === 'function')) {
+        clickedTrigger = item;
+      }
+    }
+
+    const strictHit = findWildWidgetFromEventTarget(rawTarget, doc, composedPath);
+    if (strictHit) {
+      const triggerEl =
+        clickedTrigger && clickedTrigger !== strictHit.node ? clickedTrigger : null;
+      return { ...strictHit, triggerEl };
+    }
+
+    // 宽松兜底：接受任意在非正文/非顶底栏区域的独立小浮层（fixed / sticky / absolute，含外层 Shadow Host）
+    let relaxedNode = null;
+    let relaxedHost = null;
+    for (const item of chain) {
+      if (item === doc?.body || item === doc?.documentElement || item === sheld || item === root) {
+        break;
+      }
+      if (!item?.tagName) continue;
+      const tag = String(item.tagName).toUpperCase();
+      if (IGNORED_TAG_NAMES.has(tag) || tag === 'HEADER' || tag === 'NAV' || tag === 'FOOTER') {
+        continue;
+      }
+      const cid = String(item.id || '');
+      if (SHADOW_TRAVERSE_ONLY_HOST_IDS.has(cid)) continue;
+
+      const cs = readComputedStyleSafe(item, root);
+      const pos = readEffectivePosition(item, root, cs);
+      const isFloatingPos = pos === 'fixed' || pos === 'sticky' || pos === 'absolute';
+      if (!isFloatingPos) continue;
+
+      const { w, h } = readEffectiveBoxSize(item);
+      if (!isAcceptablePickedGeometry(w, h)) continue;
+
+      relaxedNode = item;
+      relaxedHost = item.__stmShadowHost || (isNodeInShadowDom(item, doc) ? shadowHost : null);
+      if (pos === 'fixed' || pos === 'sticky') {
+        break;
+      }
+    }
+
+    if (!relaxedNode) return null;
+    const { w, h } = readEffectiveBoxSize(relaxedNode);
+    let key = buildFloatingWidgetKey(relaxedNode, { shadowHost: relaxedHost });
+    if (!key) {
+      const tag = String(relaxedNode.tagName || 'div').toLowerCase();
+      key = `pick:${tag}|${Math.round(w)}x${Math.round(h)}`;
+    }
+    if (relaxedHost && relaxedNode.__stmShadowHost !== relaxedHost) {
+      relaxedNode.__stmShadowHost = relaxedHost;
+    }
+    const triggerEl = clickedTrigger && clickedTrigger !== relaxedNode ? clickedTrigger : null;
+    return { node: relaxedNode, key, shadowHost: relaxedHost, triggerEl };
+  }
+
+  function stopPickMode() {
+    pickModeActive = false;
+    pickBannerEl?.remove?.();
+    pickBannerEl = null;
+    if (capsuleEl) {
+      capsuleEl.classList.remove('is-picking');
+    }
+    syncClutterNow();
+  }
+
+  function startPickMode() {
+    const doc = root?.document;
+    if (!doc?.body || !isActiveInChat()) return;
+    closePopover();
+    pickModeActive = true;
+    capsuleEl?.classList?.add?.('is-picking');
+
+    if (!pickBannerEl || !pickBannerEl.isConnected) {
+      pickBannerEl = doc.getElementById('stm-float-pick-banner') || el('div', 'stm-float-pick-banner');
+      pickBannerEl.id = 'stm-float-pick-banner';
+      pickBannerEl.setAttribute('role', 'status');
+      pickBannerEl.replaceChildren();
+      pickBannerEl.append(el('span', '', '轻点屏幕上任意悬浮球即可收纳'));
+      const cancelBtn = el('button', 'stm-float-pick-cancel', '取消');
+      cancelBtn.type = 'button';
+      cancelBtn.addEventListener('click', evt => {
+        evt.preventDefault?.();
+        evt.stopPropagation?.();
+        stopPickMode();
+      });
+      pickBannerEl.append(cancelBtn);
+      doc.body.append(pickBannerEl);
+    }
+    syncClutterNow();
+  }
+
   function isPointerNearCapsule(clientX, clientY) {
     if (!capsuleEl || capsuleEl.hidden || typeof capsuleEl.getBoundingClientRect !== 'function') {
       return false;
@@ -2048,6 +2366,48 @@ export function createFloatCapsule({
         const target = (Array.isArray(composedPath) && composedPath[0]) || evt.target;
         const elTarget =
           target && typeof target.closest === 'function' ? target : target?.parentElement || target;
+
+        // 点选收纳态：捕获阶段直接拦下点击（绝不误开目标悬浮球面板），精准拾取目标并立即收纳
+        if (pickModeActive && isActiveInChat()) {
+          const hitBanner =
+            pickBannerEl &&
+            ((elTarget && pickBannerEl.contains?.(elTarget)) ||
+              (Array.isArray(composedPath) && composedPath.includes(pickBannerEl)));
+          if (hitBanner) return;
+
+          evt.preventDefault?.();
+          evt.stopPropagation?.();
+          evt.stopImmediatePropagation?.();
+          pickSuppressUntil = Date.now() + 260;
+
+          const hitCapsule =
+            capsuleEl &&
+            ((elTarget && capsuleEl.contains?.(elTarget)) ||
+              (Array.isArray(composedPath) && composedPath.includes(capsuleEl)));
+          if (hitCapsule) {
+            stopPickMode();
+            return;
+          }
+
+          const picked = resolvePickableFloatingTarget(elTarget, doc, composedPath);
+          if (picked && picked.key) {
+            pickedWildMap.set(picked.key, picked);
+            const desc = buildClutterDescriptor(picked.node, picked.node, 'wild', 9998, {
+              widgetKey: picked.key,
+              fallbackName: '悬浮挂件',
+              shadowHost: picked.shadowHost || null,
+              triggerEl: picked.triggerEl || null,
+            });
+            addTuckedWidgetKey(picked.key);
+            bypassClutterHide = false;
+            stopPickMode();
+            syncPositionAndBoundsNow();
+            toastMessage(`已点选收纳「${desc.label}」（点中间收纳球可随时打开或放出）`, 'success');
+          } else {
+            toastMessage('这里不是悬浮球，请轻点页面上的悬浮挂件（或点上方取消）', 'info');
+          }
+          return;
+        }
 
         if (tempOpenHostNodes.size > 0) {
           for (const hNode of Array.from(tempOpenHostNodes)) {
@@ -2153,14 +2513,40 @@ export function createFloatCapsule({
         }
       };
 
+      const onDocPickSwallow = evt => {
+        if (!pickModeActive && Date.now() > pickSuppressUntil) return;
+        const composedPath = typeof evt.composedPath === 'function' ? evt.composedPath() : null;
+        const target = (Array.isArray(composedPath) && composedPath[0]) || evt.target;
+        const elTarget =
+          target && typeof target.closest === 'function' ? target : target?.parentElement || target;
+        const hitBanner =
+          pickBannerEl &&
+          ((elTarget && pickBannerEl.contains?.(elTarget)) ||
+            (Array.isArray(composedPath) && composedPath.includes(pickBannerEl)));
+        if (hitBanner) return;
+        evt.preventDefault?.();
+        evt.stopPropagation?.();
+        evt.stopImmediatePropagation?.();
+      };
+
       const onDocKeyDown = evt => {
-        if (evt.key === 'Escape' && popoverOpen) {
-          evt.stopPropagation?.();
-          closePopover();
+        if (evt.key === 'Escape') {
+          if (pickModeActive) {
+            evt.stopPropagation?.();
+            stopPickMode();
+            return;
+          }
+          if (popoverOpen) {
+            evt.stopPropagation?.();
+            closePopover();
+          }
         }
       };
 
       doc.addEventListener?.('pointerdown', onDocPointerDown, true);
+      doc.addEventListener?.('mousedown', onDocPickSwallow, true);
+      doc.addEventListener?.('touchstart', onDocPickSwallow, { capture: true, passive: false });
+      doc.addEventListener?.('click', onDocPickSwallow, true);
       doc.addEventListener?.('pointermove', onDocPointerMove, true);
       doc.addEventListener?.('pointerup', finishWildDrag, true);
       doc.addEventListener?.('pointercancel', finishWildDrag, true);
@@ -2171,6 +2557,9 @@ export function createFloatCapsule({
 
       cleanups.push(
         () => doc.removeEventListener?.('pointerdown', onDocPointerDown, true),
+        () => doc.removeEventListener?.('mousedown', onDocPickSwallow, true),
+        () => doc.removeEventListener?.('touchstart', onDocPickSwallow, true),
+        () => doc.removeEventListener?.('click', onDocPickSwallow, true),
         () => doc.removeEventListener?.('pointermove', onDocPointerMove, true),
         () => doc.removeEventListener?.('pointerup', finishWildDrag, true),
         () => doc.removeEventListener?.('pointercancel', finishWildDrag, true),
@@ -2192,6 +2581,11 @@ export function createFloatCapsule({
     if (!active) {
       clearDelayedScanTimers();
       wildDragState = null;
+      if (pickModeActive) {
+        pickModeActive = false;
+        pickBannerEl?.remove?.();
+        pickBannerEl = null;
+      }
       closePopover();
       clearQuickJump();
       tapTracker.reset();
@@ -2244,7 +2638,13 @@ export function createFloatCapsule({
     observedFormRoot = null;
     bodyChildObserver?.disconnect?.();
     bodyChildObserver = null;
+    docElChildObserver?.disconnect?.();
+    docElChildObserver = null;
     wildDragState = null;
+    pickModeActive = false;
+    pickBannerEl?.remove?.();
+    pickBannerEl = null;
+    pickedWildMap.clear();
 
     while (cleanups.length) {
       const off = cleanups.pop();
@@ -2265,10 +2665,16 @@ export function createFloatCapsule({
   }
 
   return {
-    isOpen: () => popoverOpen,
+    isOpen: () => popoverOpen || pickModeActive,
+    isPickMode: () => pickModeActive,
     open: openPopover,
-    close: closePopover,
+    close: () => {
+      if (pickModeActive) stopPickMode();
+      closePopover();
+    },
     toggle: togglePopover,
+    startPickMode,
+    stopPickMode,
     refresh,
     destroy,
   };

@@ -7,15 +7,15 @@
  * 4. 核心参数调节（上下文快捷档位自动解锁高上限 / 最大回复 / 温度）+ 提示词条目开关、上下微调与内联编辑，350ms 防抖自动落盘。
  */
 
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.15';
-import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.15';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.16';
+import { createIconNode, svgMarkup } from '../core/icons.js?v=0.9.16';
 import {
   closeAllNativeDrawers,
   getCurrentEntityMeta,
   openNativeDrawer,
   toastMessage,
-} from '../shell/host-actions.js?v=0.9.15';
-import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.15';
+} from '../shell/host-actions.js?v=0.9.16';
+import { createPresetAssistantPanel } from './preset-assistant.js?v=0.9.16';
 import {
   CONTEXT_QUICK_TIERS,
   MAX_TOKENS_QUICK_TIERS,
@@ -24,6 +24,7 @@ import {
   applyGenerationParams,
   assignPromptToGroup,
   captureCurrentPresetSnapshot,
+  computePresetTextStats,
   createCustomPromptEntry,
   createPresetAutoSaver,
   createPresetPromptGroup,
@@ -62,7 +63,7 @@ import {
   toggleArchivePreset,
   togglePromptEntryEnabled,
   updatePromptEntryFields,
-} from './preset-backend.js?v=0.9.15';
+} from './preset-backend.js?v=0.9.16';
 
 const AUTO_SAVE_DEBOUNCE_MS = 350;
 
@@ -137,9 +138,14 @@ export function createPresetDock({
     presetListWrap: null,
     bindCharListWrap: null,
     promptCountSpan: null,
+    promptStatsSpan: null,
     promptGroupBtn: null,
     promptListWrap: null,
   };
+
+  const presetTokenCache = new Map();
+  let presetTokenCalcSeq = 0;
+  let presetTokenTimer = 0;
 
   function formatContextShort(tokens) {
     const n = Number(tokens) || 0;
@@ -838,11 +844,101 @@ export function createPresetDock({
   // ===========================================================================
   // 局部渲染 3：提示词条目列表与内联编辑器（搜索/过滤/编辑均保持流畅焦点）
   // ===========================================================================
+  function formatStatNumber(num) {
+    const n = Math.max(0, Math.round(Number(num) || 0));
+    return n.toLocaleString ? n.toLocaleString('en-US') : String(n);
+  }
+
+  function formatPresetStatsText(stats, exactTokens = null) {
+    const hasExact = Number.isFinite(exactTokens) && exactTokens >= 0;
+    const tokNum = hasExact ? exactTokens : stats.estimatedEnabledTokens;
+    const tokLabel =
+      stats.enabledChars === 0
+        ? '0 词符'
+        : `${hasExact ? '' : '约 '}${formatStatNumber(tokNum)} 词符`;
+    const charLabel =
+      stats.enabledChars === stats.totalChars
+        ? `共 ${formatStatNumber(stats.totalChars)} 字符`
+        : `启用 ${formatStatNumber(stats.enabledChars)} / 总 ${formatStatNumber(stats.totalChars)} 字符`;
+    return `${tokLabel} · ${charLabel}`;
+  }
+
+  function syncPresetTextMetrics(oaiSettings) {
+    const stats = computePresetTextStats(oaiSettings || {});
+    if (liveRefs.promptCountSpan) {
+      liveRefs.promptCountSpan.textContent = `已启用 ${stats.enabledCount} / 共 ${stats.totalCount} 条`;
+    }
+
+    const statsEl = liveRefs.promptStatsSpan;
+    if (!statsEl) return stats;
+
+    if (presetTokenTimer) {
+      clearTimeout(presetTokenTimer);
+      presetTokenTimer = 0;
+    }
+
+    if (stats.enabledChars === 0) {
+      statsEl.textContent = formatPresetStatsText(stats, 0);
+      statsEl.title = `已启用条目 0 词符 · 预设总字符 ${formatStatNumber(stats.totalChars)}`;
+      return stats;
+    }
+
+    if (presetTokenCache.has(stats.signature)) {
+      const cached = presetTokenCache.get(stats.signature);
+      statsEl.textContent = formatPresetStatsText(stats, cached);
+      statsEl.title = `当前已启用条目精确词符数 ${formatStatNumber(cached)} · 已启用 ${formatStatNumber(stats.enabledChars)} 字符 / 预设总计 ${formatStatNumber(stats.totalChars)} 字符`;
+      return stats;
+    }
+
+    statsEl.textContent = formatPresetStatsText(stats, null);
+    statsEl.title = `已启用条目约 ${formatStatNumber(stats.estimatedEnabledTokens)} 词符（正在按酒馆分词器计算精确值）· 已启用 ${formatStatNumber(stats.enabledChars)} / 预设总计 ${formatStatNumber(stats.totalChars)} 字符`;
+
+    const ctx = getContext?.();
+    const asyncCounter = typeof ctx?.getTokenCountAsync === 'function' ? ctx.getTokenCountAsync : null;
+    const syncCounter = typeof ctx?.getTokenCount === 'function' ? ctx.getTokenCount : null;
+    if (!asyncCounter && !syncCounter) return stats;
+
+    const seq = ++presetTokenCalcSeq;
+    const targetSig = stats.signature;
+    const combinedText = stats.enabledCombinedText;
+
+    const applyExact = rawCount => {
+      if (seq !== presetTokenCalcSeq) return;
+      const num = Number(rawCount);
+      if (!Number.isFinite(num) || num < 0) return;
+      if (presetTokenCache.size >= 32) {
+        const oldestKey = presetTokenCache.keys().next().value;
+        presetTokenCache.delete(oldestKey);
+      }
+      presetTokenCache.set(targetSig, Math.round(num));
+      if (liveRefs.promptStatsSpan === statsEl && statsEl.isConnected !== false) {
+        statsEl.textContent = formatPresetStatsText(stats, Math.round(num));
+        statsEl.title = `当前已启用条目精确词符数 ${formatStatNumber(num)} · 已启用 ${formatStatNumber(stats.enabledChars)} 字符 / 预设总计 ${formatStatNumber(stats.totalChars)} 字符`;
+      }
+    };
+
+    presetTokenTimer = setTimeout(() => {
+      presetTokenTimer = 0;
+      if (seq !== presetTokenCalcSeq) return;
+      try {
+        if (asyncCounter) {
+          Promise.resolve(asyncCounter(combinedText))
+            .then(applyExact)
+            .catch(() => {});
+        } else if (syncCounter) {
+          applyExact(syncCounter(combinedText));
+        }
+      } catch {
+        // 忽略宿主分词器异常，保留快估值
+      }
+    }, 80);
+
+    return stats;
+  }
+
   function refreshPromptCounterHeader() {
-    if (!liveRefs.promptCountSpan) return;
     const oai = getContext?.()?.chatCompletionSettings || {};
-    const stats = readOrderedPromptEntries(oai);
-    liveRefs.promptCountSpan.textContent = `已启用 ${stats.enabledCount} / 共 ${stats.totalCount} 条`;
+    syncPresetTextMetrics(oai);
   }
 
   function renderPromptListOnly() {
@@ -863,10 +959,8 @@ export function createPresetDock({
       ? readStoredPresetByName(hostState.activePreset, { pm: hostState.presetManager })
       : null;
 
-    const { entries, enabledCount, totalCount } = readOrderedPromptEntries(oai);
-    if (liveRefs.promptCountSpan) {
-      liveRefs.promptCountSpan.textContent = `已启用 ${enabledCount} / 共 ${totalCount} 条`;
-    }
+    const { entries, totalCount } = readOrderedPromptEntries(oai);
+    syncPresetTextMetrics(oai);
 
     const groupState = readPresetPromptGroups(oai, { fallbackPreset });
     if (liveRefs.promptGroupBtn) {
@@ -1287,6 +1381,7 @@ export function createPresetDock({
             entry.content = nextContent;
             charLenSpan.textContent = `${nextContent.length} 字符`;
             updatePromptEntryFields(oai, entry.identifier, { content: nextContent });
+            refreshPromptCounterHeader();
             void syncHostPromptManagerAndSettings({
               getContext,
               changedPromptId: entry.identifier,
@@ -1598,6 +1693,7 @@ export function createPresetDock({
       presetListWrap: null,
       bindCharListWrap: null,
       promptCountSpan: null,
+      promptStatsSpan: null,
       promptGroupBtn: null,
       promptListWrap: null,
     };
@@ -1906,6 +2002,9 @@ export function createPresetDock({
     const countBadge = el('span', 'stm-preset-badge is-subtle', '');
     liveRefs.promptCountSpan = countBadge;
     promptHeadLeft.append(countBadge);
+    const statsLine = el('span', 'stm-preset-stats-line', '');
+    liveRefs.promptStatsSpan = statsLine;
+    promptHeadLeft.append(statsLine);
 
     const addPromptBtn = el('button', 'stm-station-add-btn stm-prompt-add-btn');
     addPromptBtn.type = 'button';
@@ -2460,6 +2559,11 @@ export function createPresetDock({
   }
 
   function destroy() {
+    if (presetTokenTimer) {
+      clearTimeout(presetTokenTimer);
+      presetTokenTimer = 0;
+    }
+    presetTokenCalcSeq += 1;
     assistantPanel.destroy();
     if (autoSaver.hasPending()) {
       void autoSaver.flush();

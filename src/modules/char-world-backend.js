@@ -8,8 +8,8 @@
  * 5. 人话蓝绿灯切换、中英文逗号关键词解析、条目增删改搜与 300ms 锁死 `{ bookName, dataSnapshot }` 防串书自动落盘队列。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.15';
-import { saveExportBlob } from '../core/file-saver.js?v=0.9.15';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
+import { saveExportBlob } from '../core/file-saver.js?v=0.9.16';
 import {
   captureCurrentPresetSnapshot,
   getEntityBindingKey,
@@ -19,7 +19,7 @@ import {
   saveHostPreset,
   syncHostPromptManagerAndSettings,
   togglePromptEntryEnabled,
-} from './preset-backend.js?v=0.9.15';
+} from './preset-backend.js?v=0.9.16';
 
 export const WORLD_INFO_AUTO_SAVE_MS = 300;
 export const CHAR_PROFILE_AUTO_SAVE_MS = 350;

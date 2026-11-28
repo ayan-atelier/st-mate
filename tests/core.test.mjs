@@ -556,6 +556,10 @@ test('icons & aesthetics: 全量细线图标（含 plug/star/key/search）均为
     assert.ok(svg.includes('stroke="currentColor"'), `${iconKey} 必须跟随主题文字色`);
     assert.ok(svg.includes('stroke-width="1.5"'), `${iconKey} 必须统一 1.5px 极简细线`);
     assert.ok(svg.includes('fill="none"'), `${iconKey} 必须为非实心纯线图标`);
+    assert.ok(
+      svg.includes('width="15"') && svg.includes('height="15"'),
+      `${iconKey} 必须自带默认 width/height 属性，防止 iOS Safari/WKWebView inline-flex 内 SVG 塌缩为 0x0 不可见`,
+    );
   }
 
   for (const mod of MODULE_DESCRIPTORS) {
@@ -4599,6 +4603,10 @@ function createMiniDomHarness() {
       if (!arr) return;
       const idx = arr.indexOf(fn);
       if (idx >= 0) arr.splice(idx, 1);
+    },
+    dispatchEvent(evt) {
+      const arr = [...(this.listeners.get(evt?.type) || [])];
+      for (const fn of arr) fn(evt);
     },
   };
   doc.documentElement = new MiniElement('HTML', doc);
@@ -11576,5 +11584,274 @@ test('preset BaiBai-compat grouping & worldbook grouping: 柏宝箱双向兼容�
   } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
+  }
+});
+
+test('v0.9.16 float-capsule Shadow Host / html FAB + click-to-tuck & preset token/char metrics: 千千结点击穿透、两三事 html 挂载收纳、点选收纳与预设总词符/字符统计', async () => {
+  const { createFloatCapsule, discoverWildFloatingWidgets } = await import('../src/shell/float-capsule.js');
+  const { computePresetTextStats, estimatePresetTokens } = await import('../src/modules/preset-backend.js');
+  const { createPresetDock } = await import('../src/modules/preset-dock.js');
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevComputed = globalThis.getComputedStyle;
+  const prevPtr = globalThis.PointerEvent;
+  const prevMouse = globalThis.MouseEvent;
+
+  const { doc } = createMiniDomHarness();
+  globalThis.document = doc;
+
+  class FakePointerEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      Object.assign(this, init);
+    }
+  }
+  class FakeMouseEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      Object.assign(this, init);
+    }
+  }
+
+  const win = {
+    innerWidth: 393,
+    innerHeight: 820,
+    document: doc,
+    PointerEvent: FakePointerEvent,
+    MouseEvent: FakeMouseEvent,
+    getComputedStyle(node) {
+      return {
+        display: node?.style?.display || 'block',
+        visibility: node?.style?.visibility || 'visible',
+        opacity: node?.style?.opacity ?? '1',
+        position: node?.style?.position || 'static',
+        pointerEvents: node?.style?.pointerEvents || 'auto',
+      };
+    },
+    requestAnimationFrame: fn => setTimeout(fn, 0),
+    cancelAnimationFrame: id => clearTimeout(id),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  globalThis.window = win;
+  globalThis.getComputedStyle = win.getComputedStyle;
+  globalThis.PointerEvent = FakePointerEvent;
+  globalThis.MouseEvent = FakeMouseEvent;
+
+  try {
+    // 1. 模拟「千千结」(#qqj-fab-host：外层 fixed Shadow Host + 内部 shadowRoot > button)
+    const qqjHost = doc.createElement('div');
+    qqjHost.id = 'qqj-fab-host';
+    qqjHost.style.position = 'fixed';
+    qqjHost.style.width = '36px';
+    qqjHost.style.height = '36px';
+    qqjHost.offsetWidth = 36;
+    qqjHost.offsetHeight = 36;
+    const qqjShadow = { host: qqjHost, children: [] };
+    const qqjBtn = doc.createElement('button');
+    qqjBtn.setAttribute('aria-label', '打开千千结');
+    qqjBtn.parentNode = qqjShadow;
+    qqjBtn.getRootNode = () => qqjShadow;
+    qqjBtn.setPointerCapture = () => {
+      throw new Error('NotFoundError');
+    };
+    let qqjOpened = 0;
+    let qqjGesture = null;
+    qqjBtn.addEventListener('pointerdown', e => {
+      qqjGesture = { dragging: false };
+      qqjBtn.setPointerCapture(e.pointerId);
+    });
+    qqjBtn.addEventListener('pointerup', () => {
+      qqjGesture = null;
+    });
+    qqjBtn.addEventListener('click', () => {
+      if (!qqjGesture?.dragging) qqjOpened += 1;
+    });
+    qqjShadow.children.push(qqjBtn);
+    qqjHost.shadowRoot = qqjShadow;
+    doc.body.append(qqjHost);
+
+    // 2. 模拟「两三事」(#tmt-fab-host：直接挂在 document.documentElement <html> 下，不在 body 内！)
+    const tmtHost = doc.createElement('div');
+    tmtHost.id = 'tmt-fab-host';
+    tmtHost.style.position = 'fixed';
+    tmtHost.style.width = '36px';
+    tmtHost.style.height = '36px';
+    tmtHost.offsetWidth = 36;
+    tmtHost.offsetHeight = 36;
+    const tmtShadow = { host: tmtHost, children: [] };
+    const tmtBtn = doc.createElement('button');
+    tmtBtn.setAttribute('aria-label', '打开两三事（悬浮球）');
+    tmtBtn.parentNode = tmtShadow;
+    tmtBtn.getRootNode = () => tmtShadow;
+    let tmtOpened = 0;
+    tmtBtn.addEventListener('click', () => {
+      tmtOpened += 1;
+    });
+    tmtShadow.children.push(tmtBtn);
+    tmtHost.shadowRoot = tmtShadow;
+    doc.documentElement.append(tmtHost);
+
+    // 验证两三事 (<html> 挂载) 与千千结 (Shadow Host) 均被自动扫描发现
+    const discovered = discoverWildFloatingWidgets(doc, win);
+    const keys = discovered.map(d => d.key);
+    assert.ok(keys.includes('id:qqj-fab-host'), '扫描器应发现千千结 #qqj-fab-host');
+    assert.ok(keys.includes('id:tmt-fab-host'), '扫描器应扫描 document.documentElement 发现两三事 #tmt-fab-host');
+
+    const ctx = {
+      characterId: 0,
+      characters: [{ name: '测试角色', avatar: 'test.png' }],
+      extensionSettings: {
+        st_mate: {
+          shellEnabled: true,
+          floatCapsuleEnabled: true,
+        },
+      },
+      chatCompletionSettings: {
+        prompts: [
+          { identifier: 'main', name: '主系统', role: 'system', content: '你好世界，请用细腻文笔续写剧情。', enabled: true },
+          { identifier: 'extra', name: '备选规则', role: 'system', content: '这段暂时关闭但计入全预设总字符。', enabled: false },
+          { identifier: 'chatHistory', name: '聊天记录', marker: true, content: '' },
+        ],
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: [
+              { identifier: 'main', enabled: true },
+              { identifier: 'extra', enabled: false },
+              { identifier: 'chatHistory', enabled: true },
+            ],
+          },
+        ],
+      },
+      getTokenCountAsync: async text => Math.max(0, text.length * 2),
+      saveSettingsDebounced() {},
+    };
+
+    const store = createSettingsStore({ getContext: () => ctx });
+    store.hydrate();
+
+    const capsule = createFloatCapsule({
+      root: win,
+      getContext: () => ctx,
+      store,
+      isHomeCloaked: () => false,
+    });
+    capsule.refresh();
+
+    const capNode = doc.getElementById('stm-float-capsule');
+    const bagBtn = capNode.querySelector('.stm-float-bag');
+    assert.equal(bagBtn.hidden, false);
+    bagBtn.click();
+
+    // 在收纳仓内一键吸纳千千结与两三事，并验证读出内部 Shadow DOM 的正确名字
+    const absorbBtns = capNode.querySelectorAll('.stm-float-absorb-btn');
+    const qqjAbsorb = absorbBtns.find(b => /千千结/.test(b.title));
+    const tmtAbsorb = absorbBtns.find(b => /两三事/.test(b.title));
+    assert.ok(qqjAbsorb, '千千结应穿透 shadowRoot 识别出「打开千千结」名称');
+    assert.ok(tmtAbsorb, '两三事应穿透 shadowRoot 识别出「打开两三事」名称');
+
+    qqjAbsorb.click();
+    const tmtAbsorb2 = capNode.querySelectorAll('.stm-float-absorb-btn').find(b => /两三事/.test(b.title));
+    tmtAbsorb2.click();
+
+    assert.equal(qqjHost.style.getPropertyValue('display'), 'none', '千千结 Shadow Host 应被内联 display:none 隐藏');
+    assert.equal(tmtHost.style.getPropertyValue('display'), 'none', '两三事 html 子节点应被内联 display:none 隐藏');
+
+    // 点开收纳仓点击千千结与两三事，必须穿透 shadowRoot 精准触发内部 button 打开！
+    const tuckedBtns = capNode.querySelectorAll('.stm-float-pop-item');
+    const qqjTucked = tuckedBtns.find(b => /千千结/.test(b.title));
+    assert.ok(qqjTucked);
+    qqjTucked.click();
+    assert.equal(qqjOpened, 1, '点击已收纳的千千结应穿透 shadowRoot 触发内部 button 成功打开且无 NotFoundError');
+
+    await new Promise(r => setTimeout(r, 20));
+    bagBtn.click();
+    const tmtTucked = capNode.querySelectorAll('.stm-float-pop-item').find(b => /两三事/.test(b.title));
+    assert.ok(tmtTucked);
+    tmtTucked.click();
+    assert.equal(tmtOpened, 1, '点击已收纳的两三事应穿透 shadowRoot 成功打开');
+
+    // 3. 测试「点选收纳」模式：轻点非标准悬浮球（模拟汪汪来报球），捕获阶段拦下不误开，立即收进收纳仓且点击可开
+    await new Promise(r => setTimeout(r, 20));
+    const wangOrb = doc.createElement('div');
+    wangOrb.id = 'wangwang-weird-orb';
+    wangOrb.style.position = 'absolute';
+    wangOrb.style.width = '168px';
+    wangOrb.style.height = '168px';
+    wangOrb.offsetWidth = 168;
+    wangOrb.offsetHeight = 168;
+    const wangInnerBtn = doc.createElement('button');
+    wangInnerBtn.setAttribute('aria-label', '汪汪来报');
+    let wangOpened = 0;
+    wangInnerBtn.addEventListener('click', () => {
+      wangOpened += 1;
+    });
+    wangOrb.append(wangInnerBtn);
+    doc.body.append(wangOrb);
+
+    bagBtn.click();
+    const pickBtn = capNode.querySelector('.stm-float-pick-btn');
+    assert.ok(pickBtn, '收纳仓顶栏应提供「点选收纳」入口');
+    pickBtn.click();
+    assert.equal(capsule.isPickMode(), true);
+    assert.ok(doc.getElementById('stm-float-pick-banner'), '进入点选模式后显示顶部提示条');
+
+    // 模拟用户在点选模式下轻点汪汪来报球
+    let defaultPrevented = false;
+    let immediateStopped = false;
+    doc.dispatchEvent({
+      type: 'pointerdown',
+      target: wangInnerBtn,
+      composedPath: () => [wangInnerBtn, wangOrb, doc.body, doc.documentElement, doc, win],
+      preventDefault: () => {
+        defaultPrevented = true;
+      },
+      stopPropagation() {},
+      stopImmediatePropagation: () => {
+        immediateStopped = true;
+      },
+    });
+    assert.equal(defaultPrevented, true, '点选收纳捕获阶段应拦截默认行为，防止误开目标面板');
+    assert.equal(immediateStopped, true);
+    assert.equal(capsule.isPickMode(), false, '成功拾取后自动退出点选模式');
+    assert.equal(doc.getElementById('stm-float-pick-banner'), null);
+    assert.equal(wangOpened, 0, '点选收纳过程绝不误触打开目标悬浮球');
+    assert.equal(wangOrb.dataset.stmClutterHidden, '1', '非标准球通过点选收纳成功隐藏');
+
+    bagBtn.click();
+    const wangTucked = capNode.querySelectorAll('.stm-float-pop-item').find(b => /汪汪来报/.test(b.title));
+    assert.ok(wangTucked, '点选收纳后的非标准球应出现在收纳仓中');
+    wangTucked.click();
+    assert.equal(wangOpened, 1, '点收纳仓里的点选球应精准触发被点中的内层按钮');
+    capsule.destroy();
+
+    // 4. 验证预设总词符数 & 预设总字符数统计（纯函数 + 预设馆实时刷新与异步精确分词回填）
+    const textStats = computePresetTextStats(ctx.chatCompletionSettings);
+    assert.equal(textStats.enabledChars, '你好世界，请用细腻文笔续写剧情。'.length);
+    assert.equal(
+      textStats.totalChars,
+      '你好世界，请用细腻文笔续写剧情。'.length + '这段暂时关闭但计入全预设总字符。'.length,
+    );
+    assert.ok(estimatePresetTokens('你好世界 Hello') > 0);
+
+    const presetDock = createPresetDock({ getContext: () => ctx, store });
+    presetDock.open();
+    const statsSpan = doc.getElementById('stm-preset-dock')?.querySelector('.stm-preset-stats-line');
+    assert.ok(statsSpan, '预设馆应展示总词符数与预设总字符数轻信息条');
+    assert.match(statsSpan.textContent, /词符/, '首帧 0ms 即展示估算词符数');
+    assert.match(statsSpan.textContent, /启用 16 \/ 总 32 字符/, '同时清晰展示已启用与全预设总字符数');
+
+    // 等待 80ms 防抖异步 getTokenCountAsync 回填精确词符数 (16 * 2 = 32)
+    await new Promise(r => setTimeout(r, 120));
+    assert.match(statsSpan.textContent, /^32 词符 · 启用 16 \/ 总 32 字符$/, '异步分词完成后无缝替换为精确词符数');
+    presetDock.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.getComputedStyle = prevComputed;
+    globalThis.PointerEvent = prevPtr;
+    globalThis.MouseEvent = prevMouse;
   }
 });

@@ -568,6 +568,39 @@ body.stm-shell-active.jd-bookshelf-home-active #chat.jd-bookshelf-home:has(> .hp
   pointer-events: none;
 }
 
+/* iOS Safari / WKWebView 护栏：inline-flex 容器内无显式宽高的 <svg> 在 WebKit 下会塌缩为 0x0 不可见，
+   为所有定宽图标容器统一 inline-flex 并强制锁定内部 <svg> 为 100% 尺寸，确保楼底「···/复制/编辑」、折叠箭头与导览图标在 iPhone 上清晰显示 */
+.stm-float-item-svg,
+.stm-float-quick-svg,
+.stm-entry-group-chevron,
+.stm-vault-collapse-chevron,
+.stm-guide-svg,
+.stm-guide-lead-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stm-floor-svg > svg,
+.stm-floor-edit-svg > svg,
+.stm-floor-pill-svg > svg,
+.stm-floor-menu-icon > svg,
+.stm-floor-menu-chevron > svg,
+.stm-floor-chip-icon > svg,
+.stm-float-item-svg > svg,
+.stm-float-quick-svg > svg,
+.stm-entry-group-chevron > svg,
+.stm-vault-collapse-chevron > svg,
+.stm-guide-svg > svg,
+.stm-guide-tab-svg > svg,
+.stm-guide-lead-icon > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 /* 书架首行右侧「设置 + 原生酒馆」极简融合区 */
 .stm-shelf-actions {
   justify-self: end;
@@ -3929,6 +3962,8 @@ body.stm-shell-active.stm-pure-reading .stm-pure-aa-pill:not([hidden]):active {
 /* ============================================================================
  * 对话侧边一体联动独立圆球快捷组 & 底栏/野生悬浮物无损收纳 (.stm-float-capsule)
  * ============================================================================ */
+html:has(> body.stm-shell-active.stm-float-capsule-on:not(.stm-home-cloak))
+  > [data-stm-clutter-hidden="1"]:not([data-stm-clicking="1"]):not([data-stm-host-popup-live="1"]),
 body.stm-shell-active.stm-float-capsule-on:not(.stm-home-cloak)
   [data-stm-clutter-hidden="1"]:not([data-stm-clicking="1"]):not([data-stm-host-popup-live="1"]) {
   display: none !important;
@@ -4191,6 +4226,65 @@ body.stm-turbo-mobile .stm-float-slot {
   border-color: var(--stm-accent) !important;
   color: var(--stm-ink) !important;
   background: color-mix(in srgb, var(--stm-accent) 16%, transparent) !important;
+}
+
+.stm-float-pick-btn {
+  appearance: none;
+  padding: 2px 7px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border) !important;
+  background: transparent !important;
+  color: var(--stm-muted) !important;
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.stm-float-pick-btn:hover,
+.stm-float-pick-btn.is-active {
+  border-color: var(--stm-accent) !important;
+  color: var(--stm-ink) !important;
+  background: color-mix(in srgb, var(--stm-accent) 18%, transparent) !important;
+}
+
+#stm-float-pick-banner {
+  position: fixed;
+  top: calc(var(--stm-safe-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483640;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  padding: 7px 10px 7px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--stm-accent);
+  background: color-mix(in srgb, var(--stm-surface) 94%, transparent);
+  color: var(--stm-ink);
+  font-size: 12px;
+  line-height: 1.3;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#stm-float-pick-banner .stm-float-pick-cancel {
+  appearance: none;
+  padding: 2px 9px;
+  margin: 0;
+  border-radius: 999px;
+  border: 1px solid var(--stm-border) !important;
+  background: rgba(128, 128, 128, 0.14) !important;
+  color: var(--stm-ink) !important;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#stm-float-pick-banner .stm-float-pick-cancel:hover {
+  border-color: var(--stm-accent) !important;
 }
 
 .stm-float-raw-toggle {
@@ -6255,6 +6349,14 @@ body.stm-shell-active.stm-pure-reading .stm-preset-dock {
   font-size: 13.5px;
   font-weight: 700;
   color: var(--stm-ink);
+}
+
+.stm-preset-stats-line {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--stm-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .stm-param-summary-bar {
@@ -10650,7 +10752,7 @@ html body.stm-floor-actions-bottom #chat#chat > .mes[data-stm-subgrid-floor="1"]
   border-radius: 6px;
   background: transparent !important;
   color: var(--stm-muted);
-  opacity: 0.62;
+  opacity: 0.78;
   cursor: pointer;
   transition: opacity 0.14s ease, color 0.14s ease, background-color 0.14s ease;
 }

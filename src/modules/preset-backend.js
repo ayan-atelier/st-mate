@@ -7,8 +7,8 @@
  * 4. 核心生成参数（上下文自动破除锁定上限 / 最大回复 / 温度）与提示词条目 (`prompts` + `prompt_order`) 开关、排序、增删改与防白改自动落盘。
  */
 
-import { hasActiveChatSelection } from '../core/env.js?v=0.9.15';
-import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.15';
+import { hasActiveChatSelection } from '../core/env.js?v=0.9.16';
+import { STM_NAMESPACE, normalizePresetStudio } from '../core/schema.js?v=0.9.16';
 
 export const UNLOCKED_MAX_CONTEXT = 2000000;
 
@@ -2333,6 +2333,78 @@ export function readOrderedPromptEntries(
     enabledCount,
     totalCount: entries.length,
     markerCount,
+  };
+}
+
+function fastStringHash32(text) {
+  const s = String(text || '');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * 轻量本地词符数快估（中文/全角约 0.68 token/字，英文与符号约 1 token / 3.8 字符），
+ * 用于异步调用酒馆精确分词器前的 0ms 瞬时展示及离线兜底。
+ */
+export function estimatePresetTokens(text) {
+  const s = String(text || '');
+  if (!s) return 0;
+  let cjkCount = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i);
+    if (
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0x3400 && code <= 0x9fff) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      cjkCount += 1;
+    }
+  }
+  const otherCount = s.length - cjkCount;
+  return Math.max(1, Math.ceil(cjkCount * 0.68 + otherCount / 3.8));
+}
+
+/**
+ * 统计当前预设的条目数、启用/全预设总字符数与待分词文本签名（纯函数，不改动宿主状态）。
+ */
+export function computePresetTextStats(
+  oaiSettings,
+  { promptManager = cachedHostOpenAiMod?.promptManager ?? null } = {},
+) {
+  const ordered = readOrderedPromptEntries(oaiSettings, { promptManager });
+  let enabledChars = 0;
+  let totalChars = 0;
+  const enabledChunks = [];
+
+  for (const entry of ordered.entries) {
+    if (!entry || entry.isMarker) continue;
+    const text = typeof entry.content === 'string' ? entry.content : '';
+    const len = text.length;
+    totalChars += len;
+    if (entry.enabled) {
+      enabledChars += len;
+      if (len > 0) enabledChunks.push(text);
+    }
+  }
+
+  const enabledCombinedText = enabledChunks.join('\n');
+  const estimatedEnabledTokens = estimatePresetTokens(enabledCombinedText);
+  const signature = `${ordered.enabledCount}:${ordered.totalCount}:${enabledChars}:${totalChars}:${fastStringHash32(enabledCombinedText)}`;
+
+  return {
+    enabledCount: ordered.enabledCount,
+    totalCount: ordered.totalCount,
+    markerCount: ordered.markerCount,
+    enabledChars,
+    totalChars,
+    estimatedEnabledTokens,
+    enabledCombinedText,
+    signature,
   };
 }
 
